@@ -1,0 +1,32 @@
+# _frontend/ 容器级 .gitignore
+# 两个子 npm 项目（z-schedule-frontend/ 和 z-schedule-frontend-component/）都继承本规则。
+# 子项目自己的 .gitignore 只声明特有项（如 .vite、*.tsbuildinfo）。
+
+# ===== npm 通用 =====
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===== 构建产物 =====
+# 应用层 dist/（被 admin pom 的 maven-resources-plugin 复制进 jar，不入仓）
+dist/
+dist-ssr/
+
+# 组件层 dist/（待 npm publish 时由 package.json files 字段控制；当前不入仓）
+# 注：组件层 .gitignore 也声明了 dist/，双保险
+
+# ===== 本地覆盖 =====
+*.local
+
+# ===== IDE =====
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

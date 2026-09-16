@@ -34,10 +34,22 @@
         <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <!-- admin 独立 module, 没有 flatten 阶段, 字面写版本 -->
-        <z-schedule.version>1.0.0</z-schedule.version>
+        <!--
+            admin 独立 module, 没有 flatten 阶段, 字面写版本。
+            必须与 z-schedule 顶层 pom 的 <revision> 保持一致（V1 留 reactor 后会参与 reactor 解析）。
+            发版前同步更新本字段（或改用 ${revision} 显式注入，见 V1 验证记录）。
+        -->
+        <z-schedule.version>1.0.1</z-schedule.version>
         <z-boot.version>1.0.8</z-boot.version>
         <z-util.version>1.0.10</z-util.version>
+
+        <!--
+            admin 是 standalone demo + docker 镜像源，永远不上 Maven Central。
+            保留在 reactor 以享受统一构建（mvn package / install / -pl admin -am 都能用），
+            但 deploy 阶段自动跳过。
+            详见 lead/005_技术架构/005_前端工程与中间件部署架构规范.md §2
+        -->
+        <maven.deploy.skip>true</maven.deploy.skip>
     </properties>
 
     <dependencies>
@@ -151,6 +163,86 @@
 
     <build>
         <plugins>
+            <!--
+                V2 改造：frontend-maven-plugin 在 process-resources 阶段跑 npm build
+                workingDirectory 指向 _frontend/z-schedule-frontend/（仓根下，不在 reactor 内）
+                产物 dist/ → 由下面 maven-resources-plugin 复制到 src/main/resources/static/
+                详见 lead/005_技术架构/005_前端工程与中间件部署架构规范.md §1.2 / §6.1 V2
+            -->
+            <plugin>
+                <groupId>com.github.eirslett</groupId>
+                <artifactId>frontend-maven-plugin</artifactId>
+                <version>1.15.0</version>
+                <configuration>
+                    <workingDirectory>${project.basedir}/../_frontend/z-schedule-frontend</workingDirectory>
+                    <installDirectory>${project.build.directory}/frontend</installDirectory>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>install-node-and-npm</id>
+                        <goals>
+                            <goal>install-node-and-npm</goal>
+                        </goals>
+                        <phase>generate-resources</phase>
+                        <configuration>
+                            <nodeVersion>v18.17.0</nodeVersion>
+                            <npmVersion>9.6.7</npmVersion>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>npm-install</id>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <phase>generate-resources</phase>
+                        <configuration>
+                            <arguments>install</arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>npm-run-build</id>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <phase>generate-resources</phase>
+                        <configuration>
+                            <arguments>run build</arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+                V2 改造：把 _frontend/z-schedule-frontend/dist/ 复制到 target/classes/static/
+                （不复制到 src/main/resources/static/，避免污染源码目录 + git 噪声）
+                必须在 frontend-maven-plugin 跑完之后（process-resources > generate-resources）
+                且在默认 maven-resources-plugin 之后（process-resources 阶段默认 src/main/resources -> target/classes）
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-frontend-dist</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+                            <overwrite>true</overwrite>
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}/../_frontend/z-schedule-frontend/dist</directory>
+                                    <filtering>false</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- V1 改造：admin 永远不上 Central，但保留在 reactor 以享受统一构建 -->
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

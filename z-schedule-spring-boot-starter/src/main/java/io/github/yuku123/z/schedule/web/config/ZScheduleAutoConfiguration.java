@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import com.zifang.z.boot.datasource.starter.ModuleDataSourceTemplate;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.mybatis.spring.annotation.MapperScan;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
@@ -28,6 +29,9 @@ import javax.sql.DataSource;
  *   <li>{@code @MapperScan} 注册 5 个 MyBatis Mapper（JobInfo/Log/Group/Registry/Leader）</li>
  *   <li>依赖 {@code z-boot-datasource-starter} + Druid 数据源</li>
  * </ul>
+ *
+ * <p><b>Dev profile 支持</b>：当 {@code z.base.db.schedule.disabled=true} 时，
+ * {@link #dataSourceSchedule} Bean 不创建，由 admin 端提供 H2 等替代 DataSource（同名 @Bean）。
  */
 @Configuration
 @ComponentScan(basePackages = "io.github.yuku123.z.schedule.web")
@@ -37,12 +41,18 @@ import javax.sql.DataSource;
 )
 public class ZScheduleAutoConfiguration extends ModuleDataSourceTemplate {
 
+    /**
+     * 生产 / 默认环境：starter 自建 Druid + MySQL DataSource。
+     * 用 {@code z.base.db.schedule.disabled=false}（或不设）启用。
+     */
     @org.springframework.context.annotation.Bean(name = "dataSourceSchedule")
+    @ConditionalOnProperty(name = "z.base.db.schedule.disabled", havingValue = "false", matchIfMissing = true)
     public DataSource dataSourceSchedule(Environment env) {
         return buildDataSource(env, "schedule");
     }
 
     @org.springframework.context.annotation.Bean(name = "sqlSessionFactorySchedule")
+    @ConditionalOnProperty(name = "z.base.db.schedule.disabled", havingValue = "false", matchIfMissing = true)
     public SqlSessionFactory sqlSessionFactorySchedule(
             @org.springframework.beans.factory.annotation.Qualifier("dataSourceSchedule")
             DataSource dataSourceSchedule) throws Exception {

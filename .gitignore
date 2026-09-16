@@ -72,3 +72,18 @@ logs/
 
 # ===== Git 本地备份目录 (历史塌缩用) =====
 .git.bak.*/
+
+# ---------- Frontend (_frontend/) ----------
+# 容器级 + 子项目级统一
+_frontend/**/node_modules/
+_frontend/**/dist/
+_frontend/**/.vite/
+
+# ---------- Deploy (deploy/) ----------
+# v4-test 脚手架的 node_modules
+deploy/v4-test/node_modules/
+
+# ---------- Admin static/ ----------
+# V2 改造后 src/main/resources/static/ 只放 .gitkeep 占位
+# 实际 dist 由 frontend-maven-plugin 生成到 target/classes/static/（不进 git）
+z-*/src/main/resources/static/assets/
