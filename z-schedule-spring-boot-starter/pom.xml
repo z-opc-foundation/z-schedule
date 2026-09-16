@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- ${revision} ONLY inside <parent>.version, NOT at project level -->
+    <parent>
+        <groupId>io.github.yuku123</groupId>
+        <artifactId>z-schedule</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>z-schedule-spring-boot-starter</artifactId>
+    <packaging>jar</packaging>
+    <name>z-schedule :: spring-boot-starter (Scheduler + Cluster + REST API auto-config)</name>
+    <description>
+        Z-Schedule Spring Boot Starter: 调度中心 AutoConfiguration + 集群协调 (Leader / Schedule Ring / Schedule Engine) + REST API.
+        业务模块只需 &lt;dependency&gt;io.github.yuku123:z-schedule-spring-boot-starter&lt;/dependency&gt; 一行集成.
+    </description>
+    <url>https://github.com/z-opc-foundation/z-schedule/tree/main/z-schedule-spring-boot-starter</url>
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://opensource.org/licenses/MIT</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+    <developers>
+        <developer>
+            <id>yuku123</id>
+            <name>yuku123</name>
+            <email>1340947819@qq.com</email>
+            <organization>z-opc-foundation</organization>
+            <organizationUrl>https://github.com/z-opc-foundation</organizationUrl>
+            <timezone>+08:00</timezone>
+            <roles>
+                <role>owner</role>
+            </roles>
+        </developer>
+    </developers>
+    <scm>
+        <connection>scm:git:https://github.com/z-opc-foundation/z-schedule.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/z-opc-foundation/z-schedule.git</developerConnection>
+        <url>https://github.com/z-opc-foundation/z-schedule</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <properties>
+        <!-- 子 pom 自包含 properties, 顶层 flatten 后 z-boot.version 会通过父继承 -->
+        <z-boot.version>1.0.8</z-boot.version>
+        <z-util.version>1.0.10</z-util.version>
+    </properties>
+
+    <dependencies>
+        <!-- z-schedule-core: 业务 entity/router/util -->
+        <dependency>
+            <groupId>io.github.yuku123</groupId>
+            <artifactId>z-schedule-core</artifactId>
+        </dependency>
+
+        <!-- z-boot: BOM 锁版本, starter 提供默认配置 -->
+        <dependency>
+            <groupId>io.github.yuku123</groupId>
+            <artifactId>z-boot-dependencies</artifactId>
+            <version>${z-boot.version}</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.github.yuku123</groupId>
+            <artifactId>z-boot-web-starter</artifactId>
+            <version>${z-boot.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.yuku123</groupId>
+            <artifactId>z-boot-datasource-starter</artifactId>
+            <version>${z-boot.version}</version>
+        </dependency>
+
+        <!-- 工具 -->
+        <dependency>
+            <groupId>io.github.yuku123</groupId>
+            <artifactId>z-util-core</artifactId>
+            <version>${z-util.version}</version>
+        </dependency>
+
+        <!-- MyBatis-Plus -->
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-extension</artifactId>
+        </dependency>
+
+        <!-- Spring Boot AutoConfigure 注册入口 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+
+        <!-- Log4j2 API (本模块 src/main/java 含 LogManager.getLogger) -->
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+        </dependency>
+    </dependencies>
+
+</project>

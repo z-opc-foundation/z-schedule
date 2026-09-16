@@ -1,0 +1,74 @@
+# ---------- macOS ----------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# ---------- Java / Maven ----------
+target/
+**/target/
+*.class
+*.jar
+*.war
+*.ear
+*.flattened-pom.xml
+**/*.flattened-pom.xml
+dependency-reduced-pom.xml
+mvnw
+mvnw.cmd
+.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+.factorypath
+.apt_generated/
+.springBeans
+
+# ---------- Node (legacy _frontend) ----------
+node_modules/
+**/node_modules/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---------- Logs ----------
+logs/
+**/logs/
+*.log
+*.log.*
+
+# ---------- Secrets (Central Portal publish + local env overrides) ----------
+.env
+.gnupg/
+**/.gnupg/
+
+# ⚠️ 本地 Spring profile 配置（可能含真实 DB 密码，绝不 commit）
+**/application-local.yml
+**/application-local.properties
+**/application-local.yaml
+
+# ---------- OS scratch ----------
+*.swp
+*.swo
+*~
+*.bak
+*.tmp
+*.orig
+*.rej
+
+# ---------- Build context / Docker stale ----------
+.build-context/
+
+# ===== Git 本地备份目录 (历史塌缩用) =====
+.git.bak.*/

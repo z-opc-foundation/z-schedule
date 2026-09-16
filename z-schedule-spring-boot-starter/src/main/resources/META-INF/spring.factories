@@ -1,0 +1,2 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+io.github.yuku123.z.schedule.web.config.ZScheduleAutoConfiguration

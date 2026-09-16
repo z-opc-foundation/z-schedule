@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        z-schedule-admin: 独立可启动演示应用 (不进 reactor, 顶层 pom.xml 不列本模块).
+        本地启动: mvn spring-boot:run
+        默认端口 / context-path 见 application.yml (18086 / meta)
+        凭证: 读环境变量 SPRING_DATASOURCE_PASSWORD, 不在 application.yml 写明文.
+              本地开发用 src/main/resources/application-local.yml (gitignored).
+    -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>2.7.12</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>io.github.yuku123</groupId>
+    <artifactId>z-schedule-admin</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+    <name>z-schedule :: admin (Standalone Demo App, NOT published to Central)</name>
+    <description>
+        Z-Schedule 独立可启动演示应用. 本地 spring-boot:run 启动一个完整的调度中心 UI.
+        不入中央 (admin 不进 reactor, 不发 Maven Central).
+    </description>
+
+    <properties>
+        <java.version>8</java.version>
+        <maven.compiler.source>8</maven.compiler.source>
+        <maven.compiler.target>8</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- admin 独立 module, 没有 flatten 阶段, 字面写版本 -->
+        <z-schedule.version>1.0.0</z-schedule.version>
+        <z-boot.version>1.0.8</z-boot.version>
+        <z-util.version>1.0.10</z-util.version>
+    </properties>
+
+    <dependencies>
+        <!-- 本仓核心 starter: 提供调度 + 集群 + REST -->
+        <dependency>
+            <groupId>io.github.yuku123</groupId>
+            <artifactId>z-schedule-spring-boot-starter</artifactId>
+            <version>${z-schedule.version}</version>
+        </dependency>
+
+        <!-- z-boot: 默认配置 -->
+        <dependency>
+            <groupId>io.github.yuku123</groupId>
+            <artifactId>z-boot-web-starter</artifactId>
+            <version>${z-boot.version}</version>
+        </dependency>
+        <!--
+            解决 log4j-slf4j-impl 双版本冲突:
+            z-boot-datasource-starter 会 transitive 拉 log4j-slf4j-impl 2.17.x (跟 log4j-core 2.17.x 配套),
+            spring-boot-starter-log4j2 拉 log4j-slf4j2-impl 2.26.x (跟 log4j-core 2.20+ 配套).
+            两者共存导致 MyBatis-Plus 启动时 NoSuchMethodError: Log4jLoggerFactory.<init>().
+            显式排除 z-boot-datasource-starter 拉来的老版本, 只保留新的.
+        -->
+        <dependency>
+            <groupId>io.github.yuku123</groupId>
+            <artifactId>z-boot-datasource-starter</artifactId>
+            <version>${z-boot.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-slf4j-impl</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- 工具 -->
+        <dependency>
+            <groupId>io.github.yuku123</groupId>
+            <artifactId>z-util-core</artifactId>
+            <version>${z-util.version}</version>
+        </dependency>
+
+        <!--
+            z-agent-llm-gateway: TokenBurnJobHandler 调用 LLM 接口 (本地 monorepo 内部, 不在中央)
+            groupId 保留 com.zifang, version 是 monorepo 内部 SNAPSHOT
+        -->
+        <dependency>
+            <groupId>com.zifang</groupId>
+            <artifactId>z-agent-llm-gateway-core</artifactId>
+            <version>1.0.0-SNAPSHOT</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.baomidou</groupId>
+                    <artifactId>mybatis-plus-boot-starter</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.mysql</groupId>
+                    <artifactId>mysql-connector-j</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Actuator (健康检查) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Log4j2 (starter / z-boot-web-starter 统一使用 log4j2) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-log4j2</artifactId>
+            <exclusions>
+                <!--
+                    spring-boot-starter-log4j2 2.7.12 自带 log4j-slf4j-impl 2.17.2 (SLF4J 1.x bridge),
+                    与 z-util-core 1.0.10 拉的 log4j-slf4j2-impl 2.26.1 (SLF4J 2.x bridge) 冲突.
+                    后者配 log4j-core 2.20+ / SLF4J 2.x, MyBatis-Plus 启动需要后者.
+                    排除老的, 让 z-util-core 提供的 2.26.1 唯一存在.
+                -->
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-slf4j-impl</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- H2 Database (本地测试用, 生产换 MySQL) -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals><goal>repackage</goal></goals>
+                        <configuration>
+                            <classifier>exec</classifier>
+                            <mainClass>io.github.yuku123.z.schedule.admin.ZScheduleAdminApplication</mainClass>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
