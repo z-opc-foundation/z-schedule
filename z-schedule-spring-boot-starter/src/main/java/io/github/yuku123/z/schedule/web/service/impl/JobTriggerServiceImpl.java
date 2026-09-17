@@ -1,6 +1,7 @@
 package io.github.yuku123.z.schedule.web.service.impl;
 
 import io.github.yuku123.z.schedule.core.enums.TriggerCodeEnum;
+import io.github.yuku123.z.schedule.core.enums.TriggerTypeEnum;
 import io.github.yuku123.z.schedule.core.model.JobInfo;
 import io.github.yuku123.z.schedule.core.model.JobLog;
 import io.github.yuku123.z.schedule.core.model.ReturnT;
@@ -23,6 +24,9 @@ import javax.annotation.Resource;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Date;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Future;
 
 /**
  * 定时任务触发器 — 集群感知 + 独立调度引擎
@@ -62,6 +66,16 @@ public class JobTriggerServiceImpl implements JobTriggerService {
      * 调度引擎（独立线程池 + 时间轮）
      */
     private JobScheduleEngine engine;
+
+    /**
+     * 正在运行的任务：key=logId, value=Future
+     */
+    private final Map<Long, Future<?>> runningTasks = new ConcurrentHashMap<>();
+
+    /**
+     * 任务执行耗时记录（ms）：用于快/慢线程池分级
+     */
+    private final Map<Integer, Long> jobExecutionTimes = new ConcurrentHashMap<>();
 
     @PostConstruct
     public void init() {
@@ -119,6 +133,33 @@ public class JobTriggerServiceImpl implements JobTriggerService {
     }
 
     @Override
+    public void completeJob(int jobId) {
+        if (engine != null && engine.isRunning()) {
+            engine.completeJob(jobId);
+        }
+        logger.debug("completeJob, jobId={}", jobId);
+    }
+
+    @Override
+    public void killJob(long logId) {
+        Future<?> future = runningTasks.remove(logId);
+        if (future != null) {
+            future.cancel(true);
+            logger.info("Job killed, logId={}", logId);
+            // 更新日志
+            JobLog log = jobLogService.getById(logId);
+            if (log != null) {
+                log.setHandleCode(TriggerCodeEnum.TIMEOUT.getCode());
+                log.setHandleMsg("任务被终止");
+                log.setHandleTime(new Date());
+                jobLogService.update(log);
+            }
+        } else {
+            logger.warn("No running task found for logId={}", logId);
+        }
+    }
+
+    @Override
     public void triggerJob(JobInfo jobInfo) {
         // 手动触发允许在任一节点执行
         logger.info("Job triggered manually, jobId={}", jobInfo.getId());
@@ -126,42 +167,103 @@ public class JobTriggerServiceImpl implements JobTriggerService {
     }
 
     /**
-     * 执行任务逻辑（完整 JobLog 记录）。
+     * 执行任务逻辑（完整 JobLog 记录 + 失败重试 + 父任务触发 + FIX_DELAY 回调）。
      */
     private void executeJob(JobInfo jobInfo) {
-        JobLog log = new JobLog();
-        log.setJobId(jobInfo.getId());
-        log.setJobGroup(jobInfo.getJobGroup());
-        log.setExecutorHandler(jobInfo.getExecutorHandler());
-        log.setExecutorParam(jobInfo.getExecutorParam());
-        log.setTriggerCode(TriggerCodeEnum.SUCCESS.getCode());
-        log.setTriggerMsg("调度成功");
-        log.setTriggerTime(new Date());
-        log.setAlarmStatus(0);
-        log.setHandleCode(0);
-        long logId = jobLogService.save(log);
+        int retryCount = jobInfo.getExecutorFailRetryCount();
+        if (retryCount < 0) retryCount = 0;
+        int maxAttempts = retryCount + 1; // 至少执行 1 次
 
-        long start = System.currentTimeMillis();
-        try {
-            String handler = jobInfo.getExecutorHandler();
-            if (handler == null || handler.trim().isEmpty()) {
-                log.setHandleCode(TriggerCodeEnum.FAIL.getCode());
-                log.setHandleMsg("未指定 executorHandler");
-                log.setAlarmStatus(1);
-                return;
-            }
-            executeHandler(handler, jobInfo.getExecutorParam());
-            log.setHandleCode(ReturnT.SUCCESS_CODE);
-            log.setHandleMsg("执行成功,耗时 " + (System.currentTimeMillis() - start) + "ms");
-            log.setHandleTime(new Date());
-        } catch (Throwable e) {
-            log.setHandleCode(TriggerCodeEnum.FAIL.getCode());
-            log.setHandleMsg(e.getMessage() == null ? e.getClass().getName() : e.getMessage());
-            log.setHandleTime(new Date());
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            boolean isRetry = attempt > 1;
+            String logLabel = isRetry ? "重试第" + (attempt - 1) + "次" : "首次执行";
+
+            JobLog log = new JobLog();
+            log.setJobId(jobInfo.getId());
+            log.setJobGroup(jobInfo.getJobGroup());
+            log.setExecutorHandler(jobInfo.getExecutorHandler());
+            log.setExecutorParam(jobInfo.getExecutorParam());
+            log.setTriggerCode(TriggerCodeEnum.SUCCESS.getCode());
+            log.setTriggerMsg(logLabel);
+            log.setTriggerTime(new Date());
             log.setAlarmStatus(0);
-            logger.error("Job execution failed, jobId={}", jobInfo.getId(), e);
-        } finally {
-            jobLogService.update(log);
+            log.setHandleCode(0);
+            log.setExecutorFailRetryCount(retryCount);
+            long logId = jobLogService.save(log);
+
+            long start = System.currentTimeMillis();
+            try {
+                String handler = jobInfo.getExecutorHandler();
+                if (handler == null || handler.trim().isEmpty()) {
+                    log.setHandleCode(TriggerCodeEnum.FAIL.getCode());
+                    log.setHandleMsg("未指定 executorHandler");
+                    log.setAlarmStatus(1);
+                    jobLogService.update(log);
+                    break; // 无 handler 不重试
+                }
+                executeHandler(handler, jobInfo.getExecutorParam());
+                long costMs = System.currentTimeMillis() - start;
+                log.setHandleCode(ReturnT.SUCCESS_CODE);
+                log.setHandleMsg("执行成功,耗时 " + costMs + "ms" + (isRetry ? " (" + logLabel + ")" : ""));
+                log.setHandleTime(new Date());
+                jobLogService.update(log);
+
+                // 记录执行耗时
+                jobExecutionTimes.put(jobInfo.getId(), costMs);
+
+                // 成功后触发父任务的子任务
+                triggerChildJobs(jobInfo);
+
+                // FIX_DELAY 模式：执行完成后挂入时间轮
+                if (engine != null) {
+                    engine.completeJob(jobInfo.getId());
+                }
+                return; // 成功，退出重试循环
+
+            } catch (Throwable e) {
+                long costMs = System.currentTimeMillis() - start;
+                log.setHandleCode(TriggerCodeEnum.FAIL.getCode());
+                log.setHandleMsg("执行失败" + (isRetry ? " (" + logLabel + ")" : "") + ": "
+                        + (e.getMessage() == null ? e.getClass().getName() : e.getMessage()));
+                log.setHandleTime(new Date());
+                log.setAlarmStatus(0);
+                jobLogService.update(log);
+                logger.error("Job execution failed, jobId={}, attempt={}/{}", jobInfo.getId(), attempt, maxAttempts, e);
+
+                if (attempt < maxAttempts) {
+                    // 重试间隔：指数退避，最小 1 秒
+                    long delay = Math.min(1000L * (1L << (attempt - 1)), 30_000L);
+                    try {
+                        Thread.sleep(delay);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 触发子任务（父任务执行成功后自动触发）。
+     */
+    private void triggerChildJobs(JobInfo parentJob) {
+        String childJobIds = parentJob.getChildJobId();
+        if (childJobIds == null || childJobIds.trim().isEmpty()) {
+            return;
+        }
+        String[] ids = childJobIds.split(",");
+        for (String idStr : ids) {
+            try {
+                int childId = Integer.parseInt(idStr.trim());
+                JobInfo childJob = jobInfoService.getById(childId);
+                if (childJob != null && childJob.getTriggerStatus() == 1) {
+                    logger.info("Triggering child job, parentId={}, childId={}", parentJob.getId(), childId);
+                    triggerJob(childJob);
+                }
+            } catch (NumberFormatException e) {
+                logger.warn("Invalid child job id: {}", idStr);
+            }
         }
     }
 
@@ -186,5 +288,12 @@ public class JobTriggerServiceImpl implements JobTriggerService {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * 获取任务平均执行耗时（ms），供引擎判断快/慢线程池。
+     */
+    public Long getJobAvgCost(int jobId) {
+        return jobExecutionTimes.get(jobId);
     }
 }

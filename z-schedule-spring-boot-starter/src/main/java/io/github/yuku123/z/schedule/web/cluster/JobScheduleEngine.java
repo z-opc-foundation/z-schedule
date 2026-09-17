@@ -1,5 +1,7 @@
 package io.github.yuku123.z.schedule.web.cluster;
 
+import io.github.yuku123.z.schedule.core.enums.MisfireStrategyEnum;
+import io.github.yuku123.z.schedule.core.enums.TriggerTypeEnum;
 import io.github.yuku123.z.schedule.core.model.JobInfo;
 import io.github.yuku123.z.schedule.web.service.JobInfoService;
 import io.github.yuku123.z.schedule.web.service.JobTriggerService;
@@ -69,9 +71,24 @@ public class JobScheduleEngine {
     private ScheduledFuture<?> tickFuture;
 
     /**
-     * 独立执行线程池：异步触发任务，避免阻塞调度线程
+     * 快任务执行线程池（默认 200 线程）
      */
-    private ExecutorService executePool;
+    private ExecutorService fastPool;
+
+    /**
+     * 慢任务执行线程池（默认 200 线程）
+     */
+    private ExecutorService slowPool;
+
+    /**
+     * 任务执行耗时记录：用于判断任务应进入快/慢池
+     */
+    private final Map<Integer, Long> jobAvgCostMap = new ConcurrentHashMap<>();
+
+    /**
+     * 慢任务判定阈值（ms），超过此平均耗时的任务降级到慢线程池
+     */
+    private long slowThreshold = 5000L;
 
     /**
      * 外部依赖（通过 setter 注入）
@@ -96,6 +113,13 @@ public class JobScheduleEngine {
         this.leaderElector = leaderElector;
     }
 
+    /**
+     * 设置慢任务判定阈值（ms）。
+     */
+    public void setSlowThreshold(long slowThreshold) {
+        this.slowThreshold = slowThreshold;
+    }
+
     // ---- 启动 / 停止 ----
 
     /**
@@ -104,7 +128,7 @@ public class JobScheduleEngine {
     public synchronized void start() {
         if (running) return;
 
-        // 独立调度线程池：1 线程，守护线程，避免 JVM 退出时卡住
+        // 独立调度线程池：1 线程，守护线程
         schedulePool = Executors.newScheduledThreadPool(1, r -> {
             Thread t = new Thread(r, "z-schedule-tick");
             t.setDaemon(true);
@@ -112,16 +136,23 @@ public class JobScheduleEngine {
         });
         schedulePool.scheduleAtFixedRate(this::tick, 1, 1, TimeUnit.SECONDS);
 
-        // 独立执行线程池：4 线程，异步触发任务
-        executePool = Executors.newFixedThreadPool(4, r -> {
-            Thread t = new Thread(r, "z-schedule-exec-");
+        // 快任务线程池
+        fastPool = Executors.newFixedThreadPool(200, r -> {
+            Thread t = new Thread(r, "z-schedule-fast-");
+            t.setDaemon(true);
+            return t;
+        });
+
+        // 慢任务线程池
+        slowPool = Executors.newFixedThreadPool(200, r -> {
+            Thread t = new Thread(r, "z-schedule-slow-");
             t.setDaemon(true);
             return t;
         });
 
         running = true;
         initialized = true;
-        logger.info("[z-schedule] Engine started: schedulePool=1, executePool=4, ringSlots=60");
+        logger.info("[z-schedule] Engine started: schedulePool=1, fastPool=200, slowPool=200, ringSlots=60");
     }
 
     /**
@@ -141,10 +172,17 @@ public class JobScheduleEngine {
             } catch (InterruptedException ignored) {
             }
         }
-        if (executePool != null) {
-            executePool.shutdown();
+        if (fastPool != null) {
+            fastPool.shutdown();
             try {
-                executePool.awaitTermination(10, TimeUnit.SECONDS);
+                fastPool.awaitTermination(10, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+            }
+        }
+        if (slowPool != null) {
+            slowPool.shutdown();
+            try {
+                slowPool.awaitTermination(10, TimeUnit.SECONDS);
             } catch (InterruptedException ignored) {
             }
         }
@@ -166,8 +204,15 @@ public class JobScheduleEngine {
             }
 
             for (Integer jobId : dueJobs) {
+                // 根据历史平均耗时选择快/慢线程池
+                ExecutorService targetPool = fastPool;
+                Long avgCost = jobAvgCostMap.get(jobId);
+                if (avgCost != null && avgCost > slowThreshold) {
+                    targetPool = slowPool;
+                }
+
                 // 异步触发，避免阻塞调度线程
-                executePool.submit(() -> {
+                targetPool.submit(() -> {
                     try {
                         JobInfo job = jobInfoService.getById(jobId);
                         if (job == null || job.getTriggerStatus() != 1) {
@@ -187,24 +232,53 @@ public class JobScheduleEngine {
     }
 
     /**
-     * 将一个已触发的任务重新挂入时间轮（基于 DB 中的 job_cron 计算下次触发时间）。
+     * 将一个已触发的任务重新挂入时间轮（基于触发类型计算下次触发时间）。
      */
     private void rescheduleJob(int jobId) {
         try {
             JobInfo job = jobInfoService.getById(jobId);
-            if (job == null || job.getTriggerStatus() != 1 || job.getJobCron() == null) {
+            if (job == null || job.getTriggerStatus() != 1) {
                 return;
             }
-            io.github.yuku123.z.schedule.core.util.CronExpression cron =
-                    new io.github.yuku123.z.schedule.core.util.CronExpression(job.getJobCron());
-            Date now = new Date();
-            Date next = cron.getNextValidTimeAfter(now);
-            if (next == null) {
-                return; // Cron 无后续时间
+
+            String triggerType = job.getTriggerType();
+            if (triggerType == null || triggerType.isEmpty()) {
+                triggerType = TriggerTypeEnum.CRON.getCode();
             }
-            long nextMs = next.getTime();
+
+            long nextMs = 0;
+
+            if (TriggerTypeEnum.FIX_RATE.getCode().equals(triggerType)) {
+                // 固定间隔触发：上次触发时间 + 间隔
+                if (job.getFixInterval() > 0) {
+                    nextMs = System.currentTimeMillis() + job.getFixInterval();
+                }
+            } else if (TriggerTypeEnum.FIX_DELAY.getCode().equals(triggerType)) {
+                // 固定延迟触发：由执行完成回调触发挂入，此处暂不自动挂入
+                // FIX_DELAY 模式的任务在执行完成后通过 completeJob() 挂入
+                return;
+            } else {
+                // CRON 触发（默认）
+                if (job.getJobCron() == null) {
+                    return;
+                }
+                io.github.yuku123.z.schedule.core.util.CronExpression cron =
+                        new io.github.yuku123.z.schedule.core.util.CronExpression(job.getJobCron());
+                Date now = new Date();
+                Date next = cron.getNextValidTimeAfter(now);
+                if (next == null) {
+                    return;
+                }
+                nextMs = next.getTime();
+            }
+
+            if (nextMs <= 0) {
+                return;
+            }
+
             ring.push(jobId, nextMs);
             jobTriggerTimes.put(jobId, nextMs);
+
             // 持久化 trigger_next_time
             if (jobInfoService instanceof io.github.yuku123.z.schedule.web.service.impl.JobInfoServiceImpl) {
                 ((io.github.yuku123.z.schedule.web.service.impl.JobInfoServiceImpl) jobInfoService)
@@ -221,6 +295,7 @@ public class JobScheduleEngine {
      * Leader 加载：从 DB 加载所有 trigger_status=1 的任务，填充时间轮。
      * <p>
      * 每次 Leader 切换时调用一次（由 JobTriggerServiceImpl.reloadRunningJobs 触发）。
+     * 支持 Misfire 策略：检测过期任务并按策略补偿。
      */
     public void reloadJobs() {
         if (!initialized) {
@@ -238,28 +313,105 @@ public class JobScheduleEngine {
         // 填充时间轮
         long nowMs = System.currentTimeMillis();
         int loaded = 0;
+        int misfired = 0;
         for (JobInfo job : running) {
             try {
-                io.github.yuku123.z.schedule.core.util.CronExpression cron =
-                        new io.github.yuku123.z.schedule.core.util.CronExpression(job.getJobCron());
-                Date now = new Date();
-                Date next = cron.getNextValidTimeAfter(now);
-                if (next == null) continue;
+                String triggerType = job.getTriggerType();
+                if (triggerType == null || triggerType.isEmpty()) {
+                    triggerType = TriggerTypeEnum.CRON.getCode();
+                }
 
-                long nextMs = next.getTime();
-                ring.push(job.getId(), nextMs);
-                jobTriggerTimes.put(job.getId(), nextMs);
-                loaded++;
+                if (TriggerTypeEnum.FIX_RATE.getCode().equals(triggerType)) {
+                    // FIX_RATE: 使用 fixInterval 计算下次触发时间
+                    long interval = job.getFixInterval();
+                    if (interval <= 0) continue;
+                    long nextMs;
+                    if (job.getTriggerLastTime() > 0) {
+                        nextMs = job.getTriggerLastTime() + interval;
+                    } else {
+                        nextMs = nowMs + interval;
+                    }
+
+                    // Misfire 检测：下次触发时间已过期
+                    if (nextMs < nowMs) {
+                        String misfire = job.getMisfireStrategy();
+                        if (MisfireStrategyEnum.FIRE_ONCE_NOW.getCode().equals(misfire)) {
+                            // 立即补偿触发
+                            misfired++;
+                            jobTriggerService.triggerJob(job);
+                        }
+                        // 重新计算下次触发时间
+                        nextMs = nowMs + interval;
+                    }
+
+                    ring.push(job.getId(), nextMs);
+                    jobTriggerTimes.put(job.getId(), nextMs);
+                    loaded++;
+
+                } else if (TriggerTypeEnum.FIX_DELAY.getCode().equals(triggerType)) {
+                    // FIX_DELAY: 等待执行完成后挂入，此处跳过
+                    continue;
+
+                } else {
+                    // CRON 触发（默认）
+                    if (job.getJobCron() == null) continue;
+                    io.github.yuku123.z.schedule.core.util.CronExpression cron =
+                            new io.github.yuku123.z.schedule.core.util.CronExpression(job.getJobCron());
+                    Date now = new Date();
+                    Date next = cron.getNextValidTimeAfter(now);
+                    if (next == null) continue;
+
+                    long nextMs = next.getTime();
+
+                    // Misfire 检测：如果 trigger_next_time 已过期
+                    if (job.getTriggerNextTime() > 0 && job.getTriggerNextTime() < nowMs) {
+                        String misfire = job.getMisfireStrategy();
+                        if (MisfireStrategyEnum.FIRE_ONCE_NOW.getCode().equals(misfire)) {
+                            // 立即补偿触发
+                            misfired++;
+                            jobTriggerService.triggerJob(job);
+                        }
+                    }
+
+                    ring.push(job.getId(), nextMs);
+                    jobTriggerTimes.put(job.getId(), nextMs);
+                    loaded++;
+                }
             } catch (Exception e) {
                 logger.warn("[z-schedule] Skip job {}: cron parse error: {}", job.getId(), e.getMessage());
             }
         }
 
-        logger.info("[z-schedule] Engine loaded {} jobs into ring (ringTotal={}, queueSize={})",
-                loaded, ring.totalSize(), jobTriggerTimes.size());
+        logger.info("[z-schedule] Engine loaded {} jobs into ring (ringTotal={}, misfired={})",
+                loaded, ring.totalSize(), misfired);
     }
 
     // ---- 监控 / 诊断 ----
+
+    /**
+     * FIX_DELAY 模式：任务执行完成后，将任务重新挂入时间轮。
+     */
+    public void completeJob(int jobId) {
+        try {
+            JobInfo job = jobInfoService.getById(jobId);
+            if (job == null || job.getTriggerStatus() != 1) {
+                return;
+            }
+            String triggerType = job.getTriggerType();
+            if (TriggerTypeEnum.FIX_DELAY.getCode().equals(triggerType) && job.getFixInterval() > 0) {
+                long nextMs = System.currentTimeMillis() + job.getFixInterval();
+                ring.push(jobId, nextMs);
+                jobTriggerTimes.put(jobId, nextMs);
+                if (jobInfoService instanceof io.github.yuku123.z.schedule.web.service.impl.JobInfoServiceImpl) {
+                    ((io.github.yuku123.z.schedule.web.service.impl.JobInfoServiceImpl) jobInfoService)
+                            .updateTriggerTimes(jobId, System.currentTimeMillis(), nextMs);
+                }
+                logger.debug("[z-schedule] FIX_DELAY rescheduled, jobId={}, nextMs={}", jobId, nextMs);
+            }
+        } catch (Exception e) {
+            logger.error("[z-schedule] completeJob failed, jobId={}", jobId, e);
+        }
+    }
 
     public int scheduledJobCount() {
         return ring.totalSize();

@@ -57,4 +57,12 @@ public interface JobLogService {
      * @return 删除数量
      */
     int clearAll();
+
+    /**
+     * 清理超过指定天数的日志.
+     *
+     * @param days 保留天数（清理 days 天之前的日志）
+     * @return 删除数量
+     */
+    int clearLogByDays(int days);
 }

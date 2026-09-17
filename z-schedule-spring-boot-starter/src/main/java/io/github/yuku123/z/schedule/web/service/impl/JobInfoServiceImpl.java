@@ -81,6 +81,12 @@ public class JobInfoServiceImpl implements JobInfoService {
         jobInfo.setTriggerStatus(0);
         jobInfo.setTriggerLastTime(0);
         jobInfo.setTriggerNextTime(0);
+        if (jobInfo.getTriggerType() == null || jobInfo.getTriggerType().isEmpty()) {
+            jobInfo.setTriggerType("CRON");
+        }
+        if (jobInfo.getMisfireStrategy() == null || jobInfo.getMisfireStrategy().isEmpty()) {
+            jobInfo.setMisfireStrategy("DO_NOTHING");
+        }
         Date now = new Date();
         jobInfo.setAddTime(now);
         jobInfo.setUpdateTime(now);
@@ -130,6 +136,14 @@ public class JobInfoServiceImpl implements JobInfoService {
         if (jobInfo.getExecutorTimeout() >= 0) exist.setExecutorTimeout(jobInfo.getExecutorTimeout());
         if (jobInfo.getExecutorFailRetryCount() >= 0)
             exist.setExecutorFailRetryCount(jobInfo.getExecutorFailRetryCount());
+        if (jobInfo.getTriggerType() != null && !jobInfo.getTriggerType().isEmpty())
+            exist.setTriggerType(jobInfo.getTriggerType());
+        if (jobInfo.getFixInterval() >= 0)
+            exist.setFixInterval(jobInfo.getFixInterval());
+        if (jobInfo.getMisfireStrategy() != null && !jobInfo.getMisfireStrategy().isEmpty())
+            exist.setMisfireStrategy(jobInfo.getMisfireStrategy());
+        if (jobInfo.getChildJobId() != null)
+            exist.setChildJobId(jobInfo.getChildJobId());
         exist.setUpdateTime(new Date());
 
         int rows = jobInfoMapper.updateById(exist);

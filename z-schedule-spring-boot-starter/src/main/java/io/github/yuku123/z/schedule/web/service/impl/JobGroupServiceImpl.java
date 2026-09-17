@@ -42,6 +42,16 @@ public class JobGroupServiceImpl implements JobGroupService {
                 new io.github.yuku123.z.schedule.core.route.impl.FailoverRouter());
         ROUTERS.put(ExecutorRouteStrategyEnum.SHARDING_BROADCAST.getCode(),
                 new io.github.yuku123.z.schedule.core.route.impl.ShardingBroadcastRouter());
+        ROUTERS.put(ExecutorRouteStrategyEnum.FIRST.getCode(),
+                new io.github.yuku123.z.schedule.core.route.impl.FirstRouter());
+        ROUTERS.put(ExecutorRouteStrategyEnum.LAST.getCode(),
+                new io.github.yuku123.z.schedule.core.route.impl.LastRouter());
+        ROUTERS.put(ExecutorRouteStrategyEnum.LFU.getCode(),
+                new io.github.yuku123.z.schedule.core.route.impl.LfuRouter());
+        ROUTERS.put(ExecutorRouteStrategyEnum.LRU.getCode(),
+                new io.github.yuku123.z.schedule.core.route.impl.LruRouter());
+        ROUTERS.put(ExecutorRouteStrategyEnum.BUSYOVER.getCode(),
+                new io.github.yuku123.z.schedule.core.route.impl.BusyoverRouter());
     }
 
     @Resource

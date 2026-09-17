@@ -41,6 +41,22 @@ public class JobInfoDO {
      * 下次触发时间 (epoch ms, 0=未计算)
      */
     private Long triggerNextTime;
+    /**
+     * 触发类型：CRON / FIX_RATE / FIX_DELAY
+     */
+    private String triggerType;
+    /**
+     * FIX_RATE/FIX_DELAY 间隔时间 (毫秒)
+     */
+    private Long fixInterval;
+    /**
+     * 调度过期策略：DO_NOTHING / FIRE_ONCE_NOW
+     */
+    private String misfireStrategy;
+    /**
+     * 子任务ID（逗号分隔），父任务成功后自动触发
+     */
+    private String childJobId;
     private Date addTime;
     private Date updateTime;
 
@@ -162,6 +178,38 @@ public class JobInfoDO {
 
     public void setTriggerNextTime(Long triggerNextTime) {
         this.triggerNextTime = triggerNextTime;
+    }
+
+    public String getTriggerType() {
+        return triggerType;
+    }
+
+    public void setTriggerType(String triggerType) {
+        this.triggerType = triggerType;
+    }
+
+    public Long getFixInterval() {
+        return fixInterval;
+    }
+
+    public void setFixInterval(Long fixInterval) {
+        this.fixInterval = fixInterval;
+    }
+
+    public String getMisfireStrategy() {
+        return misfireStrategy;
+    }
+
+    public void setMisfireStrategy(String misfireStrategy) {
+        this.misfireStrategy = misfireStrategy;
+    }
+
+    public String getChildJobId() {
+        return childJobId;
+    }
+
+    public void setChildJobId(String childJobId) {
+        this.childJobId = childJobId;
     }
 
     public Date getAddTime() {

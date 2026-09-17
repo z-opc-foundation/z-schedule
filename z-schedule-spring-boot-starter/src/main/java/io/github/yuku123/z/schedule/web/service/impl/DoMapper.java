@@ -3,9 +3,11 @@ package io.github.yuku123.z.schedule.web.service.impl;
 import io.github.yuku123.z.schedule.core.model.JobGroup;
 import io.github.yuku123.z.schedule.core.model.JobInfo;
 import io.github.yuku123.z.schedule.core.model.JobLog;
+import io.github.yuku123.z.schedule.core.model.User;
 import io.github.yuku123.z.schedule.web.domain.entity.JobGroupDO;
 import io.github.yuku123.z.schedule.web.domain.entity.JobInfoDO;
 import io.github.yuku123.z.schedule.web.domain.entity.JobLogDO;
+import io.github.yuku123.z.schedule.web.domain.entity.UserDO;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -41,6 +43,10 @@ final class DoMapper {
         d.setTriggerStatus(src.getTriggerStatus());
         d.setTriggerLastTime(src.getTriggerLastTime());
         d.setTriggerNextTime(src.getTriggerNextTime());
+        d.setTriggerType(src.getTriggerType());
+        d.setFixInterval(src.getFixInterval());
+        d.setMisfireStrategy(src.getMisfireStrategy());
+        d.setChildJobId(src.getChildJobId());
         d.setAddTime(src.getAddTime());
         d.setUpdateTime(src.getUpdateTime());
         return d;
@@ -68,6 +74,10 @@ final class DoMapper {
         j.setTriggerStatus(d.getTriggerStatus() == null ? 0 : d.getTriggerStatus());
         j.setTriggerLastTime(d.getTriggerLastTime() == null ? 0L : d.getTriggerLastTime());
         j.setTriggerNextTime(d.getTriggerNextTime() == null ? 0L : d.getTriggerNextTime());
+        j.setTriggerType(d.getTriggerType());
+        j.setFixInterval(d.getFixInterval() == null ? 0L : d.getFixInterval());
+        j.setMisfireStrategy(d.getMisfireStrategy());
+        j.setChildJobId(d.getChildJobId());
         j.setAddTime(d.getAddTime());
         j.setUpdateTime(d.getUpdateTime());
         return j;
@@ -174,6 +184,49 @@ final class DoMapper {
     static List<JobGroup> toGroupDTOList(List<JobGroupDO> list) {
         List<JobGroup> out = new ArrayList<>(list.size());
         for (JobGroupDO d : list) {
+            out.add(toDTO(d));
+        }
+        return out;
+    }
+
+    // ---- User ----
+    static UserDO toDO(User src) {
+        if (src == null) {
+            return null;
+        }
+        UserDO d = new UserDO();
+        if (src.getId() > 0) {
+            d.setId(src.getId());
+        }
+        d.setUsername(src.getUsername());
+        d.setPassword(src.getPassword());
+        d.setRole(src.getRole());
+        d.setPermission(src.getPermission());
+        d.setAddTime(src.getAddTime());
+        d.setUpdateTime(src.getUpdateTime());
+        return d;
+    }
+
+    static User toDTO(UserDO d) {
+        if (d == null) {
+            return null;
+        }
+        User u = new User();
+        if (d.getId() != null) {
+            u.setId(d.getId());
+        }
+        u.setUsername(d.getUsername());
+        u.setPassword(d.getPassword());
+        u.setRole(d.getRole());
+        u.setPermission(d.getPermission());
+        u.setAddTime(d.getAddTime());
+        u.setUpdateTime(d.getUpdateTime());
+        return u;
+    }
+
+    static List<User> toUserDTOList(List<UserDO> list) {
+        List<User> out = new ArrayList<>(list.size());
+        for (UserDO d : list) {
             out.add(toDTO(d));
         }
         return out;

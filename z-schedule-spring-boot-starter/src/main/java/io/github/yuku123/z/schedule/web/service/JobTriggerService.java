@@ -30,4 +30,18 @@ public interface JobTriggerService {
      * @param jobInfo 任务信息
      */
     void triggerJob(JobInfo jobInfo);
+
+    /**
+     * 任务执行完成回调（用于 FIX_DELAY 模式挂入时间轮）
+     *
+     * @param jobId 任务ID
+     */
+    void completeJob(int jobId);
+
+    /**
+     * 终止正在运行的任务
+     *
+     * @param logId 执行日志ID
+     */
+    void killJob(long logId);
 }

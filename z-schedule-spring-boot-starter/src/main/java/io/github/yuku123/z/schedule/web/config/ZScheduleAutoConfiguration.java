@@ -2,9 +2,14 @@ package io.github.yuku123.z.schedule.web.config;
 
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import com.zifang.z.boot.datasource.starter.ModuleDataSourceTemplate;
+import io.github.yuku123.z.schedule.core.config.ScheduleProperties;
+import io.github.yuku123.z.schedule.web.filter.TokenAuthFilter;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
@@ -42,16 +47,40 @@ import javax.sql.DataSource;
 public class ZScheduleAutoConfiguration extends ModuleDataSourceTemplate {
 
     /**
+     * 调度系统配置属性（对应 z.schedule.* 前缀）。
+     */
+    @Bean
+    @ConfigurationProperties(prefix = "z.schedule")
+    public ScheduleProperties scheduleProperties() {
+        return new ScheduleProperties();
+    }
+
+    /**
+     * Token 认证过滤器注册。
+     * <p>
+     * 当 z.schedule.accessToken 非空时启用，拦截 /executor/* 路径。
+     */
+    @Bean
+    public FilterRegistrationBean<TokenAuthFilter> tokenAuthFilterRegistration(ScheduleProperties props) {
+        FilterRegistrationBean<TokenAuthFilter> registration = new FilterRegistrationBean<>();
+        registration.setFilter(new TokenAuthFilter(props));
+        registration.addUrlPatterns("/executor/*");
+        registration.setName("tokenAuthFilter");
+        registration.setOrder(1);
+        return registration;
+    }
+
+    /**
      * 生产 / 默认环境：starter 自建 Druid + MySQL DataSource。
      * 用 {@code z.base.db.schedule.disabled=false}（或不设）启用。
      */
-    @org.springframework.context.annotation.Bean(name = "dataSourceSchedule")
+    @Bean(name = "dataSourceSchedule")
     @ConditionalOnProperty(name = "z.base.db.schedule.disabled", havingValue = "false", matchIfMissing = true)
     public DataSource dataSourceSchedule(Environment env) {
         return buildDataSource(env, "schedule");
     }
 
-    @org.springframework.context.annotation.Bean(name = "sqlSessionFactorySchedule")
+    @Bean(name = "sqlSessionFactorySchedule")
     @ConditionalOnProperty(name = "z.base.db.schedule.disabled", havingValue = "false", matchIfMissing = true)
     public SqlSessionFactory sqlSessionFactorySchedule(
             @org.springframework.beans.factory.annotation.Qualifier("dataSourceSchedule")

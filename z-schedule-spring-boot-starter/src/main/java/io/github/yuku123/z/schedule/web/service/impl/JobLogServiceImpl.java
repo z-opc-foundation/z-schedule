@@ -60,4 +60,13 @@ public class JobLogServiceImpl implements JobLogService {
     public int clearAll() {
         return jobLogMapper.delete(null);
     }
+
+    @Override
+    public int clearLogByDays(int days) {
+        if (days < 7) days = 7;
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        cal.add(java.util.Calendar.DAY_OF_MONTH, -days);
+        return jobLogMapper.delete(
+                new LambdaQueryWrapper<JobLogDO>().lt(JobLogDO::getTriggerTime, cal.getTime()));
+    }
 }

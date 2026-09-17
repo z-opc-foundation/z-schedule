@@ -6,6 +6,7 @@ import io.github.yuku123.z.schedule.core.param.KillParam;
 import io.github.yuku123.z.schedule.core.param.TriggerParam;
 import io.github.yuku123.z.schedule.web.service.ExecutorRegistryService;
 import io.github.yuku123.z.schedule.web.service.JobLogService;
+import io.github.yuku123.z.schedule.web.service.JobTriggerService;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,6 +40,9 @@ public class ExecutorCallbackController {
 
     @Autowired
     private JobLogService jobLogService;
+
+    @Autowired
+    private JobTriggerService jobTriggerService;
 
     /**
      * 执行器心跳(同步 path 参数 + body 两种传参方式).
@@ -83,13 +87,19 @@ public class ExecutorCallbackController {
     }
 
     /**
-     * 终止任务(由执行器调用上报).
+     * 终止任务（由执行器调用上报）。
      */
     @PostMapping("/kill")
     public ReturnT<String> kill(@RequestBody KillParam killParam) {
         logger.info("Executor kill, param={}", killParam);
         if (killParam == null || killParam.getJobId() <= 0) {
             return ReturnT.fail(400, "jobId 不能为空");
+        }
+        // 通过 jobId 查找最近的日志并终止
+        JobLog log = jobLogService.getById(killParam.getLogId());
+        if (log != null && log.getId() > 0) {
+            jobTriggerService.killJob(log.getId());
+            return ReturnT.success("已终止任务", null);
         }
         return ReturnT.success("已通知终止", null);
     }

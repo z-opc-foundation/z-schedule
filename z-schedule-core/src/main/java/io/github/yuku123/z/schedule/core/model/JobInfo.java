@@ -100,6 +100,26 @@ public class JobInfo implements Serializable {
      */
     private long triggerNextTime;
 
+    /**
+     * 触发类型：CRON / FIX_RATE / FIX_DELAY / MANUAL / API / RETRY / PARENT
+     */
+    private String triggerType;
+
+    /**
+     * FIX_RATE/FIX_DELAY 模式的间隔时间（毫秒）
+     */
+    private long fixInterval;
+
+    /**
+     * 调度过期策略：DO_NOTHING / FIRE_ONCE_NOW
+     */
+    private String misfireStrategy;
+
+    /**
+     * 子任务ID（逗号分隔），父任务执行成功后自动触发
+     */
+    private String childJobId;
+
     public int getId() {
         return id;
     }
@@ -242,6 +262,38 @@ public class JobInfo implements Serializable {
 
     public void setTriggerNextTime(long triggerNextTime) {
         this.triggerNextTime = triggerNextTime;
+    }
+
+    public String getTriggerType() {
+        return triggerType;
+    }
+
+    public void setTriggerType(String triggerType) {
+        this.triggerType = triggerType;
+    }
+
+    public long getFixInterval() {
+        return fixInterval;
+    }
+
+    public void setFixInterval(long fixInterval) {
+        this.fixInterval = fixInterval;
+    }
+
+    public String getMisfireStrategy() {
+        return misfireStrategy;
+    }
+
+    public void setMisfireStrategy(String misfireStrategy) {
+        this.misfireStrategy = misfireStrategy;
+    }
+
+    public String getChildJobId() {
+        return childJobId;
+    }
+
+    public void setChildJobId(String childJobId) {
+        this.childJobId = childJobId;
     }
 
     @Override

@@ -33,7 +33,12 @@ public enum TriggerTypeEnum {
     /**
      * 固定间隔触发
      */
-    FIX_RATE("FIX_RATE", "固定间隔触发");
+    FIX_RATE("FIX_RATE", "固定间隔触发"),
+
+    /**
+     * 固定延迟触发（上次完成后延迟指定时间再触发）
+     */
+    FIX_DELAY("FIX_DELAY", "固定延迟触发");
 
     private final String code;
     private final String desc;

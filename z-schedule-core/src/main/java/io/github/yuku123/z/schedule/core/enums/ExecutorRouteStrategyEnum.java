@@ -33,7 +33,27 @@ public enum ExecutorRouteStrategyEnum {
     /**
      * 分片广播
      */
-    SHARDING_BROADCAST("SHARDING_BROADCAST", "分片广播");
+    SHARDING_BROADCAST("SHARDING_BROADCAST", "分片广播"),
+
+    /**
+     * 固定第一个
+     */
+    FIRST("FIRST", "固定第一个"),
+
+    /**
+     * 固定最后一个
+     */
+    LAST("LAST", "固定最后一个"),
+
+    /**
+     * 最不经常使用
+     */
+    LFU("LFU", "最不经常使用"),
+
+    /**
+     * 忙碌转移
+     */
+    BUSYOVER("BUSYOVER", "忙碌转移");
 
     private final String code;
     private final String desc;
