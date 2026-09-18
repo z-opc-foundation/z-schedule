@@ -55,4 +55,22 @@ public enum TriggerTypeEnum {
     public String getDesc() {
         return desc;
     }
+
+    /**
+     * 根据 code 查找对应的枚举。
+     *
+     * @param code 枚举 code
+     * @return 匹配的枚举，未匹配返回 null
+     */
+    public static TriggerTypeEnum match(String code) {
+        if (code == null) {
+            return null;
+        }
+        for (TriggerTypeEnum item : TriggerTypeEnum.values()) {
+            if (item.getCode().equals(code)) {
+                return item;
+            }
+        }
+        return null;
+    }
 }

@@ -4,6 +4,7 @@ import io.github.yuku123.z.schedule.core.route.ExecutorRouter;
 import org.junit.Test;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.Assert.*;
 
@@ -76,12 +77,90 @@ public class RouterTest {
     }
 
     @Test
+    public void testFirstReturnsFirst() {
+        FirstRouter router = new FirstRouter();
+        assertEquals(ADDRESSES.get(0), router.route(ADDRESSES, 1));
+        assertEquals(ADDRESSES.get(0), router.route(ADDRESSES, 999));
+    }
+
+    @Test
+    public void testLastReturnsLast() {
+        LastRouter router = new LastRouter();
+        assertEquals(ADDRESSES.get(ADDRESSES.size() - 1), router.route(ADDRESSES, 1));
+        assertEquals(ADDRESSES.get(ADDRESSES.size() - 1), router.route(ADDRESSES, 999));
+    }
+
+    @Test
+    public void testLfuPrefersLessUsedAddress() {
+        LfuRouter router = new LfuRouter();
+        // 第一次路由：选择第一个（因为都是 0 次）
+        String first = router.route(ADDRESSES, 1);
+        assertNotNull(first);
+        assertTrue(ADDRESSES.contains(first));
+        // 多次路由后，应该使用过次数最少的被选中
+        for (int i = 0; i < 5; i++) {
+            String r = router.route(ADDRESSES, 1);
+            assertTrue(ADDRESSES.contains(r));
+        }
+    }
+
+    @Test
+    public void testLruPrefersLeastRecentlyUsed() {
+        LruRouter router = new LruRouter();
+        String first = router.route(ADDRESSES, 1);
+        assertNotNull(first);
+        assertTrue(ADDRESSES.contains(first));
+        // 再次路由，刷新时间戳后应该换到不同的地址
+        String second = router.route(ADDRESSES, 1);
+        assertNotNull(second);
+        assertTrue(ADDRESSES.contains(second));
+    }
+
+    @Test
+    public void testBusyoverFallsBackToFirstWithoutChecker() {
+        BusyoverRouter router = new BusyoverRouter();
+        // 没有设置 IdleChecker，应降级返回第一个
+        assertEquals(ADDRESSES.get(0), router.route(ADDRESSES, 1));
+    }
+
+    @Test
+    public void testBusyoverWithIdleCheckerPicksIdleNode() {
+        BusyoverRouter router = new BusyoverRouter();
+        BusyoverRouter.setIdleChecker(addr -> {
+            // 模拟：只有最后一个地址空闲
+            return "127.0.0.1:8083".equals(addr);
+        });
+        try {
+            String result = router.route(ADDRESSES, 1);
+            assertEquals("127.0.0.1:8083", result);
+        } finally {
+            BusyoverRouter.setIdleChecker(null);
+        }
+    }
+
+    @Test
+    public void testBusyoverAllBusyReturnsFirst() {
+        BusyoverRouter router = new BusyoverRouter();
+        BusyoverRouter.setIdleChecker(addr -> false); // 所有都忙碌
+        try {
+            assertEquals(ADDRESSES.get(0), router.route(ADDRESSES, 1));
+        } finally {
+            BusyoverRouter.setIdleChecker(null);
+        }
+    }
+
+    @Test
     public void testEmptyAddressList() {
         assertNull(new RandomRouter().route(new ArrayList<String>(), 1));
         assertNull(new RoundRobinRouter().route(null, 1));
         assertNull(new ConsistentHashRouter().route(new ArrayList<String>(), 1));
         assertNull(new FailoverRouter().route(new ArrayList<String>(), 1));
         assertNull(new ShardingBroadcastRouter().route(null, 1));
+        assertNull(new FirstRouter().route(null, 1));
+        assertNull(new LastRouter().route(null, 1));
+        assertNull(new LfuRouter().route(null, 1));
+        assertNull(new LruRouter().route(null, 1));
+        assertNull(new BusyoverRouter().route(null, 1));
     }
 
     @Test
@@ -92,5 +171,10 @@ public class RouterTest {
         assertEquals("127.0.0.1:9999", new ConsistentHashRouter().route(one, 1));
         assertEquals("127.0.0.1:9999", new FailoverRouter().route(one, 1));
         assertEquals("127.0.0.1:9999", new ShardingBroadcastRouter().route(one, 1));
+        assertEquals("127.0.0.1:9999", new FirstRouter().route(one, 1));
+        assertEquals("127.0.0.1:9999", new LastRouter().route(one, 1));
+        assertEquals("127.0.0.1:9999", new LfuRouter().route(one, 1));
+        assertEquals("127.0.0.1:9999", new LruRouter().route(one, 1));
+        assertEquals("127.0.0.1:9999", new BusyoverRouter().route(one, 1));
     }
 }
