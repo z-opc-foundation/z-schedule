@@ -191,6 +191,19 @@
             </distributionManagement>
             <build>
                 <plugins>
+                    <!-- 中央发布场景下，禁用 maven-deploy-plugin 的 default-deploy，
+                         改由 central-publishing-maven-plugin 接管。
+                         否则 maven-deploy-plugin 会尝试推到不存在的传统 repository，
+                         触发 Invalid request / Broken pipe -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-deploy-plugin</artifactId>
+                        <version>3.1.4</version>
+                        <configuration>
+                            <skip>true</skip>
+                        </configuration>
+                    </plugin>
+
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-source-plugin</artifactId>
