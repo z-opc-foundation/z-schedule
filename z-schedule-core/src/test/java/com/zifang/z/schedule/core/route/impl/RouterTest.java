@@ -1,6 +1,6 @@
-package io.github.yuku123.z.schedule.core.route.impl;
+package com.zifang.z.schedule.core.route.impl;
 
-import io.github.yuku123.z.schedule.core.route.ExecutorRouter;
+import com.zifang.z.schedule.core.route.ExecutorRouter;
 import org.junit.Test;
 
 import java.util.*;

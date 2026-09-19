@@ -1,4 +1,4 @@
-package io.github.yuku123.z.schedule.core.enums;
+package com.zifang.z.schedule.core.enums;
 
 import org.junit.Test;
 

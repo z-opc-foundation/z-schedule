@@ -1,4 +1,4 @@
-package io.github.yuku123.z.schedule.core.util;
+package com.zifang.z.schedule.core.util;
 
 import org.junit.Test;
 

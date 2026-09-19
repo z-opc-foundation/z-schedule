@@ -1,6 +1,6 @@
-package io.github.yuku123.z.schedule.core.model;
+package com.zifang.z.schedule.core.model;
 
-import io.github.yuku123.z.schedule.core.config.ScheduleProperties;
+import com.zifang.z.schedule.core.config.ScheduleProperties;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
