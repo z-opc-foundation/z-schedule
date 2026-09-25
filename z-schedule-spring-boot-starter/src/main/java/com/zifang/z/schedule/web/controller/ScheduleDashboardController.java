@@ -36,6 +36,9 @@ import java.util.stream.Collectors;
 @RequestMapping({"/dashboard", "/api/schedule"})
 public class ScheduleDashboardController {
 
+    /** 趋势图最多回看的天数,前端只需要近两周,更大的值只会被日历循环放大. */
+    private static final int MAX_TREND_DAYS = 366;
+
     @Autowired
     private JobInfoService jobInfoService;
 
@@ -103,22 +106,18 @@ public class ScheduleDashboardController {
         cal.set(Calendar.SECOND, 0);
         cal.set(Calendar.MILLISECOND, 0);
         Date todayStart = cal.getTime();
+        cal.add(Calendar.DAY_OF_YEAR, 1);
 
-        List<JobLog> todayLogs = jobLogService.query(0, 0, -1, 0).stream()
-                .filter(l -> l.getTriggerTime() != null && !l.getTriggerTime().before(todayStart))
-                .collect(Collectors.toList());
-        int todayTotal = todayLogs.size();
-        long todaySuccess = todayLogs.stream().filter(l -> l.getHandleCode() == ReturnT.SUCCESS_CODE).count();
-        int successRate = todayTotal == 0 ? 0 : (int) Math.round(todaySuccess * 100.0 / todayTotal);
-        int failRate = 100 - successRate;
+        JobLogService.Stats today = jobLogService.statsBetween(todayStart, cal.getTime());
+        int successRate = today.successRate();
 
         Map<String, Object> stats = new HashMap<>();
         stats.put("jobCount", total);
         stats.put("runningJobCount", running);
         stats.put("executorCount", registryService.onlineGroupCount());
-        stats.put("todayTriggerCount", todayTotal);
+        stats.put("todayTriggerCount", today.getTotal());
         stats.put("successRate", successRate);
-        stats.put("failRate", failRate);
+        stats.put("failRate", 100 - successRate);
         return ReturnT.success(stats);
     }
 
@@ -172,42 +171,37 @@ public class ScheduleDashboardController {
 
     /**
      * 成功率趋势(近 N 天).
+     * <p>
+     * 日期按数据库/服务的自然日聚合,一次查询拿到 N 天的计数;
+     * 早期实现把整张 job_log 拉进 JVM 再按天扫,趋势页会随日志量线性变慢。
      */
     @GetMapping("/successRateTrend")
     public ReturnT<List<Map<String, Object>>> successRateTrend(@RequestParam(required = false, defaultValue = "7") int days) {
+        int span = Math.max(1, Math.min(days, MAX_TREND_DAYS));
+        Calendar cursor = Calendar.getInstance();
+        cursor.set(Calendar.HOUR_OF_DAY, 0);
+        cursor.set(Calendar.MINUTE, 0);
+        cursor.set(Calendar.SECOND, 0);
+        cursor.set(Calendar.MILLISECOND, 0);
+        cursor.add(Calendar.DAY_OF_YEAR, -(span - 1));
+
+        Map<String, JobLogService.Stats> byDay = jobLogService.dailyStatsSince(cursor.getTime());
+        SimpleDateFormat dayKey = new SimpleDateFormat("yyyy-MM-dd");
+        SimpleDateFormat label = new SimpleDateFormat("MM-dd");
+
+        Calendar day = (Calendar) cursor.clone();
         List<Map<String, Object>> result = new ArrayList<>();
-        SimpleDateFormat sdf = new SimpleDateFormat("MM-dd");
-        List<JobLog> all = jobLogService.query(0, 0, -1, 0);
-        Calendar cal = Calendar.getInstance();
-        cal.set(Calendar.HOUR_OF_DAY, 23);
-        cal.set(Calendar.MINUTE, 59);
-        cal.set(Calendar.SECOND, 59);
-        cal.set(Calendar.MILLISECOND, 0);
-
-        for (int i = days - 1; i >= 0; i--) {
-            Calendar day = (Calendar) cal.clone();
-            day.add(Calendar.DAY_OF_YEAR, -i);
-            Date dayEnd = day.getTime();
-            Calendar dayStart = (Calendar) day.clone();
-            dayStart.set(Calendar.HOUR_OF_DAY, 0);
-            dayStart.set(Calendar.MINUTE, 0);
-            dayStart.set(Calendar.SECOND, 0);
-            Date dayStartDate = dayStart.getTime();
-
-            int total = 0, success = 0;
-            for (JobLog l : all) {
-                if (l.getTriggerTime() == null) continue;
-                Date t = l.getTriggerTime();
-                if (t.before(dayStartDate) || t.after(dayEnd)) continue;
-                total++;
-                if (l.getHandleCode() == ReturnT.SUCCESS_CODE) success++;
-            }
+        for (int i = 0; i < span; i++) {
+            JobLogService.Stats stats = byDay.get(dayKey.format(day.getTime()));
+            long total = stats == null ? 0L : stats.getTotal();
+            long success = stats == null ? 0L : stats.getSuccess();
             int rate = total == 0 ? 100 : (int) Math.round(success * 100.0 / total);
             Map<String, Object> m = new HashMap<>();
-            m.put("date", sdf.format(dayStartDate));
+            m.put("date", label.format(day.getTime()));
             m.put("successRate", rate);
             m.put("total", total);
             result.add(m);
+            day.add(Calendar.DAY_OF_YEAR, 1);
         }
         return ReturnT.success(result);
     }

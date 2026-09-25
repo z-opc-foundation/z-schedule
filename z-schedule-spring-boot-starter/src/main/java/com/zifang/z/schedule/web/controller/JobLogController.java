@@ -36,7 +36,7 @@ public class JobLogController {
      *
      * @param jobId    任务 ID,默认 0 不过滤
      * @param jobGroup 任务组,默认 0 不过滤
-     * @param status   状态过滤,0=全部 / 1=成功 / 2=失败
+     * @param status   状态过滤,0=全部 / 1=成功 / 2=失败(任何非成功码:500/502/404/503/400)
      * @param limit    返回上限
      * @return 日志列表(按 triggerTime 倒序)
      */
@@ -49,7 +49,7 @@ public class JobLogController {
         if (status == 1) {
             handleCode = ReturnT.SUCCESS_CODE;
         } else if (status == 2) {
-            handleCode = 500;
+            handleCode = JobLogService.ANY_FAILURE;
         }
         return ReturnT.success(jobLogService.query(jobGroup, jobId, handleCode, limit));
     }

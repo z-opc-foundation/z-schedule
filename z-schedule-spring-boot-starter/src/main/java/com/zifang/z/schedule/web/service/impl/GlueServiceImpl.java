@@ -34,7 +34,7 @@ public class GlueServiceImpl implements GlueService {
         if (jobId <= 0) {
             return ReturnT.fail("任务ID无效");
         }
-        if (glueSource == null || glueSource.isEmpty()) {
+        if (glueSource == null || glueSource.trim().isEmpty()) {
             return ReturnT.fail("GLUE源码不能为空");
         }
         if (glueType == null || glueType.isEmpty()) {
@@ -46,17 +46,17 @@ public class GlueServiceImpl implements GlueService {
             return ReturnT.fail("GLUE类型不合法: " + glueType);
         }
 
+        // 只发布不可变快照：列表一旦放进 map 就不再原地修改，
+        // 否则读侧 new ArrayList<>(versions) 会和在写入头插入的 add(0,..) 抢同一个数组。
         glueVersionMap.compute(jobId, (key, versions) -> {
-            if (versions == null) {
-                versions = new ArrayList<>();
+            List<String> updated = new ArrayList<String>(MAX_VERSION_SIZE + 1);
+            updated.add(glueSource);
+            if (versions != null) {
+                updated.addAll(versions);
             }
-            // 新版本插入到列表头部
-            versions.add(0, glueSource);
-            // 超过最大版本数时，移除最早的版本
-            if (versions.size() > MAX_VERSION_SIZE) {
-                versions = new ArrayList<>(versions.subList(0, MAX_VERSION_SIZE));
-            }
-            return versions;
+            return updated.size() > MAX_VERSION_SIZE
+                    ? new ArrayList<String>(updated.subList(0, MAX_VERSION_SIZE))
+                    : updated;
         });
 
         return ReturnT.success("保存成功");

@@ -15,6 +15,7 @@ import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 /**
  * Token 认证过滤器。
@@ -54,8 +55,8 @@ public class TokenAuthFilter implements Filter {
         HttpServletRequest httpRequest = (HttpServletRequest) request;
         HttpServletResponse httpResponse = (HttpServletResponse) response;
 
-        String uri = httpRequest.getRequestURI();
-        if (!matchExecutorUri(uri)) {
+        String uri = mappedPath(httpRequest);
+        if (!isExecutorPath(uri)) {
             chain.doFilter(request, response);
             return;
         }
@@ -75,7 +76,7 @@ public class TokenAuthFilter implements Filter {
         }
 
         // 校验 token
-        if (configuredToken.equals(requestToken)) {
+        if (tokenMatches(configuredToken, requestToken)) {
             chain.doFilter(request, response);
         } else {
             log.warn("accessToken 不合法, uri={}, remoteAddr={}", uri, httpRequest.getRemoteAddr());
@@ -89,10 +90,43 @@ public class TokenAuthFilter implements Filter {
     }
 
     /**
-     * 判断 URI 是否匹配 /executor/* 路径。
+     * 容器完成映射后的路径。
+     * <p>
+     * 不能用 {@link HttpServletRequest#getRequestURI()}:它带着 context-path 且不解码,
+     * admin 以 {@code context-path=/schedule} 部署时 URI 是 {@code /schedule/executor/callback},
+     * 按前缀判断会让整个执行器回调接口绕过鉴权;{@code %65} 之类的编码同样能绕过。
+     * servletPath + pathInfo 由容器解码并去掉 context-path 后给出,才是可比对的路径。
      */
-    private boolean matchExecutorUri(String uri) {
-        return uri.startsWith("/executor/");
+    static String mappedPath(HttpServletRequest request) {
+        String servletPath = request.getServletPath();
+        String pathInfo = request.getPathInfo();
+        String path = (servletPath == null ? "" : servletPath) + (pathInfo == null ? "" : pathInfo);
+        if (!path.isEmpty()) {
+            return path;
+        }
+        String uri = request.getRequestURI();
+        if (uri == null) {
+            return "";
+        }
+        String contextPath = request.getContextPath();
+        if (contextPath != null && !contextPath.isEmpty() && uri.startsWith(contextPath)) {
+            uri = uri.substring(contextPath.length());
+        }
+        return uri;
+    }
+
+    /** 判断 URI 是否匹配 /executor/* 路径。 */
+    private static boolean isExecutorPath(String path) {
+        return path.startsWith("/executor/") || path.equals("/executor");
+    }
+
+    /** 定长时间比较,避免按字节探测 token。 */
+    private static boolean tokenMatches(String configured, String provided) {
+        if (provided == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(configured.getBytes(StandardCharsets.UTF_8),
+                provided.getBytes(StandardCharsets.UTF_8));
     }
 
     /**

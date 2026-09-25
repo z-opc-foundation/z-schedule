@@ -1,5 +1,6 @@
 package com.zifang.z.schedule.web.service.impl;
 
+import com.zifang.z.schedule.core.config.ScheduleProperties;
 import com.zifang.z.schedule.core.enums.TriggerCodeEnum;
 import com.zifang.z.schedule.core.enums.TriggerTypeEnum;
 import com.zifang.z.schedule.core.model.JobInfo;
@@ -7,6 +8,7 @@ import com.zifang.z.schedule.core.model.JobLog;
 import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.web.cluster.JobScheduleEngine;
 import com.zifang.z.schedule.web.cluster.LeaderElector;
+import com.zifang.z.schedule.web.service.AlarmService;
 import com.zifang.z.schedule.web.service.JobInfoService;
 import com.zifang.z.schedule.web.service.JobLogService;
 import com.zifang.z.schedule.web.service.JobTriggerService;
@@ -19,31 +21,22 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
-import org.springframework.context.annotation.Lazy;
 import javax.annotation.Resource;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Date;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Future;
 
 /**
  * 定时任务触发器 — 集群感知 + 独立调度引擎
  * <p>
- * <b>架构演进</b>：
- * <pre>
- * v1 (已废弃)：Spring TaskScheduler + ConcurrentHashMap → 单机内存，重启丢失
- * v2 (旧版)：Spring TaskScheduler + DB 持久化 → 多节点重复执行风险
- * v3 (当前)：独立 ScheduleEngine + 时间轮 + Leader 选举 → 集群安全，DB 持久化
- * </pre>
- * <p>
- * <b>关键设计</b>：
+ * <b>架构</b>：
  * <ul>
- *   <li>独立 {@link JobScheduleEngine}：含独立 ScheduleThreadPool (1线程 tick) + ExecuteThreadPool (4线程异步)</li>
- *   <li>仅 Leader 节点执行调度（通过 {@link LeaderElector} 判断）</li>
- *   <li>DB 持久化：任务在 z_schedule_job_info 表，重启后自动恢复</li>
- *   <li>手动触发：允许在任意节点触发（运维场景）</li>
+ *   <li>时间轮与线程池在 {@link JobScheduleEngine}；本类负责一次执行的生命周期：
+ *       建日志 → 反射调 handler → 重试 → 回写结果/告警 → FIX_DELAY 重挂</li>
+ *   <li>仅 Leader 节点排期（{@link LeaderElector}）；手动触发允许在任意节点执行</li>
+ *   <li>启停单个任务走 {@code scheduleJob}/{@code unscheduleJob}，不再全表 reload</li>
  * </ul>
  */
 @Service
@@ -54,13 +47,18 @@ public class JobTriggerServiceImpl implements JobTriggerService {
     @Resource
     private ApplicationContext applicationContext;
     @Resource
-    @Lazy
+    @org.springframework.context.annotation.Lazy
     private JobLogService jobLogService;
     @Resource
-    @Lazy
+    @org.springframework.context.annotation.Lazy
     private JobInfoService jobInfoService;
     @Resource
+    @org.springframework.context.annotation.Lazy
+    private AlarmService alarmService;
+    @Resource
     private LeaderElector leaderElector;
+    @Resource
+    private ScheduleProperties scheduleProperties;
 
     /**
      * 调度引擎（独立线程池 + 时间轮）
@@ -68,14 +66,9 @@ public class JobTriggerServiceImpl implements JobTriggerService {
     private JobScheduleEngine engine;
 
     /**
-     * 正在运行的任务：key=logId, value=Future
+     * 正在运行的执行：logId → 执行线程。kill 通过中断该线程生效，执行结束后必须移除。
      */
-    private final Map<Long, Future<?>> runningTasks = new ConcurrentHashMap<>();
-
-    /**
-     * 任务执行耗时记录（ms）：用于快/慢线程池分级
-     */
-    private final Map<Integer, Long> jobExecutionTimes = new ConcurrentHashMap<>();
+    private final Map<Long, Thread> runningExecutions = new ConcurrentHashMap<Long, Thread>();
 
     @PostConstruct
     public void init() {
@@ -83,9 +76,16 @@ public class JobTriggerServiceImpl implements JobTriggerService {
         engine.setJobInfoService(jobInfoService);
         engine.setJobTriggerService(this);
         engine.setLeaderElector(leaderElector);
-        // 启动调度引擎
+        engine.setProperties(scheduleProperties);
         engine.start();
         logger.info("[z-schedule] JobTriggerService initialized, engine started");
+    }
+
+    /**
+     * 引擎仅在测试/嵌入式场景下外部提供。
+     */
+    public void setEngine(JobScheduleEngine engine) {
+        this.engine = engine;
     }
 
     @PreDestroy
@@ -93,41 +93,42 @@ public class JobTriggerServiceImpl implements JobTriggerService {
         if (engine != null) {
             engine.stop();
         }
+        runningExecutions.clear();
     }
 
     /**
-     * Leader 切换时重新加载 DB 任务到时间轮。
-     * <p>
-     * 由 LeaderElector 的 elect() 间接触发，或由 JobInfoServiceImpl.start() 直接触发。
+     * 周期性 reconcile：兜住绕过本节点直接改 DB 的变更（其它节点 start/stop、SQL 手工改）。
      */
     @Scheduled(fixedDelay = 15_000L)
     public void reloadRunningJobs() {
         if (!leaderElector.isLeader()) {
-            return; // 非 Leader 不调度
+            return; // 非 Leader 不排期
         }
         engine.reloadJobs();
     }
 
     @Override
     public void registerJob(JobInfo jobInfo) {
-        if (jobInfo == null || jobInfo.getJobCron() == null) {
+        if (jobInfo == null) {
             logger.warn("Invalid job info, skip registration");
             return;
         }
         if (!leaderElector.isLeader()) {
-            logger.info("[Follower] skip registerJob for jobId={}", jobInfo.getId());
+            logger.info("[Follower] skip registerJob for jobId={}, leader 将在下次 reconcile 装载", jobInfo.getId());
             return;
         }
-        // 委托给引擎：引擎会重新加载 DB 任务
-        engine.reloadJobs();
-        logger.info("[Leader] registerJob delegated to engine, jobId={}", jobInfo.getId());
+        if (engine.scheduleJob(jobInfo)) {
+            logger.info("[Leader] jobId={} 已挂入时间轮, nextFire={}", jobInfo.getId(),
+                    engine.nextFireTime(jobInfo.getId()));
+        } else {
+            logger.info("[Leader] jobId={} 未进入调度（cron 非法 / 已无未来触发时间 / 已停止）", jobInfo.getId());
+        }
     }
 
     @Override
     public void cancelJob(int jobId) {
-        // 委托给引擎：引擎会重新加载 DB 任务
         if (leaderElector.isLeader() && engine.isRunning()) {
-            engine.reloadJobs();
+            engine.unscheduleJob(jobId);
         }
         logger.info("cancelJob, jobId={}", jobId);
     }
@@ -142,105 +143,140 @@ public class JobTriggerServiceImpl implements JobTriggerService {
 
     @Override
     public void killJob(long logId) {
-        Future<?> future = runningTasks.remove(logId);
-        if (future != null) {
-            future.cancel(true);
-            logger.info("Job killed, logId={}", logId);
-            // 更新日志
-            JobLog log = jobLogService.getById(logId);
-            if (log != null) {
-                log.setHandleCode(TriggerCodeEnum.TIMEOUT.getCode());
-                log.setHandleMsg("任务被终止");
-                log.setHandleTime(new Date());
-                jobLogService.update(log);
-            }
-        } else {
+        Thread worker = runningExecutions.remove(logId);
+        if (worker == null) {
             logger.warn("No running task found for logId={}", logId);
+            return;
         }
+        worker.interrupt();
+        logger.info("Job killed, logId={}, thread={}", logId, worker.getName());
+        JobLog log = jobLogService.getById(logId);
+        if (log != null) {
+            log.setHandleCode(TriggerCodeEnum.TIMEOUT.getCode());
+            log.setHandleMsg("任务被终止");
+            log.setHandleTime(new Date());
+            jobLogService.update(log);
+        }
+    }
+
+    /** 正在执行中的日志数（监控用）。 */
+    public int runningExecutionCount() {
+        return runningExecutions.size();
     }
 
     @Override
     public void triggerJob(JobInfo jobInfo) {
-        // 手动触发允许在任一节点执行
-        logger.info("Job triggered manually, jobId={}", jobInfo.getId());
         executeJob(jobInfo);
     }
 
     /**
-     * 执行任务逻辑（完整 JobLog 记录 + 失败重试 + 父任务触发 + FIX_DELAY 回调）。
+     * 执行一个任务：建日志 → 调 handler → 失败重试（指数退避）→ 回写结果与告警。
      */
     private void executeJob(JobInfo jobInfo) {
         int retryCount = jobInfo.getExecutorFailRetryCount();
-        if (retryCount < 0) retryCount = 0;
-        int maxAttempts = retryCount + 1; // 至少执行 1 次
+        if (retryCount < 0) {
+            retryCount = 0;
+        }
+        int maxAttempts = retryCount + 1;
+        long logId = 0L;
 
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            boolean isRetry = attempt > 1;
-            String logLabel = isRetry ? "重试第" + (attempt - 1) + "次" : "首次执行";
+        try {
+            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                boolean isRetry = attempt > 1;
+                String logLabel = isRetry ? "重试第" + (attempt - 1) + "次" : "首次执行";
 
-            JobLog log = new JobLog();
-            log.setJobId(jobInfo.getId());
-            log.setJobGroup(jobInfo.getJobGroup());
-            log.setExecutorHandler(jobInfo.getExecutorHandler());
-            log.setExecutorParam(jobInfo.getExecutorParam());
-            log.setTriggerCode(TriggerCodeEnum.SUCCESS.getCode());
-            log.setTriggerMsg(logLabel);
-            log.setTriggerTime(new Date());
-            log.setAlarmStatus(0);
-            log.setHandleCode(0);
-            log.setExecutorFailRetryCount(retryCount);
-            long logId = jobLogService.save(log);
-
-            long start = System.currentTimeMillis();
-            try {
-                String handler = jobInfo.getExecutorHandler();
-                if (handler == null || handler.trim().isEmpty()) {
-                    log.setHandleCode(TriggerCodeEnum.FAIL.getCode());
-                    log.setHandleMsg("未指定 executorHandler");
-                    log.setAlarmStatus(1);
-                    jobLogService.update(log);
-                    break; // 无 handler 不重试
-                }
-                executeHandler(handler, jobInfo.getExecutorParam());
-                long costMs = System.currentTimeMillis() - start;
-                log.setHandleCode(ReturnT.SUCCESS_CODE);
-                log.setHandleMsg("执行成功,耗时 " + costMs + "ms" + (isRetry ? " (" + logLabel + ")" : ""));
-                log.setHandleTime(new Date());
-                jobLogService.update(log);
-
-                // 记录执行耗时
-                jobExecutionTimes.put(jobInfo.getId(), costMs);
-
-                // 成功后触发父任务的子任务
-                triggerChildJobs(jobInfo);
-
-                // FIX_DELAY 模式：执行完成后挂入时间轮
-                if (engine != null) {
-                    engine.completeJob(jobInfo.getId());
-                }
-                return; // 成功，退出重试循环
-
-            } catch (Throwable e) {
-                long costMs = System.currentTimeMillis() - start;
-                log.setHandleCode(TriggerCodeEnum.FAIL.getCode());
-                log.setHandleMsg("执行失败" + (isRetry ? " (" + logLabel + ")" : "") + ": "
-                        + (e.getMessage() == null ? e.getClass().getName() : e.getMessage()));
-                log.setHandleTime(new Date());
+                JobLog log = new JobLog();
+                log.setJobId(jobInfo.getId());
+                log.setJobGroup(jobInfo.getJobGroup());
+                log.setExecutorHandler(jobInfo.getExecutorHandler());
+                log.setExecutorParam(jobInfo.getExecutorParam());
+                log.setTriggerCode(TriggerCodeEnum.SUCCESS.getCode());
+                log.setTriggerMsg(logLabel);
+                log.setTriggerTime(new Date());
                 log.setAlarmStatus(0);
-                jobLogService.update(log);
-                logger.error("Job execution failed, jobId={}, attempt={}/{}", jobInfo.getId(), attempt, maxAttempts, e);
+                log.setHandleCode(0);
+                log.setExecutorFailRetryCount(retryCount);
+                logId = jobLogService.save(log);
 
-                if (attempt < maxAttempts) {
-                    // 重试间隔：指数退避，最小 1 秒
-                    long delay = Math.min(1000L * (1L << (attempt - 1)), 30_000L);
-                    try {
-                        Thread.sleep(delay);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
+                registerRunning(logId);
+                long start = System.currentTimeMillis();
+                try {
+                    String handler = jobInfo.getExecutorHandler();
+                    if (handler == null || handler.trim().isEmpty()) {
+                        finishFailure(jobInfo, log, "未指定 executorHandler", TriggerCodeEnum.INVALID_PARAM.getCode());
+                        return; // 配置错误不重试
                     }
+                    executeHandler(handler, jobInfo.getExecutorParam());
+                    long costMs = System.currentTimeMillis() - start;
+                    log.setHandleCode(ReturnT.SUCCESS_CODE);
+                    log.setHandleMsg("执行成功,耗时 " + costMs + "ms" + (isRetry ? " (" + logLabel + ")" : ""));
+                    log.setHandleTime(new Date());
+                    jobLogService.update(log);
+
+                    triggerChildJobs(jobInfo);
+                    return;
+
+                } catch (InterruptedException e) {
+                    finishFailure(jobInfo, log, "任务被中断/超时: " + describe(e),
+                            TriggerCodeEnum.TIMEOUT.getCode());
+                    Thread.currentThread().interrupt();
+                    return;
+
+                } catch (Throwable e) {
+                    logger.error("Job execution failed, jobId={}, attempt={}/{}",
+                            jobInfo.getId(), attempt, maxAttempts, e);
+                    TriggerCodeEnum code = e instanceof ExecutorNotFoundException
+                            ? TriggerCodeEnum.EXECUTOR_NOT_FOUND : TriggerCodeEnum.FAIL;
+                    finishFailure(jobInfo, log,
+                            "执行失败" + (isRetry ? " (" + logLabel + ")" : "") + ": " + describe(e),
+                            code.getCode());
+                    if (attempt < maxAttempts) {
+                        long delay = Math.min(1000L * (1L << (attempt - 1)), 30_000L);
+                        Thread.sleep(delay);
+                    }
+                } finally {
+                    unregisterRunning(logId);
                 }
             }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        } finally {
+            // FIX_DELAY 无论成功失败都要重挂，否则一次异常会让该任务永久停止调度
+            if (engine != null && TriggerTypeEnum.FIX_DELAY.getCode().equals(jobInfo.getTriggerType())) {
+                engine.completeJob(jobInfo.getId());
+            }
+        }
+    }
+
+    private void finishFailure(JobInfo jobInfo, JobLog log, String message, int code) {
+        log.setHandleCode(code);
+        log.setHandleMsg(message);
+        log.setHandleTime(new Date());
+        log.setAlarmStatus(1);
+        jobLogService.update(log);
+        if (alarmService != null) {
+            try {
+                alarmService.sendAlarm(jobInfo, log);
+                jobLogService.update(log); // 持久化 sendAlarm 改写后的 alarmStatus
+            } catch (Exception e) {
+                logger.warn("[z-schedule] alarm failed, jobId={}: {}", jobInfo.getId(), e.toString());
+            }
+        }
+    }
+
+    private static String describe(Throwable e) {
+        return e.getMessage() == null ? e.getClass().getName() : e.getMessage();
+    }
+
+    private void registerRunning(long logId) {
+        if (logId > 0) {
+            runningExecutions.put(logId, Thread.currentThread());
+        }
+    }
+
+    private void unregisterRunning(long logId) {
+        if (logId > 0) {
+            runningExecutions.remove(logId);
         }
     }
 
@@ -267,33 +303,38 @@ public class JobTriggerServiceImpl implements JobTriggerService {
         }
     }
 
-    private void executeHandler(String handler, String param) {
+    private void executeHandler(String handler, String param) throws Exception {
         Object bean;
         try {
             bean = applicationContext.getBean(handler);
         } catch (NoSuchBeanDefinitionException e) {
-            logger.warn("Handler bean not registered: {}", handler);
-            return;
+            // 旧实现只打一条 warn 然后按"执行成功"回写日志，任务其实什么都没做
+            throw new ExecutorNotFoundException("执行器 bean 未注册: " + handler);
         }
         if (bean == null) {
-            return;
+            throw new ExecutorNotFoundException("执行器 bean 为空: " + handler);
         }
         try {
             Method executeMethod = bean.getClass().getMethod("execute", String.class);
             executeMethod.invoke(bean, param);
         } catch (InvocationTargetException e) {
             Throwable cause = e.getCause() == null ? e : e.getCause();
-            if (cause instanceof RuntimeException) throw (RuntimeException) cause;
+            if (cause instanceof InterruptedException) {
+                throw (InterruptedException) cause;
+            }
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;
+            }
             throw new RuntimeException(cause);
-        } catch (Exception e) {
+        } catch (ReflectiveOperationException e) {
             throw new RuntimeException(e);
         }
     }
 
-    /**
-     * 获取任务平均执行耗时（ms），供引擎判断快/慢线程池。
-     */
-    public Long getJobAvgCost(int jobId) {
-        return jobExecutionTimes.get(jobId);
+    /** handler bean 缺失，与"业务执行异常"区分开，便于日志里落到 EXECUTOR_NOT_FOUND。 */
+    static class ExecutorNotFoundException extends RuntimeException {
+        ExecutorNotFoundException(String message) {
+            super(message);
+        }
     }
 }

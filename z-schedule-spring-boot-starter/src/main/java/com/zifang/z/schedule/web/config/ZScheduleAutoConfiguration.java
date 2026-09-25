@@ -14,6 +14,7 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 import javax.sql.DataSource;
 
@@ -37,9 +38,16 @@ import javax.sql.DataSource;
  *
  * <p><b>Dev profile 支持</b>：当 {@code z.base.db.schedule.disabled=true} 时，
  * {@link #dataSourceSchedule} Bean 不创建，由 admin 端提供 H2 等替代 DataSource（同名 @Bean）。
+ *
+ * <p><b>为什么自带 {@code @EnableScheduling}</b>：Leader 续约（{@code LeaderElector.elect}）与
+ * 周期 reconcile（{@code JobTriggerServiceImpl.reloadRunningJobs}）都挂在 {@code @Scheduled} 上，
+ * 宿主没开调度时引擎会静默地永远不当选 Leader、也就永远不调度。注意 Spring 默认调度线程只有 1 条，
+ * 续约与 reconcile 会互相排队（Leader 续约窗口 30s），嵌入方建议设
+ * {@code spring.task.scheduling.pool.size >= 2}。
  */
 @Configuration
 @ComponentScan(basePackages = "com.zifang.z.schedule.web")
+@EnableScheduling
 @MapperScan(
         basePackages = "com.zifang.z.schedule.web.domain.mapper",
         sqlSessionFactoryRef = "sqlSessionFactorySchedule"

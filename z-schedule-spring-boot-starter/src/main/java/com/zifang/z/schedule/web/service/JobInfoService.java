@@ -88,4 +88,20 @@ public interface JobInfoService {
      * @return 下次执行时间列表
      */
     ReturnT<List<String>> nextTriggerTime(String cron);
+
+    /**
+     * 列出所有 trigger_status=1 的任务（调度引擎周期对齐用，走 idx_trigger_status 索引）
+     *
+     * @return 运行中的任务列表
+     */
+    List<JobInfo> listRunning();
+
+    /**
+     * 回写调度时间戳（由引擎的 flush 线程批量调用，不在 tick 线程上执行）
+     *
+     * @param jobId    任务ID
+     * @param lastTime 本次触发时间（epoch ms）
+     * @param nextTime 下次触发时间（epoch ms），0 表示待执行完成回调再排期
+     */
+    void updateTriggerTimes(int jobId, long lastTime, long nextTime);
 }

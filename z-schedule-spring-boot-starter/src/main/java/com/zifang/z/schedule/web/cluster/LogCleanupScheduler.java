@@ -25,12 +25,18 @@ public class LogCleanupScheduler {
 
     @Resource
     private ScheduleProperties scheduleProperties;
+    @Resource
+    private LeaderElector leaderElector;
 
     /**
-     * 每天凌晨 2 点执行日志清理。
+     * 每天凌晨 2 点执行日志清理。只在 Leader 上跑：清理是全局幂等动作，
+     * 每个节点各删一遍只会互相抢同一批行的锁。
      */
     @Scheduled(cron = "0 0 2 * * ?")
     public void cleanup() {
+        if (!leaderElector.isLeader()) {
+            return;
+        }
         int retentionDays = scheduleProperties.getLogRetentionDays();
         if (retentionDays < 7) {
             retentionDays = 7;
