@@ -279,9 +279,10 @@ esac
 
 TN2=$(login "$PORT" p22_normal)
 ID_N=$(uid p22_normal)
-case "$(req POST "$BB/user/update?accessToken=$TB_A" "{\"id\":$ID_N,\"role\":\"ADMIN\"}")" in
+UPD=$(req POST "$BB/user/update?accessToken=$TB_A" "{\"id\":$ID_N,\"role\":\"ADMIN\"}")
+case "$UPD" in
   *'"code":200'*) ok "B.10 管理员会话改角色成功（p22_normal → ADMIN）；这条走的是铸权闸的 ADMIN 会话分支" ;;
-  *) bad "B.10 改角色失败：$(msg_of "$(req POST "$BB/user/update?accessToken=$TB_A" "{\"id\":$ID_N,\"role\":\"ADMIN\"}")")" ;;
+  *) bad "B.10 改角色失败：$(printf '%s' "$UPD" | cut -f1) | $(msg_of "$UPD")" ;;
 esac
 case "$(req GET "$BB/jobinfo/list?start=0&length=1&accessToken=$TN2")" in
   403*) ok "B.11 改角色 ⇒ 该用户**已签发的**会话全部作废（不等 30 min 过期；降权不落地的洞就堵在这里）" ;;
@@ -292,9 +293,10 @@ case "$(req GET "$BB/jobinfo/list?start=0&length=1&accessToken=$TB_A")" in
   *) bad "B.12 改一个用户把管理员会话也踢了" ;;
 esac
 TN3=$(login "$PORT" p22_normal)
-case "$(add_user "$PORT" p22_dup ADMIN "$TN3")" in
+DUP=$(add_user "$PORT" p22_dup ADMIN "$TN3")
+case "$DUP" in
   *'"code":200'*) ok "B.13 重新登录得到的是**新角色**的会话（作废 ≠ 把账号锁死），而且它现在铸得出 ADMIN；p22_dup 已建，留给 C 段删" ;;
-  *) bad "B.13 提权后重新登录铸不出 ADMIN：$(printf '%s' "$TN3" | cut -c1-12) | $(msg_of "$(add_user "$PORT" p22_dup ADMIN "$TN3")")" ;;
+  *) bad "B.13 提权后重新登录铸不出 ADMIN：http=$(printf '%s' "$DUP" | cut -f1) | $(msg_of "$DUP")" ;;
 esac
 ID_G=$(uid p22_gate); TA2=$(login "$PORT" p22_gate)
 say "  B.14 p22_gate id=$ID_G 令牌长度=${#TA2}（A.14 里匿名建的那个 NORMAL 账号，用来验删除）"
