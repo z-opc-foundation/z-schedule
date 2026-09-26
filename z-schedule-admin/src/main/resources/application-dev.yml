@@ -1,5 +1,9 @@
-# dev profile: H2 内存数据库, 本地零依赖启动
-# 用法: --spring.profiles.active=dev
+# dev profile: H2 内存数据库
+# 用法: mvn -B spring-boot:run -Dspring-boot.run.profiles=dev \
+#         -Dspring-boot.run.arguments=--z.base.db.schedule.disabled=true
+# 两支同名 @Bean（starter 的 dataSourceSchedule / admin 的 DevDataSourceConfig）要靠
+# disabled=true 让 starter 那两支不注册，否则 Boot 默认禁止同名覆盖 ⇒ 起不来。
+# 且这份 H2 是空库（无 schema.sql）：外壳起得来，数据接口 500。
 spring:
   datasource:
     driver-class-name: org.h2.Driver

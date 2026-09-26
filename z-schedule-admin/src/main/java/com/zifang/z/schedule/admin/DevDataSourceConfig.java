@@ -2,11 +2,7 @@ package com.zifang.z.schedule.admin;
 
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import org.apache.ibatis.session.SqlSessionFactory;
-import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
-import org.springframework.beans.factory.support.BeanDefinitionRegistry;
-import org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -24,15 +20,20 @@ import javax.sql.DataSource;
  *
  * <p>dev profile 下用本配置替换 starter 的 bean：
  * <ol>
- *   <li>{@link #removeStarterDataSourceBean()}：BeanDefinitionRegistryPostProcessor 在 Bean
- *       实例化前移除 starter 注册的 dataSourceSchedule Bean 定义</li>
  *   <li>{@link #dataSourceSchedule()}：同名 @Bean 提供 H2 DriverManagerDataSource</li>
  *   <li>{@link #sqlSessionFactorySchedule(DataSource)}：同名 @Bean 提供 MyBatis-Plus
  *       SqlSessionFactory，否则 starter 注册的 mapper Bean 找不到依赖</li>
  * </ol>
  *
  * <p>启动方式：{@code java -jar xxx.jar --spring.profiles.active=dev
- * --z.base.db.schedule.disabled=true}（禁用 starter 的 DataSource Bean 创建）。
+ * --z.base.db.schedule.disabled=true}。那个 {@code disabled=true} <b>不是可选的优化，是前置条件</b>：
+ * starter 的两支同名 @Bean 只带 {@code @ConditionalOnProperty(z.base.db.schedule.disabled)}、
+ * 没有 {@code @ConditionalOnMissingBean}，而 Boot 2.1+ 默认禁止同名 bean 覆盖 ⇒ 不给这一支
+ * 就是 {@code APPLICATION FAILED TO START}（2026-09-27 四条命令逐条实测，读数在
+ * {@code _doc/003_script/e2e/README.md} §17.2）。本类的旧 javadoc 还列过一个
+ * {@code removeStarterDataSourceBean()}（说它用 BeanDefinitionRegistryPostProcessor 提前摘掉
+ * starter 的定义）—— 那个方法<b>从来没被写进过这个文件</b>（{@code git log -S} 追到建文件那一版
+ * c8e3a8f 也只有 javadoc 里这一处），连带四个 import 一起是空口机制，已删。
  *
  * <p><b>作用范围</b>：仅 {@code dev} profile 生效。生产 / k8s 环境仍走 starter 的 MySQL 链路。
  *

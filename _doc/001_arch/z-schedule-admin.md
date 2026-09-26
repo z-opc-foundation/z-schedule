@@ -30,23 +30,62 @@
 
 ## 本地启动
 
-### 方式 A：`mvn spring-boot:run`（最快）
+> ⚠ 本节 2026-09-27 之前写的是"方式 A 最快，默认端口 18086，context-path /meta"。
+> 那两句**都是假的**，四条命令逐条实测过（读数是 `bash p24.sh` 静态臂之外的手工跑，
+> 复跑命令与原文输出见 `_doc/003_script/e2e/README.md` §17.2）：
+>
+> | 命令 | 实测结果 |
+> |---|---|
+> | `mvn spring-boot:run --spring.profiles.active=dev --server.port=18086 …` | `Unable to parse command line options: Unrecognized option: --spring.profiles.active=dev`，rc=1，**Maven 自己就拒了**，应用从未启动（18086/8080 都没人监听） |
+> | `mvn spring-boot:run`（原"方式 A"，什么都不加） | 走 `default` profile ⇒ 连 `jdbc:mysql://localhost:3306`。90 s 内日志 6820 行、`Connection refused` 命中 800 次、`Tomcat started` **0 次**，8080 与 18086 `curl` 均 rc=7（连不上） |
+> | `mvn spring-boot:run -Dspring-boot.run.profiles=dev` | `APPLICATION FAILED TO START`：`The bean 'dataSourceSchedule', defined in class path resource [.../ZScheduleAutoConfiguration.class], could not be registered. A bean with that name has already been defined`（见下面"dev profile 的两条前置"） |
+> | `… -Dspring-boot.run.arguments=--z.base.db.schedule.disabled=true` | 起来了：`Tomcat started on port(s): 8080 (http) with context path ''` ⇒ **端口是 8080、context-path 是空**，`/meta/**` 实测 404 |
+>
+> 18086 与 `/meta` 这两个值**在本仓的任何 yml/properties 里都不存在**（`grep -rn 'server.port\|context-path' src/main/resources` 只命中注释）。
+> 它们只来自镜像的 `ENV SERVER_PORT=18086` / `SERVER_SERVLET_CONTEXT_PATH=/meta`（`deploy/Dockerfile.backend`）
+> 与 compose 的 env ⇒ **照文档在本机 `mvn` 起的人拿不到那个地址**，而 `deploy/docker-compose.yml` 的
+> healthcheck 却写死了 `http://127.0.0.1:18086/meta/...`（那条在容器里成立，因为 env 给过）。
+
+### dev profile 的两条前置（缺一条就起不来）
+
+1. **`z.base.db.schedule.disabled=true` 必须显式给。** `DevDataSourceConfig`（`@Profile("dev")`）
+   与 starter 的 `ZScheduleAutoConfiguration` 注册**同名** bean（`dataSourceSchedule`
+   / `sqlSessionFactorySchedule`），而 starter 那两支只带 `@ConditionalOnProperty(z.base.db.schedule.disabled)`、
+   **没有** `@ConditionalOnMissingBean` ⇒ Boot 2.1 起默认禁止同名覆盖 ⇒ 当场崩。
+   给齐 `disabled=true` 才是 starter 注释里说的"由 admin 端提供同名 @Bean"那条路。
+2. **H2 里没有表。** dev profile 的 URL 是 `jdbc:h2:mem:zschedule_dev`，而本模块没有任何
+   `schema.sql` / 建表初始化 ⇒ 外壳起得来（`/` 200、`/actuator/health` 200）但**每个数据接口 500**：
+   实测 `/jobinfo/list`、`/dashboard/stats` 均 500，日志里 65 条 table-not-found。
+   也就是说"dev = 零依赖能玩"目前**不成立**，它只是"进程起得来"。
+   要不要把这条路补成真正可玩（自带建表，或明确必须先有库）是 #32 那一格，等拍板。
+
+### 方式 A：`mvn spring-boot:run`（起得来，但只能看外壳）
 
 ```bash
 cd z-schedule/z-schedule-admin
-mvn spring-boot:run
-# 默认端口 18086，context-path /meta
-# 访问 http://localhost:18086/meta
+mvn -B spring-boot:run \
+  -Dspring-boot.run.profiles=dev \
+  -Dspring-boot.run.arguments=--z.base.db.schedule.disabled=true
+# 实测绑定：http://localhost:8080  （context-path 为空，没有 /meta）
+# / 与 /actuator/health ⇒ 200；/jobinfo/list ⇒ 500（上面第 2 条前置）
 ```
+
+给 Maven 传应用参数只能走 `-Dspring-boot.run.*`；把 `--server.port=…` 直接跟在 `mvn` 后面
+是 Maven 的命令行而不是应用参数，它会拒（见上面的表）。端口要换就写进 arguments 里：
+`-Dspring-boot.run.arguments=--z.base.db.schedule.disabled=true,--server.port=18999`。
 
 ### 方式 B：编出 exec jar 后启动
 
 ```bash
 cd z-schedule
-mvn -pl z-schedule-admin -am package -DskipTests
+mvn -B -pl z-schedule-admin -am package -DskipTests
 
 # jar 名跟着 <revision> 走，别抄版本号：这里让 shell 去匹配，命中 0 个或多于 1 个都会响
-java -jar "$(ls z-schedule-admin/target/*-exec.jar)"
+java -jar "$(ls z-schedule-admin/target/*-exec.jar)" \
+  --spring.profiles.active=dev \
+  --z.base.db.schedule.disabled=true
+# 这条的缺口与方式 A 相同（H2 无表）。要真跑调度链路，得先有一个建好 6 张表的库，
+# 键给 z.base.db.schedule.*（不是 spring.datasource.*，那是另一个池），见 deploy/README.md「数据库」一节
 ```
 
 ### 方式 C：docker（与 deploy/ 配合）

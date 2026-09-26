@@ -1,12 +1,20 @@
 # z-schedule-admin 演示应用配置
-# 本地启动：
-#   mvn spring-boot:run \
-#     --spring.profiles.active=dev \
-#     --server.port=18086 \
-#     --server.servlet.context-path=/meta
+# 本地启动（两条都实测过，原文读数见 _doc/003_script/e2e/README.md §17.2）：
+#   mvn -B spring-boot:run \
+#     -Dspring-boot.run.profiles=dev \
+#     -Dspring-boot.run.arguments=--z.base.db.schedule.disabled=true
+#   ⇒ 绑定 8080、context-path 为空。18086 与 /meta 只来自 deploy/Dockerfile.backend 的 ENV
+#     与 compose 的 env，本文件从没设过 server.*，所以旧注释里那两行 `--server.port=18086`
+#     `--server.servlet.context-path=/meta` 直接跟在 mvn 后面时 **Maven 会拒**
+#     （`Unrecognized option`，rc=1，应用一次都没起来）：给 Maven 传应用参数只能走 -Dspring-boot.run.*。
 #
 # 默认 profile (无 active) 走 MySQL, 生产用 local profile 读环境变量.
-# dev profile 走 H2 内存数据库, 本地零依赖启动.
+# dev profile 走 H2 内存数据库，但它【不是】"零依赖可玩"：
+#   1) 必须给 z.base.db.schedule.disabled=true —— 否则 starter 的 dataSourceSchedule 与
+#      DevDataSourceConfig 的同名 @Bean 撞车（starter 那两支没有 @ConditionalOnMissingBean），
+#      Boot 2.1+ 默认禁止同名覆盖 ⇒ APPLICATION FAILED TO START；
+#   2) H2 里没有任何表（本模块无 schema.sql）⇒ 外壳 / 与 /actuator/health 是 200，
+#      而 /jobinfo/list、/dashboard/stats 实测 500（table not found）。
 #
 # ⚠️ 严禁明文凭证：所有敏感字段读环境变量，默认占位符保证启动失败而非泄露
 # 本地真实值放 src/main/resources/application-local.yml（gitignored）

@@ -518,6 +518,248 @@ else
   bad "A13 形状不对：[$A13_MAKE] [$A13_TREE] [$A13_ENV] 猎物[$A13P]（期望 三个分母都 >0 且三处都 '-' 且猎物三处各命中 1）"
 fi
 
+# ---------- A14 / A15：根 README 的广告面，与"文档教的命令写法本身跑不跑得起来" ----------
+# A14（#40 那一格顺手撞出来的）：根 README 是别人 clone 后看到的第一屏，它当时写的是
+#   `# z-wf`（模板遗留，而这个仓的根 pom artifactId 是 z-schedule）、并且只索引了 _doc/003_script/
+#   一格（001_arch、004_sql 两个目录盘上就有，前页不提）。这类"抄来的数与名"没有尺就永远漂：
+#   标题、构件模块名、_doc 一级目录、每个相对链接、版本字面量、建表张数与表名，六项逐个对实物。
+#   版本那一支与 #38 同源（抄死版本号在抬版后必坏），但它量的是文档，改不动 pom 的单一来源。
+#   ⚠ revision 形状若不再是 1.0.N，VER 那一支会自己报"尺不适用"而不是静默放行。
+# A15：文档注释里教人 `mvn spring-boot:run \ --server.port=18086` —— 那是把应用参数递给
+#   **Maven**，Maven 当场拒（`Unable to parse command line options: Unrecognized option`，实测 rc=1，
+#   应用一次都没起来）。判据只认"长选项名里含点"这一种形状（Maven 自己的长选项没有点：
+#   --also-make / --no-transfer-progress），并先摘掉 -Dspring-boot.run.arguments=/jvmArguments=
+#   的取值段 ⇒ 合法写法不误伤。必须按**逻辑行**量：那份原文的 `--server.port` 在反斜杠续行的
+#   下一行，逐行扫会结构性漏掉（与 A11 同一课）。
+#   第二支 PHANTOM 量 javadoc 里的 {@link #方法} —— DevDataSourceConfig 的注释列了一个
+#   `removeStarterDataSourceBean()`（说它用 BeanDefinitionRegistryPostProcessor 提前摘 starter 的
+#   bean），而那方法**从建文件那一版起就没写进过这个文件**，连带四个 import 是空口机制。
+#   javac 不查 @link 的目标 ⇒ 只有把"注释承诺的机制"当断言量，它才不会继续骗人。
+REPO="$(dirname "$DEPLOY")"
+cat > "$WORK/a14_docface.py" <<'PY'
+#!/usr/bin/env python3
+"""A14/A15 尺的开发副本：先在这份上把当前树量绿，再嵌进 p24.sh。"""
+import os
+import re
+import sys
+
+root = sys.argv[1]
+mode = sys.argv[2] if len(sys.argv) > 2 else 'a14'
+
+if mode == 'a14':
+    readme = sys.argv[3] if len(sys.argv) > 3 else os.path.join(root, 'README.md')
+    txt = open(readme, encoding='utf-8').read()
+    pom = open(os.path.join(root, 'pom.xml'), encoding='utf-8').read()
+    artifact = re.search(r'<artifactId>([^<]+)</artifactId>\s*<version>\$\{revision\}</version>', pom)
+    artifact = artifact.group(1) if artifact else re.search(r'<artifactId>([^<]+)</artifactId>', pom).group(1)
+    rev = re.search(r'<revision>([^<]+)</revision>', pom).group(1)
+
+    heads = re.findall(r'(?m)^#\s+(.*)$', txt)
+    first = heads[0] if heads else ''
+    print('HEAD|%s|%s' % (artifact, 'ok' if artifact in first else 'first-heading=[%s]' % first))
+
+    mods = re.findall(r'<module>([^<]+)</module>', pom)
+    miss = [m for m in mods if m not in txt]
+    print('MODULE|%d|%s' % (len(mods), ' '.join(miss) or '-'))
+
+    docdirs = sorted(d for d in os.listdir(os.path.join(root, '_doc'))
+                     if os.path.isdir(os.path.join(root, '_doc', d)))
+    # "提到"不等于"索引了"：只认 ](_doc/<d>/) 这一种形状（目录链接带尾斜杠且紧跟右括号），
+    # 否则正文里一句 `](_doc/004_sql/z-schedule.sql)` 就能冒充整条目录索引项。
+    missd = [d for d in docdirs if ('](_doc/' + d + '/)') not in txt]
+    print('DOCIDX|%d|%s' % (len(docdirs), ' '.join(missd) or '-'))
+
+    links = re.findall(r'\[[^\]]*\]\(([^)\s]+)\)', txt)
+    rel = [l for l in links if not re.match(r'^(https?:|mailto:|#|/)', l)]
+    bad = []
+    for l in rel:
+        p = l.split('#')[0]
+        if not p:
+            continue
+        if not os.path.exists(os.path.join(root, p)):
+            bad.append(l)
+    print('LINK|%d/%d|%s' % (len(rel), len(links), ' '.join(bad) or '-'))
+
+    if not re.fullmatch(r'1\.0\.\d+', rev):
+        print('VER|N/A|revision 形状不是 1.0.N（%s）⇒ 这把尺不适用，请改尺' % rev)
+    else:
+        lits = sorted(set(re.findall(r'(?<![\d.])1\.0\.\d+(?![\d.])', txt)))
+        stale = [v for v in lits if v != rev]
+        print('VER|%d|%s|cur=%s want=%s' % (len(lits), ' '.join(stale) or '-', ','.join(lits), rev))
+
+    sq = os.path.join(root, '_doc/004_sql/z-schedule.sql')
+    # 只数"语句起始行"：这份 DDL 第 7 行的注释里就写着"不含任何 DROP"，同理 CREATE TABLE 也会
+    # 在注释里出现 ⇒ 不剥注释就数会得到 7（真表 6），这一格本来就是给"抄来的张数"设的闸。
+    body = [ln for ln in open(sq, encoding='utf-8') if not ln.lstrip().startswith('--')]
+    ncreate = sum(1 for ln in body if re.match(r'\s*CREATE\s+TABLE', ln, re.I))
+    names = re.findall(r'(?mi)^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`\"]?([A-Za-z0-9_]+)',
+                       '\n'.join(body))
+    raw = sum(1 for ln in open(sq, encoding='utf-8') if re.search(r'(?i)CREATE\s+TABLE', ln))
+    claim = re.findall(r'(\d+)\s*张表', txt)
+    # 表名也钉：README 用共同前缀 + `_job_log` 的简写列名，所以判"去掉 z_schedule 前缀后的那一截在不在正文里"
+    missname = [n for n in names if n.replace('z_schedule_', '_') not in txt and n not in txt]
+    print('SQL|%d|%d|%s|%s|%s' % (ncreate, raw, ','.join(names), ','.join(claim) or '-',
+                                  'ok' if claim and int(claim[0]) == ncreate and not missname
+                                  else '张数(%s)≠%d 或表名缺 %s' % (','.join(claim), ncreate, missname)))
+    sys.exit(0)
+
+# A15：文档/注释里"给 Maven 传应用参数"的写法 + javadoc 里指向不存在成员的 {@link #x}
+mvn_bad = []
+mvn_n = 0
+for dirpath, dirnames, filenames in os.walk(root):
+    dirnames[:] = [d for d in dirnames if d not in ('target', 'node_modules', '.git', 'dist', 'logs')]
+    for fn in filenames:
+        if fn == 'p24.sh':          # 尺自己的源码里有坏形状的字面量，它不是"给人敲的命令"
+            continue
+        if not fn.endswith(('.md', '.yml', '.sh', '.java')):
+            continue
+        p = os.path.join(dirpath, fn)
+        lines = open(p, encoding='utf-8').read().split('\n')
+        if fn.endswith('.md'):
+            # 只量"能被复制粘贴执行"的那部分：markdown 里只有 ``` 围栏内是命令。
+            # 围栏外（正文/表格）允许描述坏形状 —— 那正是本节要写下来的东西，
+            # 拿它当广告判红，等于逼文档删掉证据。
+            out, infence = [], False
+            for ln in lines:
+                if ln.lstrip().startswith('```'):
+                    infence = not infence
+                    out.append('')
+                    continue
+                out.append(ln if infence else '')
+            lines = out
+        # 必须按逻辑行量：反斜杠续行时 `--server.port=` 常在下一行，逐行扫会结构性漏掉
+        # （application.yml 被改掉的那份原文就是 `\` + 换行 + `#     --spring.profiles.active=dev`）
+        start, buf, logical = 0, [], []
+        for i, ln in enumerate(lines):
+            if not buf:
+                start = i + 1
+            buf.append(ln)
+            if not ln.rstrip().endswith('\\'):
+                logical.append((start, ' '.join(x.rstrip().rstrip('\\') for x in buf)))
+                buf = []
+        if buf:
+            logical.append((start, ' '.join(buf)))
+        for ln_no, s in logical:
+            if 'mvn ' not in s:
+                continue
+            mvn_n += 1
+            # 先摘掉合法的 spring-boot.run.arguments=/jvmArguments= 取值段，剩下的才是真递给 Maven 的
+            s = re.sub(r'-Dspring-boot\.run\.(arguments|jvmArguments)=\S+', '', s)
+            # Maven 自己的长选项名里绝不含点（--also-make / --no-transfer-progress），
+            # 含点的那个形状一定是"想给应用传属性却写在 mvn 后面" ⇒ 只按这条判，不误伤
+            if re.search(r'\s--(?!\-)[A-Za-z0-9._-]*\.[A-Za-z0-9._-]*=', s):
+                mvn_bad.append('%s:%d' % (os.path.relpath(p, root), ln_no))
+print('MVNOPT|%d|%s' % (mvn_n, ' '.join(mvn_bad) or '-'))
+
+link_n = 0
+phantom = []
+for dirpath, dirnames, filenames in os.walk(root):
+    dirnames[:] = [d for d in dirnames if d not in ('target', 'node_modules', '.git', 'dist', 'logs')]
+    for fn in filenames:
+        if not fn.endswith('.java') or 'src/main' not in dirpath.replace(os.sep, '/'):
+            continue
+        p = os.path.join(dirpath, fn)
+        raw = open(p, encoding='utf-8').read()
+        names = set(re.findall(r'\{@link\s+#([A-Za-z0-9_]+)', raw))
+        code = re.sub(r'/\*.*?\*/', '', raw, flags=re.S)
+        code = re.sub(r'(?m)//.*$', '', code)
+        for n in sorted(names):
+            link_n += 1
+            if not re.search(r'(?m)^[^\n]*\b%s\b\s*[;=(]' % re.escape(n), code):
+                phantom.append('%s:#%s' % (os.path.relpath(p, root), n))
+print('PHANTOM|%d|%s' % (link_n, ' '.join(phantom) or '-'))
+PY
+a14_scan() { python3 "$WORK/a14_docface.py" "$REPO" a14 "${1:-$REPO/README.md}"; }
+A14=$(a14_scan)
+A14_HEAD=$(printf '%s\n' "$A14" | grep '^HEAD' | head -1)
+A14_MOD=$(printf '%s\n' "$A14" | grep '^MODULE' | head -1)
+A14_IDX=$(printf '%s\n' "$A14" | grep '^DOCIDX' | head -1)
+A14_LINK=$(printf '%s\n' "$A14" | grep '^LINK' | head -1)
+A14_VER=$(printf '%s\n' "$A14" | grep '^VER' | head -1)
+A14_SQL=$(printf '%s\n' "$A14" | grep '^SQL' | head -1)
+A14_MODN=$(printf '%s' "$A14_MOD" | cut -d'|' -f2)
+A14_IDXN=$(printf '%s' "$A14_IDX" | cut -d'|' -f2)
+A14_LINKN=$(printf '%s' "$A14_LINK" | cut -d'|' -f2 | cut -d'/' -f1)
+mkdir -p "$WORK/prey_a14"
+python3 - "$REPO/README.md" "$WORK/prey_a14/README.md" <<'PY'
+import sys
+t = open(sys.argv[1], encoding='utf-8').read()
+t = t.replace('# z-schedule\n', '# z-wf\n', 1)                      # 标题退回模板遗留
+t = t.replace('<version>1.0.4</version>', '<version>1.0.0</version>', 1)  # 抄死一个旧版本
+t = t.replace('[`LICENSE`](LICENSE)', '[`LICENSE`](LICENSE-typo)', 1)      # 死链
+t = t.replace('- [`_doc/004_sql/`](_doc/004_sql/) — 建表:',
+              '- [`_doc/00X/`](_doc/00X/) — 建表:')                 # 索引漏一个真实目录
+t = t.replace('6 张表', '7 张表', 1)                                # 抄来的数（不剥注释正好数到 7）
+t = t.replace('z-schedule-core', 'z-schedule-gone')                 # 模块名对不上 <modules>
+for k in ('z-wf', '1.0.0', 'LICENSE-typo', '00X', '7 张表', 'z-schedule-gone'):
+    assert k in t, 'A14 猎物没注入：' + k
+open(sys.argv[2], 'w', encoding='utf-8').write(t)
+PY
+A14P=$(a14_scan "$WORK/prey_a14/README.md")
+A14_SQLN=$(printf '%s' "$A14_SQL" | cut -d'|' -f2)
+A14_SQLRAW=$(printf '%s' "$A14_SQL" | cut -d'|' -f3)
+if printf '%s' "$A14_HEAD" | grep -qF '|ok' \
+   && [ "${A14_MODN:-0}" -gt 0 ] && [ "${A14_IDXN:-0}" -gt 0 ] && [ "${A14_LINKN:-0}" -gt 0 ] \
+   && printf '%s' "$A14" | grep -qF 'MODULE|'"$A14_MODN"'|-' \
+   && printf '%s' "$A14" | grep -qF 'DOCIDX|'"$A14_IDXN"'|-' \
+   && printf '%s' "$A14" | grep -qF 'LINK|'"$A14_LINKN"'/' \
+   && printf '%s' "$A14_LINK" | grep -qF '|-' \
+   && printf '%s' "$A14_VER" | grep -qF '|-|cur=' \
+   && printf '%s' "$A14_SQL" | grep -qF '|ok' \
+   && printf '%s' "$A14P" | grep -qF 'first-heading=[z-wf]' \
+   && printf '%s' "$A14P" | grep -qF 'MODULE|'"$A14_MODN"'|z-schedule-core' \
+   && printf '%s' "$A14P" | grep -qF 'DOCIDX|'"$A14_IDXN"'|004_sql' \
+   && printf '%s' "$A14P" | grep -qF 'LICENSE-typo' \
+   && printf '%s' "$A14P" | grep -qF '1.0.0' \
+   && printf '%s' "$A14P" | grep -qF '张数(7)'; then
+  ok "A14 根 README 六项对实物全绿（标题含根 pom artifactId、模块 $A14_MODN 个逐个在场、_doc 一级目录 $A14_IDXN 个逐个被索引、相对链接 $A14_LINKN 个逐个存在、版本字面量只有 pom 的那一个、建表 $A14_SQLN 张与脚本一致〔不剥注释会数到 $A14_SQLRAW，那一档就是给抄来的数设的〕）；同一份尺在猎物上点名的正是这六类：first-heading=[z-wf]、缺模块 z-schedule-core、缺索引项 004_sql、死链 LICENSE-typo（连同 _doc/00X/）、旧版本字面量 1.0.0、张数 7≠6"
+else
+  bad "A14 形状不对：绿侧[$A14_HEAD][$A14_MOD][$A14_IDX][$A14_LINK][$A14_VER][$A14_SQL] 猎物[$A14P]"
+fi
+
+a15_scan() { python3 "$WORK/a14_docface.py" "$1" a15; }
+A15=$(a15_scan "$REPO")
+A15_MVN=$(printf '%s\n' "$A15" | grep '^MVNOPT' | head -1)
+A15_LINK=$(printf '%s\n' "$A15" | grep '^PHANTOM' | head -1)
+A15_MVNN=$(printf '%s' "$A15_MVN" | cut -d'|' -f2)
+A15_LINKN=$(printf '%s' "$A15_LINK" | cut -d'|' -f2)
+mkdir -p "$WORK/prey_a15/_doc/004_sql" "$WORK/prey_a15/app/src/main/java/x"
+# 猎物树的写法要点（都是尺自己的反向对照，所以树里【不能】出现能被 shell 展开的形状）：
+#   坏形状只按"围栏内 + 续行"注入；围栏外同一串字面量是描述，必须【不】被点名；
+#   -Dspring-boot.run.arguments= 的取值段里有 --server.port=18999，也必须【不】被点名。
+python3 - "$WORK/prey_a15" <<'PY'
+import os, sys
+d = sys.argv[1]
+BS, DD, MM = chr(92), '-D', '--'
+md = "\n".join([
+  '#### 坏形状（围栏内 + 续行）', '', '```bash',
+  'mvn -B spring-boot:run ' + BS,
+  '  ' + MM + 'spring.profiles.active=dev ' + BS,
+  '  ' + MM + 'server.port=18086',
+  '```', '',
+  '围栏外同样的串是【描述】不是广告，不该被点名：`mvn spring-boot:run ' + MM + 'server.port=18086`。', '',
+  '合法形状：', '', '```bash',
+  'mvn -B spring-boot:run ' + DD + 'spring-boot.run.profiles=dev '
+  + DD + 'spring-boot.run.arguments=' + MM + 'z.base.db.schedule.disabled=true,'
+  + MM + 'server.port=18999',
+  '```', ''])
+open(os.path.join(d, 'bad.md'), 'w', encoding='utf-8').write(md)
+open(os.path.join(d, 'a.yml'), 'w', encoding='utf-8').write(
+  "\n".join(['# y:', '#   mvn spring-boot:run ' + BS,
+             '#     ' + MM + 'server.servlet.context-path=/meta', 'key: 1', '']))
+open(os.path.join(d, 'app/src/main/java/x/A.java'), 'w', encoding='utf-8').write(
+  "class A {\n  /** 见 {@link #real()} 与 {@link #noSuchMethod()} */\n  void real() {}\n}\n")
+PY
+A15P=$(a15_scan "$WORK/prey_a15")
+if [ "${A15_MVNN:-0}" -gt 0 ] && [ "${A15_LINKN:-0}" -gt 0 ] \
+   && printf '%s' "$A15_MVN" | grep -qF '|-' && printf '%s' "$A15_LINK" | grep -qF '|-' \
+   && printf '%s' "$A15P" | grep -qF 'MVNOPT|3|a.yml:2 bad.md:4' \
+   && printf '%s' "$A15P" | grep -qF 'PHANTOM|2|app/src/main/java/x/A.java:#noSuchMethod'; then
+  ok "A15 两支都有牙：真树 $A15_MVNN 条 mvn 逻辑行里含点长选项 0 处、$A15_LINKN 个 {@link #成员} 逐个能在同一文件里找到声明；猎物树上坏形状两处各点名一次（围栏内含续行的 mvn + yml 注释同款），而围栏外那串同样的字面量与 -Dspring-boot.run.arguments= 取值段里的 --server.port 都【没】被误伤，{@link #real()} 也没被当成幽灵"
+else
+  bad "A15 形状不对：[$A15_MVN][$A15_LINK] 猎物[$A15P]（期望 MVNOPT 分母>0 且两处 '-'，猎物恰好 a.yml:2 bad.md:4 与 A.java:#noSuchMethod）"
+fi
+
 echo ""
 echo "PASS=$PASS FAIL=$FAIL（臂 A 结束）"
 if [ "${P24_A_ONLY:-0}" = "1" ]; then

@@ -1515,3 +1515,102 @@ README 只数围栏内：`./run.sh` 也出现在讲坑的正文里（"以前裸�
 以及 `bin/start-mode{1,2,3}.sh`、`make k8s-apply` 的**渲染段**（无集群时只验渲染，见 §11 那条
 `k8s-apply.sh` 的 `"$ 0"` 碎变量修复）。这批读数和 §13/§14/§15 欠的那几遍一起，全卡在同一件事上：
 250 的 sshd 从 05:44 起拒连（22 端口 TCP 可连、不回 banner；18098 的常驻服务仍在答 JSON）。
+
+## 17. #40：本地启动那一屏教的两条命令，一条 Maven 直接拒、一条起来是空壳（A14 + A15）
+
+`#37 的静态半边（§16）只查了 `deploy/README.md`。这一节是同一把尺换到**另一屏**：
+根 `README.md`（别人 clone 后看到的第一屏）与 `_doc/001_arch/z-schedule-admin.md` 的「本地启动」。
+起因很小——想在文档里挑一条"零依赖就能跑"的路径复现 §15 那条 `run.sh` 判据，结果那条路本身走不通：
+**四条命令逐条实测，三条是死路**，而文档把其中两条写成了推荐做法。
+
+### 17.1 四条命令的原文读数（2026-09-27 06:40–06:46，本机）
+
+都在 `z-schedule/z-schedule-admin/` 下敲，日志落 `~/.cache/zs_docface/`（**不在仓里**，
+下面的读数全部来自这些日志；复算命令就照抄第一列）。
+
+| # | 命令 | 读数 |
+|---|---|---|
+| m1 | `mvn -B spring-boot:run --spring.profiles.active=dev --server.port=18086 --server.servlet.context-path=/meta` | `Unable to parse command line options: Unrecognized option: --spring.profiles.active=dev` + usage 转储，**rc=1**，`lsof` 18086 无人监听 ⇒ 应用一次都没起来（06:40:36） |
+| m2 | `mvn -B spring-boot:run`（原「方式 A」，什么都不加） | `Root WebApplicationContext: initialization completed in 438 ms` 之后就没下文：90 s 内日志 **6820 行**、`CommunicationsException\|Connection refused` **800** 次、`Tomcat started\|Started ZScheduleAdminApplication` **0** 次；`curl` 8080 与 18086 都是 `http_code=000 ... Could not connect to server`（curl rc=7）。走的是 `default` profile ⇒ `jdbc:mysql://localhost:3306` |
+| m3 | `mvn -B spring-boot:run -Dspring-boot.run.profiles=dev` | `APPLICATION FAILED TO START`：`The bean 'dataSourceSchedule', defined in class path resource [com/zifang/z/schedule/web/config/ZScheduleAutoConfiguration.class], could not be registered. A bean with that name has already been defin…`（末段被我这边的 200 字节 `cut` 切掉，原文在日志里）；Boot 给的 Action 是 `Consider renaming one of the beans or enabling overriding by setting spring.main.allow-bean-definition-overriding=true`；`BUILD FAILURE`，Total time 5.061 s（06:42:54） |
+| m4 | 同 m3 再加 `-Dspring-boot.run.arguments=--z.base.db.schedule.disabled=true` | **起来了**：`Tomcat started on port(s): 8080 (http) with context path ''`、`Started ZScheduleAdminApplication in 1.17 seconds`（06:45:37）。探针（逐条判 HTTP 码，不判"curl 通了"）：`/actuator/health` 200 len=49、`/` 200 len=417、`/index.html` 200 len=417、`/meta/actuator/health` **404**、`/jobinfo/list` **500** len=113、`/dashboard/stats` **500** len=116；`grep -cE 'Table "?.*(ZSCHEDULE\|z_schedule)\|not found\|JdbcSQLSyntaxErrorException'` = **65** |
+
+四条读出来的事实，与文档广告面逐条对：
+
+1. **`18086` 与 `/meta` 在这台机器上不存在**。`grep -rn 'server\.' z-schedule-admin/src/main/resources/`
+   只命中注释里的两行 ⇒ 独立应用从没设过 `server.*`，m4 实测就是 `8080` + 空 context-path。
+   那两个值只来自 `deploy/Dockerfile.backend` 的 `ENV SERVER_PORT=18086` /
+   `SERVER_SERVLET_CONTEXT_PATH=/meta` 与 compose 的 env —— 也就是说**它们是容器的形状，
+   被写成了本地 `mvn` 的默认值**。
+2. **`mvn … --app.property=x` 这个写法本身跑不通**：`--` 长选项是 Maven 的，不是应用的；
+   Maven 自己的长选项名里绝不含点。要传应用参数只有 `-Dspring-boot.run.arguments=` /
+   `jvmArguments=` 这一条路。（`application.yml` 的头部注释教的正是那条跑不通的。）
+3. **`dev` profile 单给必崩**（m3）：`DevDataSourceConfig`（`@Profile("dev")`）与 starter 的
+   `ZScheduleAutoConfiguration` 注册**同名** bean，而 starter 那两支只带
+   `@ConditionalOnProperty(z.base.db.schedule.disabled)`、**没有** `@ConditionalOnMissingBean`
+   ⇒ Boot 2.1+ 默认禁止同名覆盖。`disabled=true` 不是"可选优化"而是那条"由 admin 提供同名 @Bean"
+   的**前置条件**，而文档从没写过它。这与 #22（`AlarmService` 缺 `@ConditionalOnMissingBean`
+   让宿主一注册就启动失败）是同一类，登记为 #41 待裁定（改 starter ⇒ 动到已发布的 1.0.4 之外，
+   要过全量基线）。
+4. **"零依赖可玩"不成立**（m4）：进程起得来、外壳 200，但那份 H2 是空库（本模块没有 `schema.sql`），
+   每个数据接口 500。这正是 #32 那一格（要不要把这条路补成真能玩）等拍板的内容——
+   **产品怎么补等点头，文档先不许继续写"零依赖"**。
+
+⚠ 一条边界：m2–m4 都是在 `z-schedule-admin/` 里单跑 `mvn`，**没带 `-am`** ⇒
+依赖的 starter/core 由 Maven 从 `~/.m2` 解析（那里有 1.0.4），工作树的改动不参与这三跑。
+这四条读数是"文档广告的那条命令"的读数，不是"工作树字节"的读数。
+
+### 17.2 两根新臂（`p24.sh` 的 A14 / A15）
+
+A14 量根 README 的第一屏，六项全对实物：标题含根 pom 的 `artifactId`、`<modules>` 里三个模块名逐个在场、
+`_doc/` 下每个一级目录都以**索引项形状**（`](_doc/<d>/)`）出现、每个相对链接都解析、
+版本字面量只有 `<revision>` 那一个（与 #38 同源：抄死的版本号在抬版那天必坏；revision 形状一旦不再
+是 `1.0.N`，那一支自己报"尺不适用"而不是静默放行）、建表张数与表名对 `_doc/004_sql/z-schedule.sql`
+的**非注释语句行**（这份脚本第 7 行的注释里就写着 `CREATE TABLE`/`不含任何 DROP`，
+不剥注释会数到 **7** 而真表是 **6**）。
+
+A15 两支：MVNOPT 抓"把应用参数递给 Maven"那种写法（只认长选项名里含点这一形状，
+并先摘掉 `-Dspring-boot.run.arguments=` 的取值段）；PHANTOM 抓 javadoc 里 `{@link #成员}`
+指向不存在成员。第二支的直接起因是 `DevDataSourceConfig` 的注释列了
+`removeStarterDataSourceBean()`（说它用 `BeanDefinitionRegistryPostProcessor` 提前摘掉 starter 的定义），
+而那方法**从建文件那一版（c8e3a8f）起就没在这个文件里存在过**，连带四个 import 是空口机制
+⇒ javac 不查 `@link` 的目标，只有把"注释承诺的机制"当断言量，它才不会继续骗人。
+
+### 17.3 三处尺伤（都在本档自己写的尺上，按"改量具==改被测物"记账）
+
+1. **A14 第一遍红在尺上**：判据里我留了一条 `printf '%s' "$A14_MOD" | grep -qF '|z'`，
+   想验的是"标题里含 artifactId"，可那是 `HEAD` 行的字段，`MODULE` 行里根本没有 `|z`
+   ⇒ 绿侧六行读数全对（`HEAD|z-schedule|ok`…`SQL|…|6|ok`）却判 FAIL。
+   教训不是"少写一条"，而是**判据每一条都要能说出它读哪个字段的哪个位置**；
+   这一条被 `bad` 消息原样打出来才一眼看见。
+2. **`DOCIDX` 的"提到 ≠ 索引了"**：第一版判据是"`_doc/<d>` 这个串在不在正文里"，
+   我把索引行改成 `_doc/00X/` 注进猎物后，尺**仍报绿** —— 因为正文另一处
+   `](_doc/004_sql/z-schedule.sql)` 也算"提到"。这是**注入的缺陷尺看不见**那一型
+   （与 §13 那批"glob 悄悄少了一批文件"同族，但方向相反：这次是猎物证伪了尺）。
+   收紧成只认 `](_doc/<d>/)` 之后，猎物上点名 `004_sql`、绿侧仍 `-`。
+3. **A14 的 ok 消息第一版写的是"注入的字符串"而不是"尺点名的字符串"**
+   （写成 `z-schedule-gone` / `_doc/00X`，而尺点的恰恰是被抽掉的真名 `z-schedule-core` / `004_sql`）
+   ⇒ 消息里每条引文要按尺的原样回读，不能按我脑子里那份"我注入了什么"来写。
+
+另外两条是 A15 的自伤预防，都在猎物树里钉了反向对照：
+尺的源码自己写着坏形状的字面量（那是量具不是广告）⇒ 扫查器跳过 `p24.sh`；
+猎物树落在 `logs/` 下，同一棵树下一次扫描会读到上一跑的残渣 ⇒ 跳过 `logs`。
+围栏外的正文**允许**描述坏形状（m1 那一行就是证据），所以 `.md` 只量 ``` 围栏内的逻辑行 ——
+这条如果不做，文档就得分成两半："能说的"与"能查的"不重合，等于逼文档删证据。
+
+读数与复算：`P24_A_ONLY=1 bash p24.sh`（本机 bash 3.2.57，`REPO="$(dirname "$DEPLOY")"`）——
+06:55 那遍 `PASS=21 FAIL=1`（红的就是上面第 1、2 两条），改完 06:57:54 那遍
+`PASS=22 FAIL=0` rc=0。日志 `~/.cache/zs_docface/p24_a14_run3.log`、`_run4.log`（**只在 cache，
+未跟踪**；被测量具字节 `p24.sh` md5 `2f0b6a5a…`）。嵌进 `p24.sh` 的那份 python 与我单独量绿的开发副本
+逐字节 `diff` 为空（`~/.cache/zs_docface/a14_dev.py`）。
+
+### 17.4 这一格改了什么（全在文档面，产品字节未动）
+
+- 根 `README.md` 重写：标题从模板遗留的 `# z-wf`（还写了两遍）改成真项目，补坐标/模块/`_doc/` 完整索引/
+  三条"跑起来"的路各自**验到哪一步**。
+- `_doc/001_arch/z-schedule-admin.md`「本地启动」：四条命令的实测表 + dev profile 的两条前置 +
+  方式 A/B 换成能跑的形状（并写清 8080、无 `/meta`、数据接口 500）。
+- `z-schedule-admin/src/main/resources/application.yml` 与 `application-dev.yml` 的头部注释：同上改口。
+- `DevDataSourceConfig.java`：删幽灵 javadoc 条目与四个死 import，把"`disabled=true` 是前置条件"写进注释。
+- 顺手抓到的一处**抄来的数**：根 README 与我新写的 `_doc/001_arch` 都写"7 张表"，
+  真表 6 张 —— 是 A14 的 SQL 那一支（拿 7 当猎物判红）在绿侧第一遍就把我自己那句假数打出来了。
