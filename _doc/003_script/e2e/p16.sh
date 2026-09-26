@@ -100,14 +100,14 @@ log "就绪 pid=$(cat app.pid)"
 # app.pid 只记本脚本自己起的进程，救不了这种情况，所以必须直接看日志判生死。
 # 要等而不是单次 grep：Tomcat 在 context refresh 中途就绑上端口了，"Started" 那行是 refresh
 # 走完才打的——单次 grep 会撞进"端口已 200、日志还没有 Started"的窗口，把健康的实例误判成 FATAL。
-for i in $(seq 1 20); do grep -q "Started ZScheduleAdminApplication" "$LOGF" && break; sleep 1; done
-if ! grep -q "Started ZScheduleAdminApplication" "$LOGF"; then
+for i in $(seq 1 20); do grep -aq "Started ZScheduleAdminApplication" "$LOGF" && break; sleep 1; done
+if ! grep -aq "Started ZScheduleAdminApplication" "$LOGF"; then
   echo "FATAL: $LOGF 里没有 'Started ZScheduleAdminApplication'（多半是端口 $PORT 已被占用：" \
        "grep 'already in use' $LOGF）。本脚本不许在陌生实例上量数。"
-  grep -c "already in use" "$LOGF" | sed 's/^/  already-in-use 行数: /'
+  grep -ac "already in use" "$LOGF" | sed 's/^/  already-in-use 行数: /'
   exit 1
 fi
-log "确认本实例已启动（Started 行数=$(grep -c 'Started ZScheduleAdminApplication' "$LOGF")）"
+log "确认本实例已启动（Started 行数=$(grep -ac 'Started ZScheduleAdminApplication' "$LOGF")）"
 
 ladder() { # $1=handler 字面值 $2=这一组的说明
   local h="$1" label="$2" n i LOADED s0 s1
@@ -121,17 +121,17 @@ ladder() { # $1=handler 字面值 $2=这一组的说明
     LOADED=""
     for i in $(seq 1 10); do
       sleep 5
-      LOADED=$(grep -o "Engine loaded [0-9]* jobs into ring (ringTotal=[0-9]*, overflow=[0-9]*, dropped=[0-9]*)" "$LOGF" | tail -1)
+      LOADED=$(grep -ao "Engine loaded [0-9]* jobs into ring (ringTotal=[0-9]*, overflow=[0-9]*, dropped=[0-9]*)" "$LOGF" | tail -1)
       echo "$LOADED" | grep -q "loaded $n jobs" && break
     done
     echo "  $LOADED"
     echo "$LOADED" | grep -q "loaded $n jobs" || echo "  !! 装载数≠$n，本台阶读数不可信"
 
     snap > /tmp/p16.s0
-    E0=$(grep -c 'Job execution failed' "$LOGF"); B0=$(stat -c %s "$LOGF"); T0=$(date +%s)
+    E0=$(grep -ac 'Job execution failed' "$LOGF"); B0=$(stat -c %s "$LOGF"); T0=$(date +%s)
     sleep "$W"
     snap > /tmp/p16.s1
-    E1=$(grep -c 'Job execution failed' "$LOGF"); B1=$(stat -c %s "$LOGF"); T1=$(date +%s)
+    E1=$(grep -ac 'Job execution failed' "$LOGF"); B1=$(stat -c %s "$LOGF"); T1=$(date +%s)
 
     FIRES=$(( $(g dg INSERT /tmp/p16.s1) - $(g dg INSERT /tmp/p16.s0) ))
     UPDJ=$(( $(g dg UPDATE /tmp/p16.s1) - $(g dg UPDATE /tmp/p16.s0) ))
@@ -146,7 +146,7 @@ ladder() { # $1=handler 字面值 $2=这一组的说明
       printf "  全局语句: Com_insert Δ%d, Com_update Δ%d；job_log 侧 %d 插 + %d 改 ⇒ %.2f 条/次\n", ci, cu, f, upd, (f?((f+upd)/f):0);
       printf "  带堆栈 ERROR %d 条 (%.1f 条/s)，日志增 %d 字节 ⇒ %.0f B/次\n", err, err/span, bytes, (f?bytes/f:0);
     }'
-    echo "  累计丢火行(串行队列满+DISCARD_LATER)= $(grep -cE 'serial queue full|DISCARD_LATER' "$LOGF")"
+    echo "  累计丢火行(串行队列满+DISCARD_LATER)= $(grep -acE 'serial queue full|DISCARD_LATER' "$LOGF")"
     q -e "SELECT CONCAT('  本组落库行数=', COUNT(*)) FROM z_schedule_job_log WHERE job_group=$PERF_GROUP"
     q -e "UPDATE z_schedule_job_info SET trigger_status=0 WHERE job_group=$PERF_GROUP" >/dev/null
     sleep 20   # 留一个 reconcile 周期，确保上一档任务真的从轮里摘干净再播下一档

@@ -21,7 +21,7 @@ for i in $(seq 60); do
   [ "$(code "$BASE/user/login" -X POST -H 'Content-Type: application/json' -d '{}')" != "000" ] && { echo "UP after ${i}s"; break; }
   sleep 1
 done
-echo "启动日志里的鉴权自述: $(grep -o 'TokenAuthFilter.*' logs/boot5.out | head -1)"
+echo "启动日志里的鉴权自述: $(grep -ao 'TokenAuthFilter.*' logs/boot5.out | head -1)"
 
 echo
 echo "### 匿名请求（不带任何 token）"
@@ -48,7 +48,7 @@ echo
 echo "### 匿名写请求有没有真的落到库里（负向断言要带猎物）"
 echo "库里 jobDesc 含 e2e-p14: $(q "SELECT COUNT(*) FROM z_schedule_job_info WHERE job_desc LIKE 'e2e-p14-anon%'")"
 echo "带 token 建的那条:        $(q "SELECT COUNT(*) FROM z_schedule_job_info WHERE job_desc='e2e-p14-authed'")"
-echo "被拦下的 403 计数:        $(grep -c 'accessToken 不合法' logs/boot5.out)"
+echo "被拦下的 403 计数:        $(grep -ac 'accessToken 不合法' logs/boot5.out)"
 
 echo
 echo "### 清理"

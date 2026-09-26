@@ -88,7 +88,10 @@ for MA in $MAS; do
   LOADED=""
   for _ in $(seq 1 12); do
     sleep 5
-    LOADED=$(grep -o "Engine loaded [0-9]* jobs into ring (ringTotal=[0-9]*, overflow=[0-9]*, dropped=[0-9]*)" "$LOGF" | tail -1)
+    # -a 不是可有可无：日志正被应用续写，grep 3.1 的二进制判定是按读到的那一块做的，
+    # 判成二进制时它只回一行 "Binary file ... matches" ⇒ tail -1 拿不到装载行，
+    # 于是本档明明 loaded 1600 jobs 却被打印成"读数不可信"（250 实测）。
+    LOADED=$(grep -ao "Engine loaded [0-9]* jobs into ring (ringTotal=[0-9]*, overflow=[0-9]*, dropped=[0-9]*)" "$LOGF" | tail -1)
     echo "$LOADED" | grep -q "loaded $N jobs" && break
   done
   echo "  $LOADED"

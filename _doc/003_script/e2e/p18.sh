@@ -84,9 +84,9 @@ log "就绪 pid=$(cat app.pid)"
 seed "$N"
 for i in $(seq 1 10); do
   sleep 5
-  grep -o "Engine loaded [0-9]* jobs into ring" "$LOGF" | tail -1 | grep -q "loaded $N jobs" && break
+  grep -ao "Engine loaded [0-9]* jobs into ring" "$LOGF" | tail -1 | grep -q "loaded $N jobs" && break
 done
-grep -o "Engine loaded [0-9]* jobs into ring (ringTotal=[0-9]*, overflow=[0-9]*, dropped=[0-9]*)" "$LOGF" | tail -1 | sed 's/^/  /'
+grep -ao "Engine loaded [0-9]* jobs into ring (ringTotal=[0-9]*, overflow=[0-9]*, dropped=[0-9]*)" "$LOGF" | tail -1 | sed 's/^/  /'
 sleep 3
 echo "  [本 app 的连接数（按用户/库聚合）]"
 qt -e "SELECT USER, DB, COMMAND, STATE, COUNT(*) AS conns

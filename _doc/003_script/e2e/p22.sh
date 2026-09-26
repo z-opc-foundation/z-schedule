@@ -164,7 +164,7 @@ setsid env Z_SCHEDULE_ACCESSTOKEN="$SECRET" JAR="$JAR_EXPECT" PORT="$PORT" \
 disown || true
 for i in $(seq 1 60); do
   sleep 1
-  grep -q "Started ZScheduleAdminApplication" "$LOG_DIR/p22_b_instance.out" 2>/dev/null && break
+  grep -aq "Started ZScheduleAdminApplication" "$LOG_DIR/p22_b_instance.out" 2>/dev/null && break
 done
 BPID=$(pgrep -af "[j]ava" | grep -- "-jar [^ ]*$JAR_EXPECT" | grep -- "--server.port=$PORT" | awk '{print $1}' | head -1)
 [ -z "$BPID" ] && { bad "S.1 临时实例没起来（tail 见下）"; tail -6 "$LOG_DIR/p22_b_instance.out" | tee -a "$OUT"; exit 1; }
@@ -696,7 +696,7 @@ DLEFT=$(q -e "SELECT (SELECT COUNT(*) FROM z_schedule_job_info WHERE job_desc LI
 
 kill -TERM "$BPID" 2>/dev/null || true
 for i in $(seq 1 30); do sleep 1; kill -0 "$BPID" 2>/dev/null || { say "  C.1 临时实例 ${i}s 内退出"; break; }; done
-say "  C.2 临时实例日志里的 stepDown 行数=$(grep -icE 'stepped down' "$LOG_DIR/p22_b_instance.out")（它是 follower 时应为 0，抢到过一次 leader 则必须有）"
+say "  C.2 临时实例日志里的 stepDown 行数=$(grep -iacE 'stepped down' "$LOG_DIR/p22_b_instance.out")（它是 follower 时应为 0，抢到过一次 leader 则必须有）"
 ss -ltn 2>/dev/null | grep -q ":$PORT " && bad "C.3 端口 $PORT 仍被占" || ok "C.3 端口 $PORT 已释放"
 ALIVE=$(pgrep -af "[j]ava" | grep -- "-jar [^ ]*z-schedule-admin" | grep -c -- "--server.port=$RESIDENT_PORT" || true)
 [ "$ALIVE" = "1" ] && ok "C.4 常驻实例还活着（B 段没把它挤掉，服务仍挂在 250）" || bad "C.4 常驻实例不在了"

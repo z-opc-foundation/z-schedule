@@ -52,7 +52,7 @@ done
 echo "### 从 start 到第一条执行日志: ${FIRST}s (等待上限 ${MAXWAIT}s)"
 
 echo "--- 再等 22s 看节拍 ---"; sleep 22
-echo "选主时间线: $(grep -oE 'Engine started.*|Became LEADER.*' logs/boot4.out | head -3 | tr '\n' ';')"
+echo "选主时间线: $(grep -aoE 'Engine started.*|Became LEADER.*' logs/boot4.out | head -3 | tr '\n' ';')"
 echo "按 job 汇总(job_id|行数|有结论|有msg|有结束时刻|已告警):"
 q "SELECT CONCAT(job_id,' | ',COUNT(*),' | ',SUM(handle_code<>0),' | ',SUM(handle_msg IS NOT NULL),' | ',SUM(handle_time IS NOT NULL),' | ',SUM(alarm_status=1)) FROM z_schedule_job_log WHERE id>$BEFORE GROUP BY job_id ORDER BY job_id" | sed 's/^/  /'
 echo "结论分布(handle_code|行数):"
@@ -72,4 +72,4 @@ KS=$(date +%s); STOPPID=$(cat app.pid)
 kill "$STOPPID" 2>/dev/null
 for _ in $(seq 20); do kill -0 "$STOPPID" 2>/dev/null || break; sleep 1; done
 echo "关停耗时 $(( $(date +%s) - KS ))s, 关停后租约: $(q "SELECT CONCAT_WS(' | ','owner',IFNULL(owner,'NULL'),'expire',IFNULL(CAST(expire_time AS CHAR),'NULL')) FROM z_schedule_job_leader WHERE id=1")"
-grep -nE "step down|Stepped down|ERROR" logs/boot4.out | tail -5 | sed 's/^/  boot4: /'
+grep -anE "step down|Stepped down|ERROR" logs/boot4.out | tail -5 | sed 's/^/  boot4: /'

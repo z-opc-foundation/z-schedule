@@ -165,7 +165,7 @@ run_case() { # $1=handler $2=标签
   seed "$1"
   # FIX_RATE 任务由 15s 一次的 reconcile 装载进环；等它真的开始触发，再对齐窗口
   sleep 20
-  grep -o "Engine loaded [0-9]* jobs into ring (ringTotal=[0-9]*, overflow=[0-9]*, dropped=[0-9]*)" logs/perf15.out | tail -1 | sed 's/^/    ring: /'
+  grep -ao "Engine loaded [0-9]* jobs into ring (ringTotal=[0-9]*, overflow=[0-9]*, dropped=[0-9]*)" logs/perf15.out | tail -1 | sed 's/^/    ring: /'
   q -e "SELECT CONCAT('status=', trigger_status, ' next_in_future=', (trigger_next_time > UNIX_TIMESTAMP()*1000)) FROM z_schedule_job_info WHERE job_group=$PERF_GROUP" | sed 's/^/    /'
   snap > "$SNAP0"; T0=$(date +%s)
   sleep "$W_RUN"
@@ -181,7 +181,7 @@ FROM z_schedule_job_log
 WHERE job_id IN (SELECT id FROM z_schedule_job_info WHERE job_group=$PERF_GROUP)
 GROUP BY handle_code, alarm_status;
 SQL
-  echo "    该窗口 ERROR 行数（含堆栈的失败日志）: $(grep -c 'Job execution failed' logs/perf15.out)"
+  echo "    该窗口 ERROR 行数（含堆栈的失败日志）: $(grep -ac 'Job execution failed' logs/perf15.out)"
   q "UPDATE z_schedule_job_info SET trigger_status=0 WHERE job_group=$PERF_GROUP" >/dev/null
 }
 
@@ -201,7 +201,7 @@ SELECT CONCAT('owner|', IFNULL(owner,'NULL'), '|expire|', IFNULL(CAST(expire_tim
 FROM z_schedule_job_leader WHERE id=1;
 SQL
 echo "    关停耗时 $(( $(date +%s) - BEFORE ))s"
-grep -o "Stepped down from LEADER: instanceId=[a-f0-9]*" logs/perf15.out | tail -1 | sed 's/^/    /'
+grep -ao "Stepped down from LEADER: instanceId=[a-f0-9]*" logs/perf15.out | tail -1 | sed 's/^/    /'
 
 wipe
 echo

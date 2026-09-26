@@ -76,7 +76,7 @@ seed "$N"
 LOADED=""
 for i in $(seq 1 10); do
   sleep 5
-  LOADED=$(grep -o "Engine loaded [0-9]* jobs into ring (ringTotal=[0-9]*, overflow=[0-9]*, dropped=[0-9]*)" "$LOGF" | tail -1)
+  LOADED=$(grep -ao "Engine loaded [0-9]* jobs into ring (ringTotal=[0-9]*, overflow=[0-9]*, dropped=[0-9]*)" "$LOGF" | tail -1)
   echo "$LOADED" | grep -q "loaded $N jobs" && break
 done
 echo "  $LOADED"
@@ -93,8 +93,8 @@ SPAN=$((T1-T0)); [ "$SPAN" -lt 1 ] && SPAN=1
 awk -v f0="$F0" -v f1="$F1" -v span="$SPAN" -v n="$N" 'BEGIN{
   f=f1-f0; printf "--- 采样窗口 ---\n  %ds 内落库 %d 行 ⇒ %.1f 次/s（请求 %d 次/s，达成 %.1f%%）\n", span, f, f/span, n, 100*(f/span)/n}'
 echo "  （注意：行数差含装载等待期的触发，只当速率用，别和 p16 的窗口差对齐）"
-grep -oE "Engine loaded [0-9]* jobs into ring \(ringTotal=[0-9]*, overflow=[0-9]*, dropped=[0-9]*\)" "$LOGF" | tail -3 | sed 's/^/  /'
-grep -cE "serial queue full|DISCARD_LATER" "$LOGF" | sed 's/^/  累计丢火行=/'
+grep -aoE "Engine loaded [0-9]* jobs into ring \(ringTotal=[0-9]*, overflow=[0-9]*, dropped=[0-9]*\)" "$LOGF" | tail -3 | sed 's/^/  /'
+grep -acE "serial queue full|DISCARD_LATER" "$LOGF" | sed 's/^/  累计丢火行=/'
 
 q -e "UPDATE z_schedule_job_info SET trigger_status=0 WHERE job_group=$PERF_GROUP" >/dev/null
 wipe
