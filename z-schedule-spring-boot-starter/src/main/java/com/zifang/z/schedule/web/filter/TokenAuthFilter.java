@@ -16,12 +16,15 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Token 认证过滤器。
  * <p>
- * 拦截 {@code /executor/*} 路径，校验请求中的 accessToken 是否与配置一致。
- * 未配置 token 时跳过验证（允许无 token 访问）。
+ * 默认对<b>全部</b>入口校验 accessToken，只有登录口与静态外壳放行；未配置 token 时跳过验证
+ * （演示模式，但会在启动时把"管理面全开"这件事打出来，不再静默）。
  * <p>
  * token 来源优先级：请求参数 {@code accessToken} &gt; 请求头 {@code X-Access-Token}。
  */
@@ -29,9 +32,22 @@ public class TokenAuthFilter implements Filter {
 
     private static final Logger log = LogManager.getLogger(TokenAuthFilter.class);
 
-    private static final String URL_PATTERN = "/executor/*";
     private static final String PARAM_ACCESS_TOKEN = "accessToken";
     private static final String HEADER_ACCESS_TOKEN = "X-Access-Token";
+
+    /**
+     * 不需要 token 就能到的路径。
+     * <p>
+     * 只放"登录前就必须能用"的东西：登录口本身、静态外壳（SPA 的 html/js 不含任何数据）、
+     * 容器的 error 转发（否则一次 404 会被包装成 403，排查时看不出真实失败点）。
+     * 其余一律按需要 token 处理——包括 {@code /actuator/*}，它的 health 在这个应用里开了
+     * show-details=always，会把数据源信息吐给匿名访问者。
+     */
+    private static final Set<String> PUBLIC_PATHS = new HashSet<String>(Arrays.asList(
+            "/", "/index.html", "/favicon.ico", "/error", "/user/login"));
+
+    /** 静态资源前缀（把打好的前端放进 {@code static/} 时不至于连壳都下不下来）。 */
+    private static final String[] PUBLIC_PREFIXES = {"/assets/", "/static/", "/public/"};
 
     private final ScheduleProperties scheduleProperties;
 
@@ -45,7 +61,14 @@ public class TokenAuthFilter implements Filter {
 
     @Override
     public void init(FilterConfig filterConfig) throws ServletException {
-        log.info("TokenAuthFilter 初始化, urlPattern={}", URL_PATTERN);
+        String token = scheduleProperties.getAccessToken();
+        if (token == null || token.trim().isEmpty()) {
+            log.warn("[z-schedule] 未配置 z.schedule.accessToken：管理面（/jobinfo、/joblog、/jobgroup、"
+                    + "/glue、/user、/dashboard、/actuator）对任何能连到本端口的人完全敞开，"
+                    + "包括改任务、删任务、伪造执行回报。生产部署必须配这个值。");
+        } else {
+            log.info("TokenAuthFilter 初始化, urlPattern=/*（除 {} 外全部校验 accessToken）", PUBLIC_PATHS);
+        }
     }
 
     @Override
@@ -56,7 +79,7 @@ public class TokenAuthFilter implements Filter {
         HttpServletResponse httpResponse = (HttpServletResponse) response;
 
         String uri = mappedPath(httpRequest);
-        if (!isExecutorPath(uri)) {
+        if (isPublic(uri)) {
             chain.doFilter(request, response);
             return;
         }
@@ -115,9 +138,17 @@ public class TokenAuthFilter implements Filter {
         return uri;
     }
 
-    /** 判断 URI 是否匹配 /executor/* 路径。 */
-    private static boolean isExecutorPath(String path) {
-        return path.startsWith("/executor/") || path.equals("/executor");
+    /** 是否属于"登录前就必须能用"的公开路径。 */
+    private static boolean isPublic(String path) {
+        if (PUBLIC_PATHS.contains(path)) {
+            return true;
+        }
+        for (String prefix : PUBLIC_PREFIXES) {
+            if (path.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 定长时间比较,避免按字节探测 token。 */

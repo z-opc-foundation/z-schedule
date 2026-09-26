@@ -61,6 +61,25 @@ cd z-schedule/deploy && docker compose up
 - **不在 `application.yml` 写明文密码**
 - 读环境变量 `SPRING_DATASOURCE_PASSWORD`
 - 本地开发用 `src/main/resources/application-local.yml`（**gitignored**，仓库里只有 `.example`）
+- 凭证只经环境变量注入，不进 `java` 参数：同机任何人 `ps` 就能看到命令行
+
+### 访问令牌 `z.schedule.accessToken`
+
+配了它，**整个 HTTP 面**都要带 token（请求头 `X-Access-Token` 或参数 `accessToken`，参数优先），
+只有 `POST /user/login` 与静态外壳（`/`、`/index.html`、`/favicon.ico`、`/assets/`、`/static/`、
+`/public/`、`/error`）免鉴权，其余一律 403——包括 `/actuator/*`（本应用开了
+`show-details=always`，health 会把数据源信息吐给匿名访问者）。
+
+没配它则整面敞开（自带的演示 UI 才能直接用），但启动时会打一条 warn 把这件事说出来，
+不再当成静默默认。
+
+250 真机实测（配了 token）：匿名打 `/jobinfo/list`、`/joblog/list`、`/user/list`、
+`/dashboard/stats`、`/actuator/health`、`POST /jobinfo/add`、`POST /executor/callback` 全部 403，
+且 `POST /jobinfo/add` 在库里零落地；带 token 后同一批请求回到 200、任务真的建出来。
+错 token 仍 403（`MessageDigest.isEqual` 定长比较，不按字节短路）。
+
+**仍未做的**：`z_schedule_user.role` / `permission` 两列只有写入和搬运，没有任何判定读它们；
+共享 token 也不产生"这次请求是谁"的身份，所以按用户分权还缺"登录发身份"那一步。
 
 ## 模块管理特性
 

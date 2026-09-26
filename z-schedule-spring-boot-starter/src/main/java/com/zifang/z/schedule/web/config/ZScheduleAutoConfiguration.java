@@ -66,13 +66,16 @@ public class ZScheduleAutoConfiguration extends ModuleDataSourceTemplate {
     /**
      * Token 认证过滤器注册。
      * <p>
-     * 当 z.schedule.accessToken 非空时启用，拦截 /executor/* 路径。
+     * 挂在 {@code /*} 上，由 {@link TokenAuthFilter} 自己按路径决定要不要校验：
+     * 只注册 {@code /executor/*} 的话，管理面（建任务/删任务/看日志/改用户/dashboard/actuator）
+     * 根本不会经过这个过滤器，配了 accessToken 也等于没配——过滤器里的路径判断会永远"通过"，
+     * 测试再怎么断言 403 也照样绿。
      */
     @Bean
     public FilterRegistrationBean<TokenAuthFilter> tokenAuthFilterRegistration(ScheduleProperties props) {
         FilterRegistrationBean<TokenAuthFilter> registration = new FilterRegistrationBean<>();
         registration.setFilter(new TokenAuthFilter(props));
-        registration.addUrlPatterns("/executor/*");
+        registration.addUrlPatterns("/*");
         registration.setName("tokenAuthFilter");
         registration.setOrder(1);
         return registration;
