@@ -6,6 +6,8 @@ import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.web.domain.entity.JobLogDO;
 import com.zifang.z.schedule.web.domain.mapper.JobLogMapper;
 import com.zifang.z.schedule.web.service.JobLogService;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
@@ -22,6 +24,8 @@ import java.util.Map;
 @Service
 public class JobLogServiceImpl implements JobLogService {
 
+    private static final Logger logger = LogManager.getLogger(JobLogServiceImpl.class);
+
     /** 清理日志时单批删除的行数上界, 见 {@link #deleteBefore(Date)}. */
     static final int CLEAR_BATCH_SIZE = 1000;
 
@@ -32,12 +36,25 @@ public class JobLogServiceImpl implements JobLogService {
     public long save(JobLog jobLog) {
         JobLogDO d = DoMapper.toDO(jobLog);
         jobLogMapper.insert(d);
-        return d.getId() == null ? 0L : d.getId();
+        Long generated = d.getId();
+        // 必须回填进 DTO：调用方（执行链路）拿同一个 JobLog 对象接着 update() 写执行结论，
+        // 而 update() 认 id。只 return id 的话结论永远写不进去——250 真机 144 行日志
+        // 的 handle_code 全是 0 就是这么来的。
+        if (jobLog != null && generated != null) {
+            jobLog.setId(generated);
+        }
+        return generated == null ? 0L : generated;
     }
 
     @Override
     public void update(JobLog jobLog) {
-        if (jobLog == null || jobLog.getId() <= 0) return;
+        if (jobLog == null || jobLog.getId() <= 0) {
+            // 到这里就是调用方手上拿着一个没落过库的 JobLog：更新会被整条丢掉，
+            // 静默 return 曾让执行结论断链在 225 个测试全绿的情况下躲过每一轮。
+            logger.warn("[z-schedule] 丢弃一次日志更新：id 非法({}), 这一行的执行结论不会落库",
+                    jobLog == null ? "null" : jobLog.getId());
+            return;
+        }
         JobLogDO d = DoMapper.toDO(jobLog);
         jobLogMapper.updateById(d);
     }

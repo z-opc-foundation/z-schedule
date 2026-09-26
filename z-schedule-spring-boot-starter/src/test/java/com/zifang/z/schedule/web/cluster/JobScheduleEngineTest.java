@@ -816,10 +816,43 @@ public class JobScheduleEngineTest {
             List<JobInfo> running = new ArrayList<JobInfo>();
             for (JobInfo job : store.values()) {
                 if (job.getTriggerStatus() == 1) {
-                    running.add(job);
+                    // 真实实现每次读都 DoMapper.toDTO 出一个新实例，引擎因此拿到的是"等值但不同引用"的
+                    // 排期定义。直接交出自已存的那个对象，排期比较就会被对象相等性蒙对，
+                    // Long == Long 这类引用比较在测试里永远红不了。
+                    running.add(copyOf(job));
                 }
             }
             return running;
+        }
+
+        private static JobInfo copyOf(JobInfo src) {
+            JobInfo copy = new JobInfo();
+            copy.setId(src.getId());
+            copy.setJobGroup(src.getJobGroup());
+            copy.setJobCron(src.getJobCron());
+            copy.setJobDesc(src.getJobDesc());
+            copy.setAuthor(src.getAuthor());
+            copy.setAlarmEmail(src.getAlarmEmail());
+            copy.setExecutorRouteStrategy(src.getExecutorRouteStrategy());
+            copy.setExecutorHandler(src.getExecutorHandler());
+            copy.setExecutorParam(src.getExecutorParam());
+            copy.setExecutorBlockStrategy(src.getExecutorBlockStrategy());
+            // 下面三列必须"塌成值、重新装箱"，和 DoMapper.toDTO 的三元表达式同形：
+            // 原样把 src 的 Long/Integer 交出去，副本与原件就共享同一个装箱对象，
+            // 于是"比引用"和"比取值"在测试里完全同形——把 intervalOf(a) == intervalOf(b)
+            // 退化写成 a.getFixInterval() == b.getFixInterval() 也永远红不了。
+            copy.setExecutorTimeout(src.getExecutorTimeout() == null ? 0 : src.getExecutorTimeout().intValue());
+            copy.setExecutorFailRetryCount(
+                    src.getExecutorFailRetryCount() == null ? 0 : src.getExecutorFailRetryCount().intValue());
+            copy.setLogId(src.getLogId());
+            copy.setTriggerStatus(src.getTriggerStatus());
+            copy.setTriggerLastTime(src.getTriggerLastTime());
+            copy.setTriggerNextTime(src.getTriggerNextTime());
+            copy.setTriggerType(src.getTriggerType());
+            copy.setFixInterval(src.getFixInterval() == null ? 0L : src.getFixInterval().longValue());
+            copy.setMisfireStrategy(src.getMisfireStrategy());
+            copy.setChildJobId(src.getChildJobId());
+            return copy;
         }
 
         public void updateTriggerTimes(int jobId, long lastTime, long nextTime) {

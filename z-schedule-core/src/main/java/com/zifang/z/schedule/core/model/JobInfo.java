@@ -71,14 +71,21 @@ public class JobInfo implements Serializable {
     private String executorBlockStrategy;
 
     /**
-     * 任务执行超时时间，单位秒
+     * 任务执行超时时间，单位秒。
+     * <p>
+     * 装箱不是风格问题：这个 DTO 同时是 {@code /jobinfo/update} 的请求体，而 partial update 只带
+     * 改动的那几列。primitive int 下"JSON 里没有这个键"反序列化出来就是 0，与"调用方要 0（不限超时）"
+     * 无法区分，合并闸门无论怎么写都会有一边是错的——留 null 才能把两件事分开。
+     * <p>
+     * 读侧注意：{@code DoMapper.toDTO} 会把列里的 NULL 收敛成 0，所以引擎拿到的实例这三列都不为 null；
+     * 但外部直接 new 出来的 DTO 会，读它们的地方要按 null 处理。
      */
-    private int executorTimeout;
+    private Integer executorTimeout;
 
     /**
-     * 失败重试次数
+     * 失败重试次数，语义同上（null=本次补丁没提这一列）。
      */
-    private int executorFailRetryCount;
+    private Integer executorFailRetryCount;
 
     /**
      * 调度日志主键
@@ -106,9 +113,9 @@ public class JobInfo implements Serializable {
     private String triggerType;
 
     /**
-     * FIX_RATE/FIX_DELAY 模式的间隔时间（毫秒）
+     * FIX_RATE/FIX_DELAY 模式的间隔时间（毫秒）；null 同 {@link #executorTimeout}，表示补丁没带这一列。
      */
-    private long fixInterval;
+    private Long fixInterval;
 
     /**
      * 调度过期策略：DO_NOTHING / FIRE_ONCE_NOW
@@ -216,19 +223,19 @@ public class JobInfo implements Serializable {
         this.executorBlockStrategy = executorBlockStrategy;
     }
 
-    public int getExecutorTimeout() {
+    public Integer getExecutorTimeout() {
         return executorTimeout;
     }
 
-    public void setExecutorTimeout(int executorTimeout) {
+    public void setExecutorTimeout(Integer executorTimeout) {
         this.executorTimeout = executorTimeout;
     }
 
-    public int getExecutorFailRetryCount() {
+    public Integer getExecutorFailRetryCount() {
         return executorFailRetryCount;
     }
 
-    public void setExecutorFailRetryCount(int executorFailRetryCount) {
+    public void setExecutorFailRetryCount(Integer executorFailRetryCount) {
         this.executorFailRetryCount = executorFailRetryCount;
     }
 
@@ -272,11 +279,11 @@ public class JobInfo implements Serializable {
         this.triggerType = triggerType;
     }
 
-    public long getFixInterval() {
+    public Long getFixInterval() {
         return fixInterval;
     }
 
-    public void setFixInterval(long fixInterval) {
+    public void setFixInterval(Long fixInterval) {
         this.fixInterval = fixInterval;
     }
 

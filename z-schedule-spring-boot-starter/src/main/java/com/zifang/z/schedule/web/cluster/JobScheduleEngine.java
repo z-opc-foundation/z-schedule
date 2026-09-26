@@ -256,7 +256,7 @@ public class JobScheduleEngine {
             return 0L;
         }
         if (TriggerTypeEnum.FIX_RATE.getCode().equals(triggerType)) {
-            long interval = job.info.getFixInterval();
+            long interval = intervalOf(job.info);
             return interval > 0 ? nowMs + interval : 0L;
         }
         if (job.cron == null) {
@@ -269,6 +269,23 @@ public class JobScheduleEngine {
     private static String triggerTypeOf(JobInfo info) {
         String type = info.getTriggerType();
         return (type == null || type.isEmpty()) ? TriggerTypeEnum.CRON.getCode() : type;
+    }
+
+    /**
+     * {@code JobInfo} 的间隔/超时列是装箱的（partial update 要分得清"没带这一列"和"带了 0"），
+     * 引擎侧一律把 null 读成"没配置"：从服务出来的行由 {@code DoMapper.toDTO} 收敛过，
+     * 这里兜的是外部直接构造、没经过持久层的 DTO。
+     */
+    private static long intervalOf(JobInfo info) {
+        return longOf(info.getFixInterval());
+    }
+
+    private static long longOf(Long value) {
+        return value == null ? 0L : value;
+    }
+
+    private static int intOf(Integer value) {
+        return value == null ? 0 : value;
     }
 
     /**
@@ -450,7 +467,7 @@ public class JobScheduleEngine {
             if (job == null || !state.firing) {
                 continue;
             }
-            int timeoutSec = job.info.getExecutorTimeout();
+            int timeoutSec = intOf(job.info.getExecutorTimeout());
             if (timeoutSec <= 0) {
                 timeoutSec = properties.getExecutorTimeout();
             }
@@ -552,7 +569,7 @@ public class JobScheduleEngine {
         CronExpression cron = null;
 
         if (TriggerTypeEnum.FIX_RATE.getCode().equals(triggerType)) {
-            long interval = info.getFixInterval();
+            long interval = intervalOf(info);
             if (interval <= 0) {
                 return null;
             }
@@ -572,7 +589,7 @@ public class JobScheduleEngine {
 
         if (TriggerTypeEnum.FIX_DELAY.getCode().equals(triggerType)) {
             // 启动即跑一次（没有"上一次完成时间"可延迟），之后每轮由 completeJob() 挂下一轮
-            return info.getFixInterval() > 0 ? new ScheduledJob(info, null, nowMs) : null;
+            return intervalOf(info) > 0 ? new ScheduledJob(info, null, nowMs) : null;
         }
 
         if (info.getJobCron() == null || info.getJobCron().trim().isEmpty()) {
@@ -692,7 +709,9 @@ public class JobScheduleEngine {
     /** 两个定义里"会改变排期结果"的字段是否一致；不一致才允许 reconcile 重算下次触发时间。 */
     private static boolean sameSchedulePlan(JobInfo a, JobInfo b) {
         return triggerTypeOf(a).equals(triggerTypeOf(b))
-                && a.getFixInterval() == b.getFixInterval()
+                // 必须是 intervalOf 的取值比较：Long 直接 == 比的是引用，60000 与 60000 会判成"排期变了"，
+                // 于是每次 reconcile 都把 FIX_RATE 的首次触发往后推——正好是这条闸门要防的那个缺陷。
+                && intervalOf(a) == intervalOf(b)
                 && eq(a.getJobCron(), b.getJobCron())
                 && eq(a.getMisfireStrategy(), b.getMisfireStrategy());
     }
@@ -719,7 +738,7 @@ public class JobScheduleEngine {
         if (!TriggerTypeEnum.FIX_DELAY.getCode().equals(triggerTypeOf(job.info))) {
             return;
         }
-        long interval = job.info.getFixInterval();
+        long interval = intervalOf(job.info);
         if (interval <= 0) {
             return;
         }

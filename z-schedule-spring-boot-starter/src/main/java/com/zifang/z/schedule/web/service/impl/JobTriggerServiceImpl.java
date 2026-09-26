@@ -173,10 +173,9 @@ public class JobTriggerServiceImpl implements JobTriggerService {
      * 执行一个任务：建日志 → 调 handler → 失败重试（指数退避）→ 回写结果与告警。
      */
     private void executeJob(JobInfo jobInfo) {
-        int retryCount = jobInfo.getExecutorFailRetryCount();
-        if (retryCount < 0) {
-            retryCount = 0;
-        }
+        Integer configuredRetries = jobInfo.getExecutorFailRetryCount();
+        // null=这个 DTO 没经过持久层（外部直接构造/手工触发），按"不重试"处理
+        int retryCount = configuredRetries == null || configuredRetries < 0 ? 0 : configuredRetries;
         int maxAttempts = retryCount + 1;
         long logId = 0L;
 

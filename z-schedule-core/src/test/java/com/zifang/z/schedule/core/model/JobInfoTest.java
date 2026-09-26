@@ -20,7 +20,7 @@ public class JobInfoTest {
 
         // fixInterval
         job.setFixInterval(60000L);
-        assertEquals(60000L, job.getFixInterval());
+        assertEquals(Long.valueOf(60000L), job.getFixInterval());
 
         // misfireStrategy
         job.setMisfireStrategy("FIRE_ONCE_NOW");
@@ -34,11 +34,34 @@ public class JobInfoTest {
     @Test
     public void testNewFieldsDefaultValues() {
         JobInfo job = new JobInfo();
-        // 默认值：triggerType 默认为 CRON，fixInterval 默认为 0
+        // 默认值：triggerType 默认为 CRON（由读侧收敛），fixInterval 默认是"没带这一列"
         assertNull(job.getTriggerType());
-        assertEquals(0L, job.getFixInterval());
+        assertNull(job.getFixInterval());
         assertNull(job.getMisfireStrategy());
         assertNull(job.getChildJobId());
+    }
+
+    /**
+     * 这三列必须是引用类型，否则 {@code /jobinfo/update} 的 partial update 无从判断"补丁带没带这一列"：
+     * primitive 下缺席和显式 0 都是 0，而 0 对这三列都是有意义的值（不限超时 / 不重试 / 无间隔）。
+     * 装箱前合并闸门只能靠数值猜，代价是要么抹掉列值、要么吞掉合法的显式 0。
+     */
+    @Test
+    public void 补丁字段用null表示缺席而不是0() {
+        JobInfo patch = new JobInfo();
+        patch.setId(7);
+        patch.setJobDesc("只改描述");
+
+        assertNull("缺席的超时不能被读成 0", patch.getExecutorTimeout());
+        assertNull("缺席的重试次数不能被读成 0", patch.getExecutorFailRetryCount());
+        assertNull("缺席的间隔不能被读成 0", patch.getFixInterval());
+
+        patch.setExecutorTimeout(0);
+        patch.setExecutorFailRetryCount(0);
+        patch.setFixInterval(0L);
+        assertEquals(Integer.valueOf(0), patch.getExecutorTimeout());
+        assertEquals(Integer.valueOf(0), patch.getExecutorFailRetryCount());
+        assertEquals(Long.valueOf(0L), patch.getFixInterval());
     }
 
     @Test
