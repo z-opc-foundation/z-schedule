@@ -1,5 +1,8 @@
 #!/bin/bash
-# p20.sh — 连接池是不是那堵墙？固定需求（N=800 个 1Hz 任务），只改 Druid max-active，看吞吐跟不跟。
+# p20.sh — 连接池是不是那堵墙？只改 Druid max-active，看吞吐跟不跟。需求量由 N 给（默认 800）。
+#
+# N 必须**大于**想量的供给上限，否则量到的是需求不是上限：N=800/池 80 那档达成 101 %，
+# 读数 808 是需求；把 N 抬到 1600 后同一池出 904.9（达成 56.6 %），905 才是池 80 的供给上限。
 #
 # 为什么要有这一支：p16 的三级阶梯（N=400/800/1600）实测都停在 346 次/s，
 # 说明 ~346 是**供给侧天花板**而不是需求没打满；p19 又数出忙连接峰值正好等于池上限 20、
@@ -38,11 +41,18 @@ seed() { # 与 p16 同形状：空 handler ⇒ 走 INVALID_PARAM，一次执行�
   for ((i = 0; i < n; i++)); do
     rows="$rows($PERF_GROUP,'p20-$i','','p20','','$i','FIRST','SERIAL_EXECUTION',0,0,1,0,0,'FIX_RATE',1000,'DO_NOTHING','',NOW(),NOW()),"
   done
-  q -e "INSERT INTO z_schedule_job_info
-     (job_group,job_desc,job_cron,author,executor_handler,executor_param,executor_route_strategy,
-      executor_block_strategy,executor_timeout,executor_fail_retry_count,trigger_status,
-      trigger_last_time,trigger_next_time,trigger_type,fix_interval,misfire_strategy,child_job_id,add_time,update_time)
-     VALUES ${rows%,};"
+  rows="${rows%,}"
+  # 必须走 stdin：Linux 的 MAX_ARG_STRLEN 把**单个** argv 字符串限在 128 KB，
+  # 一条播种 INSERT 就是一个字符串——N=800（≈96 KB）能过，N=1600（≈192 KB）报
+  # `Argument list too long`。而 p16 用 heredoc 所以 1600 从来没挂过：两把尺因为传法不同
+  # 在一个需求量上直接不守恒，这是尺的缺陷不是系统的（挂掉时本脚本确实报了"读数不可信"，没编数）。
+  q <<SQL
+INSERT INTO z_schedule_job_info
+ (job_group,job_desc,job_cron,author,executor_handler,executor_param,executor_route_strategy,
+  executor_block_strategy,executor_timeout,executor_fail_retry_count,trigger_status,
+  trigger_last_time,trigger_next_time,trigger_type,fix_interval,misfire_strategy,child_job_id,add_time,update_time)
+VALUES $rows;
+SQL
   q -e "SELECT CONCAT('  播种=', COUNT(*), ' 个, 启用=', SUM(trigger_status))
        FROM z_schedule_job_info WHERE job_group=$PERF_GROUP"
 }
