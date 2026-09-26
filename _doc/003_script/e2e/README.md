@@ -1470,3 +1470,48 @@ README 只数围栏内：`./run.sh` 也出现在讲坑的正文里（"以前裸�
    （README:125）本来就显式写 `JAR=…-svc-<sha>-exec.jar`，不受影响。
 2. 同步 `run.sh`（md5 现为 `676a4cfb…`）到 250 之后，臂 B 与一条 p10 boot 要各跑一遍。
 3. §13/§14 那两格欠的 `run14` rc=1 归因与 `run15` 整跑复核也在同一台机器上。
+
+## 16. #37 的静态半边：`deploy/README.md` 教人敲的东西，逐条对仓内实物（`p24.sh` 的 A13）
+
+`deploy/README.md` 是本仓唯一一份"照做就能跑起来"的说明书。它广告出去的每一句 `make X`、树里
+声明的每一个路径、以及"`cp env/.env.example env/.env` 之后再 `make dev`"这条链上的每一个键，
+都是对读者的承诺（§7 那条"广告即契约"同一条规矩）。这一格先做**不需要机器**的那半边：三查。
+
+1. **`make` 目标**：只数 ``` 围栏内的行，且把 `make dev/split/cluster/build/k8s-apply/clean`
+   这种斜杠清单拆开成 6 个 token（README:16 那句就长这样）。12 个 token / 9 个不同目标，
+   全部在 `Makefile` 的 `^目标:` 集合里 ⇒ 不存在的目标 0 个。
+2. **目录树**：那 22 条 `├── xxx` 按缩进还原成路径逐个查存在（`bin/`、`env/`、`k8s/` 的子女
+   要落在各自的目录里，不是"仓里某处有同名文件"）。22 条全在。
+3. **示例 env 的键面**：三个 compose 里被 `${V:?}` 硬要求的键 = `DB_HOST DB_NAME DB_PORT DB_USER`
+   四个，`.env.example` 里这四条都以**未注释**形式给了；带 `:-` 默认的那批
+   （`DB_POOL_MAX_ACTIVE HTTP_PORT IMAGE_VERSION JAR_FILE JAVA_OPTS OCI_REGISTRY`）示例也全给了；
+   注释掉的（`BACKEND_SERVICE HTTP_PORT INGRESS_DOMAIN NAMESPACE TLS_SECRET_NAME`）确实都是可选项。
+   ⇒ **这一格没有缺陷**，但它是本档第一次把"文档路径要的键"和"清单硬要求的键"摆在一起数。
+
+三处尺伤（都记下来，因为每一条都会以"假缺陷"或"假绿"的形态咬人）：
+
+- **深度不能从 strip 之后的行算**。第一版拿 `s.count('│') + s.count('    ')` 定缩进层，而树里的
+  注释列是用空格对齐的（`├── docker-compose.yml              # Mode 1…`）⇒ 一行注释里的空格被当成
+  四层缩进，22 条里 10 条被推到错误的目录下，报出"缺 `build-images.sh`、缺 `.env.example`、
+  缺 `00-namespace.yaml`…"一整套假缺陷。现在深度从**原始行**里 `──` 的列位算（`(idx-1)//4`）。
+- **YAML/shell 的注释行必须先剥掉再扫变量**。不剥的话 `${V:?…}`（compose 第 27 行那句解释）和
+  `${BACKEND_SERVICE}`（split.yml:63 那句解释）会被读成两个硬要求键 ⇒ 又差点对着一个不存在的缺口
+  "返工"。这一条现在既是判据也是**反向对照**：A13 断言硬要求集合里不许出现 `V` / `BACKEND_SERVICE`。
+- **`grep -qwV V` 是自我冲突的写法**：BSD grep 把粘在选项串里的 `V` 当成 `-V`（无效选项，打 usage
+  退 1），于是那条判据的真假不再由被搜内容决定。A13 第一遍的 FAIL 就死在这里、而不是死在面上
+  （三个分母、猎物三处命中全都正确）。改成 `case " $列表 " in *" $k "*)` 这种零正则的形状。
+- 另有一条不算尺伤但值得留：**`ls env` 看着是空目录**，因为里面只有 `.env.example` 一个点文件。
+  本机这条坑（glob/ls 不匹配点文件）已经咬过两次，这一遍差点让我把"示例文件不存在"写进结论。
+
+读数与复算：`P24_A_ONLY=1 bash p24.sh`（本机 bash 3.2.57）——
+06:31:46 那遍 `PASS=19 FAIL=1`（红的就是 A13 的 `grep -qwV` 那条），06:33:13 与 06:33:25 两遍
+`PASS=20 FAIL=0` rc=0。日志 `~/.cache/p24_armA_a13_1.log`、`_3.log`、`_final.log`；
+被测量具字节 `p24.sh` md5 `eb27464d…`。
+
+### 16.1 #37 还欠的真机半边
+
+静态这半边只能证明"广告里的目标/路径/键在仓里对得上"。剩下的必须在一台真有 docker 的机器上敲：
+`make dev` / `split` / `cluster` / `logs` / `down` / `build` 这六个入口按 README 字面各跑一遍，
+以及 `bin/start-mode{1,2,3}.sh`、`make k8s-apply` 的**渲染段**（无集群时只验渲染，见 §11 那条
+`k8s-apply.sh` 的 `"$ 0"` 碎变量修复）。这批读数和 §13/§14/§15 欠的那几遍一起，全卡在同一件事上：
+250 的 sshd 从 05:44 起拒连（22 端口 TCP 可连、不回 banner；18098 的常驻服务仍在答 JSON）。

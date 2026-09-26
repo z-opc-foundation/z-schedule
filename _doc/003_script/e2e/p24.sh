@@ -414,6 +414,110 @@ else
   bad "A12 形状不对：zero[$A12_ZERO] one[$A12_ONE] two[$A12_TWO] named[$A12_NAMED] teeth[$A12_TEETH]"
 fi
 
+# A13（#37 的静态半边）deploy/README.md 教人敲的东西，逐条对仓内实物。
+#   三件事各自一条判据：① 围栏里出现的每个 `make X`（含 `make a/b/c` 这种斜杠清单）都得是 Makefile
+#   真有的目标；② 那棵目录树里声明的每个路径，按缩进推出来的位置得真在那儿；③ compose 用 ${V:?}
+#   硬要求的键，必须在 env/.env.example 里以**未注释**的形式存在——文档路径就是
+#   `cp env/.env.example env/.env && make dev`，示例文件缺一个硬要求键，第一条命令就死。
+# ⚠ ③ 必须是"剥掉 YAML 注释行之后再扫"：手算这一格时不剥注释，`${V:?…}` 与 `${BACKEND_SERVICE}`
+#   这两个只存在于注释里的写法被读成两个硬要求键，差点据此报"示例文件缺两项"要去返工
+#   （实情：docker-compose.split.yml:63 是注释，Makefile 里那句 `${V:?}` 也在注释里）。
+#   所以这一臂除了猎物，还带一条**反向对照**：真文件扫出来的硬要求集合里不许出现 V / BACKEND_SERVICE，
+#   哪天有人把注释扫回来了，这条会先红，不会先把假缺陷送进 README。
+cat > "$WORK/a13_docface.py" <<'PY'
+import os, re, sys
+dep, readme, makefile, envex = sys.argv[1:5]
+mk = set(re.findall(r'^([A-Za-z0-9_.-]+):', open(makefile, encoding='utf-8').read(), re.M))
+toks, bad_make = [], []
+tree = []
+fence = False
+for i, ln in enumerate(open(readme, encoding='utf-8').read().split('\n'), 1):
+    if ln.lstrip().startswith('```'):
+        fence = not fence; continue
+    if not fence:
+        continue
+    for m in re.finditer(r'make\s+([A-Za-z0-9_./-]+)', ln):
+        for t in m.group(1).split('/'):
+            if t:
+                toks.append(t)
+                if t not in mk:
+                    bad_make.append('%d:make %s' % (i, t))
+    if '──' in ln:
+        idx = ln.find('──')
+        depth = (idx - 1) // 4 if idx >= 4 else 0
+        name = re.split(r'──\s*', ln.strip(), maxsplit=1)[1].split()[0]
+        tree.append((i, depth, name))
+cur = {}
+bad_tree = []
+for i, depth, name in tree:
+    base = cur.get(depth - 1, '')
+    path = os.path.join(dep, base, name.rstrip('/')) if base else os.path.join(dep, name.rstrip('/'))
+    ok = os.path.isdir(path) if name.endswith('/') else os.path.isfile(path)
+    if name.endswith('/'):
+        cur[depth] = os.path.join(base, name.rstrip('/')) if base else name.rstrip('/')
+    if not ok:
+        bad_tree.append('%d:%s' % (i, os.path.relpath(path, dep)))
+yreq = set()
+for f in sorted(os.listdir(dep)):
+    if not f.startswith('docker-compose') or not f.endswith(('.yml', '.yaml')):
+        continue
+    for ln in open(os.path.join(dep, f), encoding='utf-8'):
+        if ln.lstrip().startswith('#'):
+            continue
+        yreq |= set(re.findall(r'\$\{([A-Z0-9_]+):\?', ln))
+ex = open(envex, encoding='utf-8').read()
+provided = set(re.findall(r'^([A-Z][A-Z0-9_]*)=', ex, re.M))
+bad_env = sorted(yreq - provided)
+print('MAKE|%d|%s' % (len(toks), ' '.join(bad_make) or '-'))
+print('TREE|%d|%s' % (len(tree), ' '.join(bad_tree) or '-'))
+print('ENV|%d|%s|%s' % (len(yreq), ' '.join(sorted(yreq)), ' '.join(bad_env) or '-'))
+PY
+a13_run() { python3 "$WORK/a13_docface.py" "$DEPLOY" "$1" "$DEPLOY/Makefile" "${2:-$DEPLOY/env/.env.example}"; }
+A13=$(a13_run "$DEPLOY/README.md")
+A13_MAKE=$(printf '%s\n' "$A13" | grep '^MAKE' | head -1)
+A13_TREE=$(printf '%s\n' "$A13" | grep '^TREE' | head -1)
+A13_ENV=$(printf '%s\n' "$A13" | grep '^ENV' | head -1)
+# 猎物：一份改过的 README（多一个假 make 目标 + 树里多一个不存在的脚本）+ 一份抽掉 DB_USER 的示例
+mkdir -p "$WORK/prey_a13"
+python3 - "$DEPLOY/README.md" "$WORK/prey_a13/README.md" "$DEPLOY/env/.env.example" "$WORK/prey_a13/env.example" <<'PY'
+import re, sys
+t = open(sys.argv[1], encoding='utf-8').read()
+# 塞进第一个 bash 围栏里，保证走的是和真判据完全相同的那条路
+i = t.index('```bash')
+j = t.index('```', i + 7)
+t2 = t[:j] + 'make frobnicate\n' + t[j:]
+k = t2.index('├── bin/')
+t2 = t2[:k] + '│   ├── start-mode7.sh\n' + t2[k:]
+assert t2 != t and 'frobnicate' in t2 and 'start-mode7.sh' in t2, 'A13 猎物没注入成功'
+open(sys.argv[2], 'w', encoding='utf-8').write(t2)
+e = open(sys.argv[3], encoding='utf-8').read()
+e2 = re.sub(r'(?m)^DB_USER=.*\n', '', e, count=1)
+assert e2 != e, 'A13 的 env 猎物没抽掉 DB_USER（示例文件的写法和我以为的不一样）'
+open(sys.argv[4], 'w', encoding='utf-8').write(e2)
+PY
+A13P=$(a13_run "$WORK/prey_a13/README.md" "$WORK/prey_a13/env.example")
+A13_MK_N=$(printf '%s' "$A13_MAKE" | cut -d'|' -f2)
+A13_TR_N=$(printf '%s' "$A13_TREE" | cut -d'|' -f2)
+A13_ENV_N=$(printf '%s' "$A13_ENV" | cut -d'|' -f2)
+A13_YREQ=" $(printf '%s' "$A13_ENV" | cut -d'|' -f3) "
+# 反向对照用 case 而不是 grep：`grep -qwV V` 这种"选项字母恰好等于被搜单词"的写法在 BSD grep 上
+# 把 -V 当成选项（打 usage、退出码 1），判据的形状就取决于 ! 落在哪，不再是"注释里的键不许算硬要求"。
+A13_BLIND=ok
+for k in V BACKEND_SERVICE; do
+  case "$A13_YREQ" in *" $k "*) A13_BLIND="把注释里的键 $k 当成了硬要求";; esac
+done
+if [ "${A13_MK_N:-0}" -gt 0 ] && [ "${A13_TR_N:-0}" -gt 0 ] && [ "${A13_ENV_N:-0}" -gt 0 ] \
+   && printf '%s' "$A13_MAKE" | grep -q '|-$' && printf '%s' "$A13_TREE" | grep -q '|-$' \
+   && printf '%s' "$A13_ENV" | grep -q '|-$' \
+   && [ "$A13_BLIND" = ok ] \
+   && [ "$(printf '%s' "$A13P" | grep -c 'frobnicate')" = "1" ] \
+   && [ "$(printf '%s' "$A13P" | grep -c 'start-mode7.sh')" = "1" ] \
+   && [ "$(printf '%s' "$A13P" | grep -c 'DB_USER')" = "1" ]; then
+  ok "A13 文档广告面三查全绿：README 围栏里 $A13_MK_N 个 make 目标全在 Makefile（不存在的目标 0 个）、树里 $A13_TR_N 条路径按缩进逐个存在、compose 硬要求 :? 的 $A13_ENV_N 个键[$A13_YREQ] 在 .env.example 里都未注释地给了；反向对照：只写在注释里的 \${V:?}/\${BACKEND_SERVICE} 没被当成硬要求；同一份尺对猎物点名 3 处 [make frobnicate / bin/start-mode7.sh / DB_USER 缺]"
+else
+  bad "A13 形状不对：[$A13_MAKE] [$A13_TREE] [$A13_ENV] 猎物[$A13P]（期望 三个分母都 >0 且三处都 '-' 且猎物三处各命中 1）"
+fi
+
 echo ""
 echo "PASS=$PASS FAIL=$FAIL（臂 A 结束）"
 if [ "${P24_A_ONLY:-0}" = "1" ]; then
