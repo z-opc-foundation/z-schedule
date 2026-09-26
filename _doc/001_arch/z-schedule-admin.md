@@ -67,8 +67,33 @@ cd z-schedule/deploy && docker compose up
 
 配了它，**整个 HTTP 面**都要带 token（请求头 `X-Access-Token` 或参数 `accessToken`，参数优先），
 只有 `POST /user/login` 与静态外壳（`/`、`/index.html`、`/favicon.ico`、`/assets/`、`/static/`、
-`/public/`、`/error`）免鉴权，其余一律 403——包括 `/actuator/*`（本应用开了
-`show-details=always`，health 会把数据源信息吐给匿名访问者）。
+`/public/`、`/error`）免鉴权，其余一律 403——包括 `/actuator/*`。
+
+括号里那段理由原先写的是"本应用开了 `show-details=always`，health 会把数据源信息吐给匿名访问者"。
+**这句是错的，而且错的方式正是本档要记的东西**：那段配置写在 `application.yml` 的 `spring.actuator.*`
+下（缩进在 `spring:` 里），而 Boot 读的是顶层 `management.*`，所以**整块配置从未生效过**——
+250 真机在构件 `a16473a` 上实测 `/actuator/health` 只回 `{"status":"UP"}`（没有明细）、
+`/actuator/info` 是 404（`include` 也没生效）。配置没生效不等于过滤器有洞：
+`/actuator/*` 的 403 由 `TokenAuthFilter` 兜着，与这段 yml 无关，所以那条 403 一直是真的。
+现在 `show-details` 显式定为 `when-authorized`，理由换成一条量过的：故障时 detail 里是
+连接池内部状态与驱动报错原文（`wait millis 3000, active 0, maxActive 20, creating 4`），
+而演示模式（未配 `accessToken`）整个 HTTP 面敞开——明细就等于是给匿名看的。
+
+### 探针面（`/actuator/health` 与两条探针组）
+
+`deploy/k8s/01-deployment-backend.yaml` 的 `livenessProbe` / `readinessProbe` 指的是
+`/actuator/health/{liveness,readiness}`。这两条路径在 2026-09-26 之前的构件上**根本不存在**（404），
+因为 Boot 只在检测到 Kubernetes 平台时才自动建这两个组，而块内的 `include` 又因上面那个缩进错而没生效
+⇒ 部署文件承诺的探测在离集群的任何场合（本机、250、docker-compose）一次都没被验过。
+现在 `management.endpoint.health.probes.enabled=true` 让它在任何平台都存在，`_doc/003_script/e2e/p23.sh`
+就是在真机上验这两条的档。
+
+第二个缺陷是这次真跑出来的：**Boot 自动建的 `readiness` 组不含数据源**。把这台实例的
+`spring.datasource.url` 指到没人听的端口后，顶层 `/actuator/health` 正确 503 DOWN，
+而 `/actuator/health/readiness` 仍回 **200 UP** ⇒ 照 manifest 部署时库死了 pod 依然"就绪"、继续接流量。
+现在 `readiness` 显式含 `readinessState,db`、`liveness` 显式只含 `ping,livenessState`：
+库抖动不该把进程重启掉（重启只会让 reconcile 更糟）。`z-schedule-admin` 里那条 yml 键位守卫
+（`ManagementConfigBindingTest`）钉的就是这个分工，5 支变异自证见 `_doc/003_script/e2e/README.md`。
 
 没配它则整面敞开（自带的演示 UI 才能直接用），但启动时会打一条 warn 把这件事说出来，
 不再当成静默默认。

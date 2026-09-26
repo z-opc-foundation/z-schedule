@@ -82,9 +82,11 @@ management:
           include: ping,livenessState
         readiness:
           include: readinessState,db
-      # 明细不对匿名铺：上面那次 DOWN 的 detail 里带着 druid 的报错原文（含被配死的 JDBC 地址），
+      # 明细不对匿名铺：DOWN 时的 detail 里是连接池内部状态和驱动报错原文（实测含
+      # `GetConnectionTimeoutException: wait millis 3000, active 0, maxActive 20, creating 4`，
+      # 把自家池容量摆给匿名；JDBC 地址本身这次没漏出来，实测 grep "33999" 零命中）。
       # 而演示模式（没配 accessToken）整个 HTTP 面是敞开的。探针靠 HTTP 码说话，不靠 body。
-      # 改回 always 的那一格在 _doc/001_arch/z-schedule-admin.md 里已经写明它其实从未生效过。
+      # 原先写的 always 其实从未生效过（就是上面那段死配置），这条改动没有扩大暴露面。
       show-details: when-authorized
 
 # 调度引擎自己的连接池（starter 的 dataSourceSchedule 读这里，不读上面 spring.datasource.druid.*）。
