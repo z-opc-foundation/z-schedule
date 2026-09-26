@@ -14,14 +14,20 @@ ENVFILE=""
 
 REPLICAS="${1:-2}"
 
+# 两支 compose CLI 都能解析（机理见 start-mode1.sh 的注释）。
+compose() {
+    if docker compose version >/dev/null 2>&1; then docker compose "$@"
+    else docker-compose "$@"; fi
+}
+
 echo "=== 启动 Mode 3（集群，backend replicas=$REPLICAS）==="
-docker compose $ENVFILE -f docker-compose.cluster.yml up -d --scale z-schedule-backend="$REPLICAS"
+compose $ENVFILE -f docker-compose.cluster.yml up -d --scale z-schedule-backend="$REPLICAS"
 
 echo ""
 echo "✓ 启动完成。"
-docker compose -f docker-compose.cluster.yml ps
+compose $ENVFILE -f docker-compose.cluster.yml ps
 echo ""
 echo "  访问前端：http://localhost"
 echo "  验证反代：curl http://localhost/api/actuator/health（nginx 把 /api/ 剥掉转到后端 /meta/）"
 echo "  调整副本：bash bin/start-mode3.sh 5（启动 5 个后端）"
-echo "  停止：docker compose -f docker-compose.cluster.yml down"
+echo "  停止：make down"

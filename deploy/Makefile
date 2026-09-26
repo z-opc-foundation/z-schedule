@@ -22,9 +22,18 @@ DB_NAME ?= zschedule
 DB_USER ?= root
 DB_POOL_MAX_ACTIVE ?= 40
 
-COMPOSE_BASE = docker compose
-COMPOSE_SPLIT = docker compose -f docker-compose.split.yml
-COMPOSE_CLUSTER = docker compose -f docker-compose.cluster.yml
+# compose 命令行不能写死：老一点的管理机只有 docker-compose 二进制、没有 compose 插件
+# （250 就是 Docker 20.10.21 + Docker Compose v5.0.2），写死 `docker compose` 会让 make dev
+# 死在命令行本身，报出来的错还不是部署的错。
+COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
+# compose 只自动读 deploy/.env，而本仓模板在 deploy/env/.env ⇒ 每条 compose 命令都得指过去。
+# ps/down/logs 尤其要指：不指的话，compose 文件里的 ${DB_HOST:?} 守卫会在**停下容器**这条路上
+# 也当场拒，用户照 README 起的容器就照 README 停不掉。
+ENVARG := $(shell [ -f env/.env ] && echo "--env-file env/.env")
+
+COMPOSE_BASE = $(COMPOSE) $(ENVARG)
+COMPOSE_SPLIT = $(COMPOSE) $(ENVARG) -f docker-compose.split.yml
+COMPOSE_CLUSTER = $(COMPOSE) $(ENVARG) -f docker-compose.cluster.yml
 
 # ---- 入口命令 ----
 .PHONY: help dev split cluster build k8s-apply clean ps logs down
@@ -57,13 +66,13 @@ k8s-apply: ## K8s 一键部署（需设置 INGRESS_DOMAIN 与 DB_HOST/DB_NAME）
 
 ps: ## 查看运行中的容器
 	@echo "=== Mode 1 ==="
-	$(COMPOSE_BASE) ps 2>/dev/null || echo "(未运行)"
+	$(COMPOSE_BASE) ps 2>/dev/null || echo "(未运行，或缺 env/.env——守卫会让 compose 连解析都失败)"
 	@echo ""
 	@echo "=== Mode 2 ==="
-	$(COMPOSE_SPLIT) ps 2>/dev/null || echo "(未运行)"
+	$(COMPOSE_SPLIT) ps 2>/dev/null || echo "(未运行，或缺 env/.env——守卫会让 compose 连解析都失败)"
 	@echo ""
 	@echo "=== Mode 3 ==="
-	$(COMPOSE_CLUSTER) ps 2>/dev/null || echo "(未运行)"
+	$(COMPOSE_CLUSTER) ps 2>/dev/null || echo "(未运行，或缺 env/.env——守卫会让 compose 连解析都失败)"
 
 logs: ## 查看 Mode 1 日志
 	$(COMPOSE_BASE) logs -f z-schedule-admin

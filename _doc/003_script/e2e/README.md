@@ -938,5 +938,118 @@ B13 两边都测：不给 `DB_HOST` ⇒ compose `config` 非 0 且消息点名�
    所以"nginx 反代到后端"在 Mode 2/3 只能验到 `/api/actuator/health` 这类直接路径，验不到页面真的能用。
 3. **真集群 apply 仍未做**（11.2）。另外这台机器只有 `docker-compose` 二进制、没有 `docker compose` 插件
    （Docker 20.10.21），而入口脚本写的是后者 ⇒ 在老一点的管理机上 `make dev` 会死在命令行本身。本轮只在 250
-   上取证，没有为它加兼容分支。
+   上取证，没有为它加兼容分支。**这一条已被 §12 那一格闭掉**：现在两支 CLI 都解析，判据是 `p25.sh` 的 P1/P2/P2c。
 4. 线上 `oc` 库的 `permission` 列还没逐列对过账（§9 那条链在演示库上验的）。
+
+## 12. Mode 1 入口彩排：`make dev` 这条路第一次真跑（#31，`p25.sh`）
+
+§11.7 第 3 条当时记的是"入口脚本写的是 `docker compose`，而 250 只有 `docker-compose` 二进制 ⇒
+在老一点的管理机上 `make dev` 会死在命令行本身"，并且**没有为它加兼容分支**。这一格把那句话兑现成读数：
+`deploy/README.md` 让人敲的 `make dev` / `bin/start-mode1.sh` 在这台机器上**从来没执行过**——
+p24 的臂 B 走的是 `docker run` + 渲染出来的 ConfigMap env，那是**清单**那条路，不是**入口**那条路。
+尺在 `_doc/003_script/e2e/p25.sh`（静态 5 项 + 运行时 24 项，跑法见档头）。
+
+250 上 09-27 03:26:04 的收口读数（时刻取自日志 mtime，`stat -c %y`）：**`总判：PASS=29 FAIL=0`**，
+另有 1 项 `[SKIP]`（P2c，这台没有 make，见 12.5）。中间那一遍 run8 是 `PASS=28 FAIL=1`，
+红在 P7 而病在尺上（12.4 第 4 条）。`make` 那一层在本机补量
+（GNU Make 3.81 + Compose v5.1.4，`P25_STATIC_ONLY=1 ./p25.sh` → **`PASS=5 FAIL=0`**，其中 P2c 证的是
+`make dev` 展开成 `docker compose … bin/start-mode1.sh`、`down` 带 `--env-file` 三处）。
+
+### 12.1 三条入口缺陷，每条都是"跑一次就有读数"
+
+| # | 缺陷 | 后果 | 抓到它的判据 |
+|---|---|---|---|
+| 1 | 三个入口脚本与 `Makefile` 把命令行钉死成 `docker compose`（Makefile 里是 `COMPOSE_x := docker compose` 这种赋值形状） | 250 是 Docker 20.10.21、没装 compose 插件 ⇒ "一键"死在**命令行本身**，报的错还不是部署的错，读日志的人会去查数据库 | P1：扫行首裸调用与钉死的赋值，两支都算命中；尺先在 3 行人造旧形状上命中过才许报绿 |
+| 2 | `docker-compose.yml` 里只有 `DB_HOST` 带 `:?` 守卫，而 `make ps` / `make down` / `make logs` **不带 `--env-file`** | `:?` 在**解析阶段**就拒 ⇒ 照 README 起得来的容器，照 README 停不掉。手工取证：同一份文件，带 `--env-file env/.env` 的 `down` rc=0，不带的 rc=1 且报同类缺变量错误（那一遍点名的键是 `DB_HOST`，但这个名字不固定，见 12.2 的 P7） | P2（三个 `COMPOSE_*` 各 1 处 `--env-file`，旧形状对照数到 0）+ P16（`down` rc=0 ⇒ 容器没了、18086 释放） |
+| 3 | 仓库根没有 `.dockerignore`，而 `build.context` 是仓库根 | daemon 收到 **827 MiB**（改前实测），而两个 Dockerfile 实际只要 `${JAR_FILE}` 那一个 jar 与前端的 `_frontend/` + `nginx.conf.template` | P3（排除清单四项，假文件对照报缺 4 项）+ P10（直接读 daemon 自己打的计数行） |
+
+`.dockerignore` 的上下文体积有三代读数，逐代都是实测：
+**827 MiB**（改前）→ **225.6 MB**（加了 `*.jar` 之后，但演练机根目录还躺着我自己的三个**改了名的**备份 jar）
+→ **52–57 MB 量级**（归档那三个之后）。这一档是"读数"而不是"定值"，同一台机器半小时内三个来源各量一次：
+`docker build -f <FROM scratch> .` 当场问 daemon = **56.93 MB**；run9 里 `create` 打的计数行是 **51.9MB**
+（P10 的换算把 daemon 的 `MB` 记成 MiB，二/十进制差约 2%，这一档只用来判 "< 300 MiB"，不当精确字节数用）；
+另写一个逐文件模拟器（按 dockerignore 语义：`*` 不跨 `/`、命中目录即整棵排除）算出 **54.2 MiB / 111 个文件**。
+三条尺相互印证到 ±10%；这五十来 MB 里 **53.6 MB 就是 Dockerfile 要 COPY 的那一个 jar**，
+`logs`（这台 140 MiB）、`mysql-data`（1 163 MiB）、`.git`、`_frontend/*/node_modules`（25 MiB）全部进不去。
+
+### 12.2 运行时那 24 项读到的东西
+
+一条链走完：**无 env 必须拒 → 写 env → 构件就位 → `create` → 临时库 → 连通性 → 入口 → 上下文 → 镜像身份 → 探针 → 两个池落点 → 建任务并执行一次 → 停止 → 常驻没被碰**。
+
+- P7 没有 `env/.env` 时入口 rc=1、消息是 `required variable DB_x is missing`，且**没有留下任何半截容器**
+  （守卫在整条链上有效，不只 `compose config`）。先被点名的键是哪一个**不确定**：compose 的插值按 Go map 顺序走，
+  同一行命令两遍分别报过 `DB_NAME` 与 `DB_HOST`（09-27 当场各跑一次取证）⇒ 判据不许认死某一个名字，
+  逐变量的覆盖在 P18。
+- P8c/P8d `create` 出的网络叫 `deploy_default`；构件 56 234 848 字节先落进 `z-schedule-admin/target/` 才许构建（见 12.4 第 2 条）。
+- P8e 临时库用官方镜像 + `docker-entrypoint-initdb.d` 挂**提交树那份无 DROP 的 DDL**，`MYSQL_DATABASE=zschedule_p25`
+  ⇒ 实测建出 **6 张表**。就绪判据是 `information_schema.tables` 里数得到的表数，**不是 `mysqladmin ping`**：
+  initdb 阶段有一个临时实例会先答 `mysqld is alive`，那时候表还不存在。
+- P8f 同网（别名 `db`）连得上；把它放到另一张网上，`mysqladmin` 读到的是
+  `You can check this by doing 'telnet 172.26.0.2 3306'` ⇒ **库容器必须与 app 同网，`DB_HOST` 用服务别名而不是裸 IP**
+  （跨 bridge 的 IP 静默不可达，这一条是"三种模式都需要可达的 MySQL"那句话的取证）。
+- P11 容器里 `/app/app.jar` 的 sha256 与宿主构件一致（`0381cb71b9fd…`，认字节不认名字）；P11b 镜像里真有 `wget`
+  ⇒ compose 与 Dockerfile 那两条 healthcheck 用的是个存在的命令。
+- P12 compose 声明的 healthcheck 到达 `healthy`（**这条是 p24 的 `docker run` 路结构上不会执行的**）。
+- P13 宿主 18086 上 `/meta/actuator/health` 与 `/meta/jobgroup/list` 都 200；P13b `/meta/` 回的是内嵌前端页面
+  （HTML 里 1 行带 app/script 标记）⇒ Mode 1 广告的能力兑现了。
+- P14 列表接口回显库里那一行（title 命中 1 处 / 库里 1 行）⇒ **引擎池连的就是 `zschedule_p25`**，
+  不是 §11.1 第 2 条那个"库名为空"的默认池。
+- P15→P15b 一次真实执行：HTTP 200 建出 FIX_RATE（`{"code":200,"msg":"success","content":"1","success":true}`）→
+  库里 `trigger_status=0`（`add()` 强制置 0）→ `start` 被接受 → `trigger_status=1` → 结论行 `handle_code=200` 计 2 行，
+  时间轮装载日志 1 行 + handler 侧证 2 行，且这些计数都取在 `BASE=$(docker logs | wc -l)` 之后。
+- P16 `down` rc=0：容器没了、18086 释放——起与停用的是**同一套 CLI 解析**。
+- P17 常驻服务仍在**一个都没换的 pid=30182** 上听 18098（用户钉的"服务挂在 250"，这一档不碰它）。
+
+### 12.3 compose 的守卫形状：`:?` 与 `?` 不是笔误
+
+补守卫前先在 compose **v5.0.2** 上测了三种形状的差：`${V:?msg}` 拒"未设置"**也**拒"设为空"，
+`${V?msg}` 只拒"未设置"。所以 `DB_HOST/PORT/NAME/USER` 用 `:?`（空值同样是漏配：空 `DB_PORT` 让两个池
+连不上，空 `DB_NAME` 让引擎池落到 `…:3306/?serverTimezone…`，见 B12），而 `DB_PASSWORD` 只用 `?`——
+**显式留空的无口令库是合法形状**，整行没写才是漏配。这三个 compose 文件（Mode 1/2/3）形状必须一致，
+由 `p25.sh` 的 P2d（静态逐文件双向）与 P18（运行时逐变量：缺它必须拒、给了两个池都渲染出来）钉住。
+
+这一节的两个读数都是量出来的，不是推的：
+**改前**在 250 上对同一份 `docker-compose.yml` 逐变量删（09-27 03:1x）——删 `DB_HOST` rc=1，
+删 `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` **全部 rc=0**，五个键的四种空值形状也全部 rc=0
+⇒ "有守卫"那句话从前只对五个里的一个成立；**改后** P18 那一臂三个文件 × 5 个删除全 rc≠0、
+4 个空值全被 `:?` 拒、`DB_PASSWORD=` 被放行，且齐 env 时渲染回读里引擎池的
+`Z_BASE_DB_SCHEDULE_HOST`/`…DATABASE` 与 spring 池的 `jdbc:mysql://…:33060/…` 落在同一组坐标上。
+P18 自己带一支猎物：一份"改前形状"的文件（`DB_PORT` 退回 `:-3306`）删掉 `DB_PORT` 必须**通过**，
+否则这一臂只是跟着 rc 点头。
+
+### 12.4 量具自己的三条返工（这一格里最该记的是这个）
+
+1. **P6 那条"DDL 不含 DROP"的前置从前是空跑的**。旧形状 `grep -ciE '[[:space:]]drop[[:space:]]'` 要求 DROP
+   前面有空白 ⇒ **行首**的 `DROP TABLE` 一个都数不到；实测同一份猎物（2 处行首 + 1 处行中 + 1 处注释）
+   新尺精确数到 3、旧尺只数到 1。同一个 bug 在 `p24.sh` 的 B4 前置里，已一并回改。
+   现在这一判据带三相反照：非注释行 3／不剥注释 4（证明"剥注释"那半也有牙）／真 DDL 0。
+2. **compose v5 在 `create` 阶段就会构建**，而 P8c 之前是"先 create 再放 jar" ⇒ `COPY failed: file not found in
+   build context`。修法是构件先落位并断言字节数 > 1 MiB。当时这条红还被 `… | tail -20; echo rc=$?` 遮了一次
+   ——那个 `rc` 是 `tail` 的，不是 compose 的。
+3. **P10 只从入口那一遍的输出里找计数行**，而 `create` 已经把镜像建好了 ⇒ 这一遍的 `up` 根本不构建，
+   于是"读不到数"被判成仓库的缺陷。改成三路取数（`up` → `create` → 都没有就显式 `build` 一次）并把**来源**印进结论。
+   还有一个更隐蔽的：两条 `grep` 用 `;` 串在同一个子 shell 里共用 stdin，第一条读到 EOF，
+   第二条**结构上永远拿不到字节** ⇒ legacy 那一形（`Sending build context to Docker daemon  827.1MB`）永远读不到，
+   而 BuildKit 那一形永远读得到。现在先把输入收进变量、各喂各的，三份 fixture（legacy / BuildKit / 无计数行）逐形验。
+4. **P7 认死了一个变量名，被自己的修复判红**（run8 `PASS=28 FAIL=1`）。补齐守卫之后同一条"无 env"命令
+   两遍分别点名 `DB_NAME` 与 `DB_HOST`——compose 的插值按 Go map 顺序走，**先撞哪个键不固定**。
+   当场各跑一次取证确认不是仓库坏了，然后把判据改成形状无关的三条：rc≠0、消息是
+   `required variable DB_[A-Z_]+ is missing` 这一族、且 `docker ps -a` 里没有残留的 `z-schedule-admin`
+   （最后这条才是"不会起一个永不 Ready 的容器"的兑现面，比"点了谁的名"更值得钉）。
+   逐变量的覆盖本来就归 P18，P7 不该兼任。
+
+### 12.5 这一档没做的
+
+1. **`make dev` 真跑一遍仍然没有**：本机有 make 没 docker daemon，250 有 daemon 没 make，
+   两个条件在同一台机器上凑不齐。P2c 证的是**展开层**（`make dev` → `docker compose … bin/start-mode1.sh`、
+   `down` 带 `--env-file` 三处），运行时那 24 项是从**脚本层**量的。两层读数别混引，
+   也别把这句读成"照 README 敲 `make dev` 在某台机器上验证过"。
+2. **Mode 2/3 只补了守卫形状（12.3）与 CLI 解析**，没起过容器：`_frontend` 那个桩里一次 API 调用都没有，
+   前端在两种模式下仍是装饰（§11.7 第 2 条原文未变）。
+3. **`*.jar` 只挡根目录**（dockerignore 的 `*` 不跨 `/`，这是 Dockerfile 要的 `z-schedule-admin/target/*.jar`
+   还能 COPY 到的前提）。所以根目录里"改名的备份 jar"（`z-schedule-admin-1.0.0-exec.jar.pre-fix` 这类）挡不住——
+   这次那 160 MiB 就是**我自己的**演练残留，已归档到 `~/.cache/z-schedule-e2e-oldjars/`（三个 sha256 各不相同：
+   `31cc3bd86f9f` / `e5994f4888e4` / `f8c9d5b6febb`，没有任何脚本引用它们）。判据钉在"上下文 < 300 MiB"这一档
+   能兜住这类噪声，但别指望它逐条识别病根。
+4. **对 #32 的证据已经顺手量到了**：选 A（自带库容器）的形状就是 P8e + P8f——initdb 从提交树那份 DDL 建出 6 张表、
+   与 app 同网、别名做 `DB_HOST`、就绪判据用表数。仍等点头，没有动仓库。

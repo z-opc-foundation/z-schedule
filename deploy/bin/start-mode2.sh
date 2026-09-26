@@ -12,12 +12,18 @@ cd "$(dirname "$0")/.."
 ENVFILE=""
 [ -f env/.env ] && ENVFILE="--env-file env/.env"
 
+# 两支 compose CLI 都能解析（机理见 start-mode1.sh 的注释）。
+compose() {
+    if docker compose version >/dev/null 2>&1; then docker compose "$@"
+    else docker-compose "$@"; fi
+}
+
 echo "=== 启动 Mode 2（分体）==="
-docker compose $ENVFILE -f docker-compose.split.yml up -d
+compose $ENVFILE -f docker-compose.split.yml up -d
 
 echo ""
 echo "✓ 启动完成。"
 echo "  访问前端：http://localhost"
 echo "  访问后端（需 exec 进容器）：docker exec -it z-schedule-backend curl http://127.0.0.1:18086/meta/actuator/health"
 echo "  验证反代：curl http://localhost/api/actuator/health"
-echo "  停止：docker compose -f docker-compose.split.yml down"
+echo "  停止：make down"

@@ -12,11 +12,18 @@ cd "$(dirname "$0")/.."
 ENVFILE=""
 [ -f env/.env ] && ENVFILE="--env-file env/.env"
 
+# 老一点的管理机只有 docker-compose 二进制、没有 compose 插件（250 就是 Docker 20.10.21 + v5.0.2），
+# 写死 `docker compose` 会让"一键"死在命令行本身，连报错都不是部署的错。
+compose() {
+    if docker compose version >/dev/null 2>&1; then docker compose "$@"
+    else docker-compose "$@"; fi
+}
+
 echo "=== 启动 Mode 1（合体）==="
-docker compose $ENVFILE up -d
+compose $ENVFILE up -d
 
 echo ""
 echo "✓ 启动完成。"
 echo "  访问：http://localhost:18086/meta"
-echo "  日志：docker compose logs -f z-schedule-admin"
-echo "  停止：docker compose down"
+echo "  日志：make logs"
+echo "  停止：make down"

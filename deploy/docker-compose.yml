@@ -21,17 +21,19 @@ services:
       # 两个池都要喂。调度引擎跑在 starter 的 dataSourceSchedule 上，键在 z.base.db.schedule.*；
       # 只给 spring.datasource.* 的话引擎池会退回内置默认（localhost:3306 / root / 空密码 / 空库名）。
       # 库坐标从 .env 的 DB_* 来（见 env/.env.example）。
-      # DB_HOST 故意没有默认值：填不出来就当场报错，
-      # 别起一个"端口不 bind、日志无限刷、又不退出"的容器（机理见 p24.sh 的 B12）。
+      # 库坐标五项都不许有静默默认值：DB_HOST/DB_PORT/DB_NAME/DB_USER 用 ${V:?…}（没写或留空都当场拒），
+      # DB_PASSWORD 用 ${V?…}（没写拒、显式留空放行——"无口令库"是合法形状）。这个不对称不是抄文档：
+      # 在 250 的 compose v5.0.2 上实测过，`:?` 把空值也算缺失、`?` 只算未定义（判据见 p25.sh 的 P18）。
+      # 理由：填不出来就当场报错，别起一个"端口不 bind、日志无限刷、又不退出"的容器（机理见 p24.sh 的 B12）。
       Z_BASE_DB_SCHEDULE_HOST: "${DB_HOST:?缺 DB_HOST：三种模式的容器都不自带数据库，见 env/.env.example}"
-      Z_BASE_DB_SCHEDULE_PORT: "${DB_PORT:-3306}"
-      Z_BASE_DB_SCHEDULE_DATABASE: "${DB_NAME:-zschedule}"
-      Z_BASE_DB_SCHEDULE_USERNAME: "${DB_USER:-root}"
-      Z_BASE_DB_SCHEDULE_PASSWORD: "${DB_PASSWORD:-}"
+      Z_BASE_DB_SCHEDULE_PORT: "${DB_PORT:?缺 DB_PORT：库坐标不许有静默默认值，见 env/.env.example（坏形状取证 p24.sh 的 B12）}"
+      Z_BASE_DB_SCHEDULE_DATABASE: "${DB_NAME:?缺 DB_NAME：空库名让引擎池连上一个不存在的库（URL 会是 …:3306/?serverTimezone…）}"
+      Z_BASE_DB_SCHEDULE_USERNAME: "${DB_USER:?缺 DB_USER：不填就退回 starter 内置的 root}"
+      Z_BASE_DB_SCHEDULE_PASSWORD: "${DB_PASSWORD?缺 DB_PASSWORD：显式留空是合法的（无口令库），整行没写才是漏配}"
       Z_SCHEDULE_DB_MAX_ACTIVE: "${DB_POOL_MAX_ACTIVE:-40}"
-      SPRING_DATASOURCE_URL: "jdbc:mysql://${DB_HOST:?缺 DB_HOST：三种模式的容器都不自带数据库，见 env/.env.example}:${DB_PORT:-3306}/${DB_NAME:-zschedule}?serverTimezone=UTC&useUnicode=true&characterEncoding=utf-8"
-      SPRING_DATASOURCE_USERNAME: "${DB_USER:-root}"
-      SPRING_DATASOURCE_PASSWORD: "${DB_PASSWORD:-}"
+      SPRING_DATASOURCE_URL: "jdbc:mysql://${DB_HOST:?缺 DB_HOST：三种模式的容器都不自带数据库，见 env/.env.example}:${DB_PORT:?缺 DB_PORT：库坐标不许有静默默认值，见 env/.env.example（坏形状取证 p24.sh 的 B12）}/${DB_NAME:?缺 DB_NAME：空库名让引擎池连上一个不存在的库（URL 会是 …:3306/?serverTimezone…）}?serverTimezone=UTC&useUnicode=true&characterEncoding=utf-8"
+      SPRING_DATASOURCE_USERNAME: "${DB_USER:?缺 DB_USER：不填就退回 starter 内置的 root}"
+      SPRING_DATASOURCE_PASSWORD: "${DB_PASSWORD?缺 DB_PASSWORD：显式留空是合法的（无口令库），整行没写才是漏配}"
       # 下面的 healthcheck 写死了 /meta 前缀，context-path 就在这钉住（application.yml 不设，默认是 /）
       SERVER_SERVLET_CONTEXT_PATH: "/meta"
       JAVA_OPTS: "${JAVA_OPTS:--Xms512m -Xmx1g}"

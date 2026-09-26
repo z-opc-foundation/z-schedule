@@ -244,9 +244,19 @@ RUNJAR="${RUNJAR:-$E2E/z-schedule-admin-svc-7ea14eb-exec.jar}"
 DDL="${DDL:-$E2E/z-schedule.sql}"
 [ -f "$RUNJAR" ] || FATAL "臂 B 要有构件：RUNJAR=$RUNJAR 不存在"
 [ -f "$DDL" ] || FATAL "臂 B 要建表脚本：DDL=$DDL 不存在"
-# 只数非注释行里的 DROP（这份 DDL 第 7 行的注释本身就写着"不含任何 DROP"，直接 grep 会自己判死）
-NDROP=$(grep -vE '^[[:space:]]*--' "$DDL" | grep -ciE '[[:space:]]drop[[:space:]]' || true)
+# 只数非注释行里的 DROP（这份 DDL 第 7 行的注释本身就写着"不含任何 DROP"，直接 grep 会自己判死）。
+# 词形要能抓**行首**的 `DROP TABLE …`——那正是 DDL 里唯一会出现的形状；旧尺 '[[:space:]]drop[[:space:]]'
+# 要求词前有一个空格，对行首形状结构性失明，而且这一档当时没有阳性对照 ⇒ 这条"零 DROP"是空跑。
+# 是 p25 的第一遍（它的猎物就数到 0）把这条抓出来的，修法与判据形状一起搬过来。
+DROPPAT='(^|[^[:alnum:]_])drop[[:space:]]'
+count_drop() { grep -vE '^[[:space:]]*--' "$1" | grep -ciE "$DROPPAT" || true; }
+printf 'DROP DATABASE IF EXISTS zschedule;\nDROP TABLE whatever;\n-- 注释里也写一个 DROP TABLE 试尺\nx INT NULL; DROP TABLE inline_after;\n' > "$WORK/prey_drop.sql"
+B4PREY=$(count_drop "$WORK/prey_drop.sql")
+B4OLD=$(grep -vE '^[[:space:]]*--' "$WORK/prey_drop.sql" | grep -ciE '[[:space:]]drop[[:space:]]' || true)
+NDROP=$(count_drop "$DDL")
+[ "${B4PREY:-0}" = "3" ] || FATAL "DROP 计数尺自身坏了：猎物应有 3 处（2 行首 + 1 行中，注释不计），实得 ${B4PREY:-?}"
 [ "${NDROP:-0}" = "0" ] || FATAL "$DDL 非注释行里有 $NDROP 处 DROP，不用它建库"
+echo "  [note] B4 的 DDL 前置闸改用能抓行首的形状：猎物上旧尺只数到 $B4OLD/3 ⇒ 旧尺确实在漏"
 MYSQLC="${MYSQLC:-z-schedule-e2e-mysql}"
 docker ps --format '{{.Names}}' | grep -qx "$MYSQLC" || FATAL "MySQL 容器 $MYSQLC 不在跑"
 
