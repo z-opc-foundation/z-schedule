@@ -16,11 +16,15 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import javax.sql.DataSource;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * z-schedule-web AutoConfiguration (供 main-starter embed).
@@ -115,7 +119,38 @@ public class ZScheduleAutoConfiguration extends ModuleDataSourceTemplate {
     @Bean(name = "dataSourceSchedule")
     @ConditionalOnProperty(name = "z.base.db.schedule.disabled", havingValue = "false", matchIfMissing = true)
     public DataSource dataSourceSchedule(Environment env) {
+        applySchedulePoolDefaults(env);
         return buildDataSource(env, "schedule");
+    }
+
+    /**
+     * 调度池默认并发。{@code ModuleDataSourceTemplate} 里那个 20 是**所有模块共用**的兜底值，
+     * 不该由 z-schedule 去改它（那会顺带抬高 z-lc / z-kb 等每个宿主的池），所以默认值由本模块
+     * 以一个**最低优先级**的属性源给出：宿主的 yml / 环境变量 / {@code --z.base.db.schedule.max-active=…}
+     * 全部压在它上面。
+     *
+     * <p>取 40 的依据（250 真机，N=1600 个 1 Hz 任务、30 s 窗口，durability 全程未降级）：
+     * max-active 20 ⇒ 346 次/s，40 ⇒ 545，80 ⇒ 905，且忙连接峰值每次都正好等于上限。
+     * 抬池只涨 1.66–1.72 倍（不是 2 倍），而 MySQL 侧 {@code max_connections} 是被同库其他服务
+     * 分摊的 ⇒ 抬高之前请按自己库的容量核对，不放心就显式设回 20。
+     */
+    static final int DEFAULT_SCHEDULE_MAX_ACTIVE = 40;
+
+    /** 属性源名字——同名重复注入必须先挡住，否则一个 {@code max-active} 会被后写的值改掉。 */
+    static final String SCHEDULE_DEFAULT_SOURCE = "zScheduleDefaults";
+
+    static void applySchedulePoolDefaults(Environment env) {
+        if (!(env instanceof ConfigurableEnvironment)) {
+            return;
+        }
+        ConfigurableEnvironment ce = (ConfigurableEnvironment) env;
+        if (ce.getPropertySources().contains(SCHEDULE_DEFAULT_SOURCE)) {
+            return;
+        }
+        Map<String, Object> defaults = new HashMap<String, Object>();
+        defaults.put("z.base.db.schedule.max-active", DEFAULT_SCHEDULE_MAX_ACTIVE);
+        // addLast = 最低优先级：任何宿主显式写的值都赢过这条默认
+        ce.getPropertySources().addLast(new MapPropertySource(SCHEDULE_DEFAULT_SOURCE, defaults));
     }
 
     @Bean(name = "sqlSessionFactorySchedule")
