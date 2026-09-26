@@ -81,9 +81,9 @@ javap -c  /tmp/x.class | grep -c 'stepDown'         # 例：#18 的关停释放�
 
 口径是"服务常驻 250"。常驻意味着**别人会拿它当"能用"的证据**，所以它的身份要写死在这里：
 
-| 项 | 值（09-26 21:3x 实测，随每次换构件会变） | 怎么复现这个读数 |
+| 项 | 值（09-26 22:08 实测，随每次换构件会变） | 怎么复现这个读数 |
 |---|---|---|
-| jar | `~/z-schedule-e2e/z-schedule-admin-svc-0f1248b-exec.jar`，md5 `a0ba15d658ececd513b397729fd1f0c6`（含 #19 的登录态 + #28 的铸权闸；`7c9de99`/`baa4458` 等旧版仍在同目录，别拿文件名当版本）。**编号取"最后一次改动 starter 源码的提交"**，之后的提交只动 `_doc/`，所以名字不等于 HEAD——判据永远是 md5 ＋ `javap` | `md5sum z-schedule-admin-svc-*.jar`（**文件名不算证据**，见上一节） |
+| jar | `~/z-schedule-e2e/z-schedule-admin-svc-44acc07-exec.jar`，md5 `ad33b6e56526616c5f53cf5d69440da2`（含 #19 的登录态 + #28 的铸权闸 + 按 jobGroup 收口；`baa4458`/`0f1248b`/`7c9de99` 等旧版仍在同目录，别拿文件名当版本）。**编号取"最后一次改动 starter 源码的提交"**，之后的提交只动 `_doc/`，所以名字不等于 HEAD——判据永远是 md5 ＋ `javap` | `md5sum z-schedule-admin-svc-*.jar`（**文件名不算证据**，见上一节） |
 | 端口 | `18098`（**故意不用 18086**：那是 `p16/p20` 的性能台架端口，撞上就会量到一个"我没控制、不知道配置"的实例——坑 14） | `ss -ltnp \| grep 18098` |
 | 存活判据 | `GET /` → 200；`GET /jobinfo/list` → 200 | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18098/jobinfo/list` |
 | 真跑一次 | `./svc_smoke.sh`（播种 → 数 `handle_code=200` → 停用） | 见第 3 节 |
@@ -132,9 +132,16 @@ curl -s -X POST "http://127.0.0.1:$PORT/user/add?accessToken=$SECRET" \
 #       照抄这个形状才能登录：echo -n "$PW" | md5sum
 ```
 
-09-26 21:35 换构件的实测时间线（一次真实走通，不是推算）：`kill -TERM` → 旧进程 `Stepped down from
-LEADER` 并退出 **1 s**；`setsid … run.sh` → `Started ZScheduleAdminApplication in 6.61 s`；
-启动后 **46 ms** 就抢到 LEADER（旧进程已经把租约释放了，不用等 30 s）。全程 ≈13 s。
+09-26 22:08 换构件（`0f1248b` → `44acc07`）实测的时间线，`logs/service_18098.out` 的行号都是真的：
+22:08:20.433 旧进程打出 `Stepped down from LEADER`（第 404 行）并退出，**1 s** 后端口空出来；
+`setsid … run.sh` 的标记行在第 409 行，`Started ZScheduleAdminApplication in 6.499 seconds` 在第 447 行
+（22:08:37.707），第 448 行 `Became LEADER: instanceId=3f63264d…`（22:08:37.756）——
+**启动后 49 ms 就拿到租约**，全程 kill→LEADER ≈17.3 s——这 17.3 s 全是新进程的启动开销
+（`Started … (JVM running for 7.554)`），**等旧租约的时间是 0**（这就是 #18 的兑现面：不释放的话这里要白等 30 s）。
+两次换构件的读数一致（上一次 21:35 那轮是 6.61 s / 47 ms）。
+判据的两条纪律：**"抢到 LEADER"要按 `deploy: JAR=` 那行划窗口再 grep**（坑 24——这份日志是追加的，
+整文件 grep 会命中上一次启动）；而且日志里的字面量是 `Became LEADER` / `Stepped down from LEADER`，
+拿 `stepDown` 或 `BECOME LEADER` 去 grep 会命中 0 条从而误判成"#18 没生效"。
 
 **为什么"端口 200"不够**：常驻实例平时 ring 里 0 个任务，日志每 15 s 只打一条
 `Engine loaded 0 jobs into ring`——那是 reconcile 在跑，不是"能执行任务"。
@@ -178,7 +185,7 @@ LEADER` 并退出 **1 s**；`setsid … run.sh` → `Started ZScheduleAdminAppli
 | `p19.sh` | **同一时刻有几条连接在忙**（忙=`COMMAND='Query'`）＋ STATE 直方图；自带 `preytest`：埋 6 条并发 `SELECT SLEEP(4)`，尺数不到 6 就 FATAL | 把"连接数"这个量从猜测变成读数 |
 | `p20.sh` | **固定需求只改池上限**（`max-active` 20/40/80），同时量吞吐与忙连接 ⇒ 池是不是那堵墙 | 天花板归属（见第 4 节，答案是"是"） |
 | `p21.sh` | **一次执行的 2 条语句里钱花在哪**：同一批 id 上 narrow(4 列) / wide(12 列) 两臂判"形状"，pair2(2 次提交) / pair1(1 次提交) 两臂判"次数" | ③ 的前提：收窄 SET 到底值不值（答案：不值，见 §4.4） |
-| `p22.sh` | **登录态 + 铸权闸在真机上兑现到哪一步**：S 段先起一台配了 `accessToken` 的关门实例（`Z_SCHEDULE_ACCESSTOKEN` 走环境变量、argv 0 命中）并用共享密钥种下第一个 ADMIN，A 段打常驻那台（演示模式：签发形状 / 角色闸 / **匿名铸 ADMIN 被拒**＋NORMAL 阳性对照），B 段回到关门实例逐条验三种撤销，收尾数库、验租约 | #19、#28（见 §9′；两台是必需的——撤销在演示模式下观察不到，而种子账号在演示模式下已经铸不出来） |
+| `p22.sh` | **登录态 + 铸权闸 + 按组分权在真机上兑现到哪一步**：S 段先起一台配了 `accessToken` 的关门实例（`Z_SCHEDULE_ACCESSTOKEN` 走环境变量、argv 0 命中）并用共享密钥种下第一个 ADMIN，A 段打常驻那台（演示模式：签发形状 / 角色闸 / **匿名铸 ADMIN 被拒**＋NORMAL 阳性对照），B 段回到关门实例逐条验三种撤销，**D 段在关门实例上验 `permission` 那一列真的参与判定**（建两个分组 + 两行任务 ⇒ 列表裁剪、点名要别组被拒、读/触发/停/启/删五支越组被拒且**库里那一行没被写过**、ADMIN 不受约束、改 `permission` 会踢掉旧会话），收尾数库、验租约 | #19、#28（见 §9′；两台是必需的——撤销在演示模式下观察不到，而种子账号在演示模式下已经铸不出来） |
 | `svc_smoke.sh` | **常驻实例现在还活着吗**：播种 3 个 2 s 任务 → 数 `handle_code=200` → 用 handler 自己那行日志做阳性对照 → 停用。两处基线（`job_log` 的 `MAX(id)` 与日志文件行数）把**上一次运行**的行排除在外——不加基线时实测过 `成功=72`，其中 42 行是历史 | 0b9ac0f 的 `IJobHandler` 派发支要在真机上被观察到；陈旧正对照/陈旧计数 |
 
 ## 4. 天花板到底压在哪一层
@@ -378,6 +385,13 @@ docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" z-schedule-e2e-mysql mysql -h127
     所以 `p22.sh` 的 `A.1` 是"200 但 code 500"，`S.10` 才是 403——写判据时只看状态码会把两道闸混成一个，
     而 `req` 助手之所以坚持"状态码 + body 一起返回"（坑 19）就是为了这里能分辨。
     同理：任何只做 `curl -o /dev/null -w '%{http_code}'` 的探针对这一整格都是**色盲**的。
+24. **往一个不截断的日志文件里 `grep Started` = 会命中上一次启动**：`run.sh` 是 `>>` 追加，
+    换构件后"等启动完成"的轮询第二次就在那份旧文件里匹配到了**上一次启动**留下的
+    `Started ZScheduleAdminApplication in … seconds`，于是报出"启动耗时=1.0 s"（本次真值 6.499 s）。
+    界面上一切正常，只是把一个慢启动量成了秒起。⇒ 要么每次启停换一个新日志文件名，
+    要么从**本次运行**写下的那行标记（`deploy: JAR=…`）往后 `awk` 再找，别对整文件 grep。
+    这条和 `svc_smoke.sh` 那行讲的"陈旧正对照/陈旧计数"（第 3 节）是同一类错误：
+    **日志在增长，而判据没有划窗口**。
 
 ## 7. 路由策略：广告与兑现的差（④ 的收口）
 
@@ -429,27 +443,31 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 # 计数只吃报告文件，不吃 mvn 的 stdout（坑 16）；输入为空必须 FATAL
 ```
 
-09-26 提交树 `0f1248b`（#19 的登录态 + #28 的铸权闸之后）`mvn clean package` 实测：
-**25 份报告 / 285 例 / 0 失败 / 0 错 / 0 跳过**，`BUILD SUCCESS`（core 5 份 45 例 + starter 20 份 240 例）。
-上一格是 24 份 / 278 例，多出来的一报告是 `UserControllerAdminGuardTest`（6 例，#28 的铸权闸），
-`TokenAuthFilterTest` 从 20 涨到 21（新增"共享密钥那一支留下全权标记而会话与匿名不留"）。
+09-26 提交树 `44acc07`（#19 的登录态 + #28 的铸权闸 + `permission` 第一次成为判据之后）`mvn test` 实测：
+**26 份报告 / 297 例 / 0 失败 / 0 错 / 0 跳过**（core 5 份 45 例 + starter 21 份 252 例）。
+上一格是 25 份 / 285 例，多出来的一报告是 `JobInfoControllerGroupAccessTest`（10 例，按 jobGroup 收口），
+另外 `LoginSessionStoreTest` 从 9 涨到 10（`permission列进了身份就参与判定`）、
+`UserServiceImplH2Test` 从 22 涨到 23（`改分组会把该用户的旧会话踢下线`）。
 其中 `JobTriggerServiceImplBehaviorTest` 15 例（含钉住分片广播语义的那 1 例）、
 `ZSchedulePoolDefaultTest` 4 例（② 的池默认）。
 先 `rm -rf surefire-reports` 再数：不清会把你**本轮没跑到的**类的旧报告一起加进来（历史上报出过 +1 类）。
 **跑过注入脚本之后必须 `mvn clean`**：还原只写回字节不改 mtime，增量编译会接着用上变异体的 class（坑 20）。
 
-## 9. 登录态与角色：这一格兑现到哪一步（#19 + #28）
+## 9. 登录态、角色与分组：这一格兑现到哪一步（#19 + #28 + `permission` 收口）
 
 改之前要知道的现状，全部由代码 + 测试钉住，不靠这段话：
 
 | 事实 | 落在哪里 | 谁来红 |
 |---|---|---|
 | `/user/login` 换回的是一串 256 bit 不透明令牌，**不再是用户名** | `UserServiceImpl.login` → `LoginSessionStore.issue` | `登录用明文密码比对库里的散列`（M3 摘掉即红） |
-| 令牌解析回 `{userId, username, role}`，挂成请求属性 `z.schedule.loginSession` | `TokenAuthFilter.doFilter` | `会话身份挂进请求而共享密钥不挂`（M2） |
+| 令牌解析回 `{userId, username, role, permission}`，挂成请求属性 `z.schedule.loginSession` | `TokenAuthFilter.doFilter` | `会话身份挂进请求而共享密钥不挂`（M2） |
 | 建/改/删账号三个口只认 ADMIN 会话；普通会话 403 且理由写"需要管理员角色" | `TokenAuthFilter.ADMIN_ONLY_PATHS` | `普通会话改不了账号而管理员会话能`（M1） |
 | **"把某个账号变成 ADMIN"另有一道闸**：只认 ADMIN 会话或共享密钥放行的请求；演示模式下匿名只能建 NORMAL | `UserController.canMintAdmin` ← `TokenAuthFilter.presentedSharedSecret`（新属性 `z.schedule.fullAuthority`） | `匿名与普通会话都铸不出 ADMIN，而 ADMIN 会话与共享密钥铸得出`（#28 的 N1–N5，见下） |
 | 会话 30 min 过期、上限 1000 条按"最久没被出示"逐出 | `LoginSessionStore` | `过期令牌解析为空并且不再占位`（M6）、`容量满时逐出最久没被出示的那条`（M7） |
 | 改角色 / 删账号 ⇒ 该用户的会话立刻全部作废 | `UserServiceImpl.update/delete` | `改角色会把该用户的旧会话踢下线`（M4）、`删账号会把他的会话一并撤销`（M5） |
+| **`permission` 这一列第一次有了读者**：签发时一起带进身份，`/jobinfo/*` 按 jobGroup 判它 | `LoginSession.permits`（6 参构造的第 5 参 ← `LoginSessionStore.issue(user)`） | `permission列进了身份就参与判定`（`G5` 摘掉签发那一参即红）、`这一列是人手填的所以解析只容错不抛` |
+| `/jobinfo/*` 八支端点按组收口：普通会话只见/只动 `permission` 里列出的组。**留空 = 不限**（不把既有账号一夜锁死）；ADMIN / 共享密钥 / 匿名结构上不受约束（`restrictable` 提前返回 `null`，它们连"为判组多打一次库"都不发生）。`update` 判**两道**：库里那一行的组 + 请求体里的组 | `GroupAccess.restrictable/narrow/denialReason` ← `JobInfoController` 的 `list/getById/add/update/remove/stop/start/trigger` | `JobInfoControllerGroupAccessTest` 10 例（`G1`–`G4`、`G6`、`G7`、`G9` 逐支红在具名判据上；`G8` 只能红在身份层，见下面那段）、真机 `p22` 的 `D` 段 |
+| 改 `permission` ⇒ 同样作废会话（**新值要重新登录才生效**：旧令牌带着旧的一组组号就是隐身入口） | `UserServiceImpl.update` 的 `permissionChanged`（在合并进库里那行**之前**算） | `改分组会把该用户的旧会话踢下线`（`G10` 摘掉即红、`G11` 放宽成"填了就算变"也即红）、真机 `D.14`/`D.15`/`D.16` |
 | `/user/logout` 幂等：不回答"这把令牌先前在不在用" | `UserController.logout` | `令牌能过过滤器而登出后过不了` |
 | 过滤器与签发方共用**同一个** store 实例 | `ZScheduleAutoConfiguration.tokenAuthFilterRegistration` | `过滤器必须注册在整个应用入口上`（M8，就是坑 20 那条红） |
 
@@ -457,8 +475,19 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 #28 的闸另打五支（量具 `~/.cache/zsched_28_mut.py`）：摘掉 `add` 的闸、摘掉 `update` 的闸、
 把 `presentedSharedSecret` 改成恒假（防"共享密钥也被锁死"）、把 `equalsIgnoreCase` 换成 `equals`
 （防 `"admin"` 小写绕过）、去掉会话那一支——**5/5 KILLED-exact**，还原后整族重跑 `mvn clean package` 全绿。
+按 jobGroup 这一层再打十一支（量具 `~/.cache/zsched_grp_mut.py`，台账 `zsched_grp_mut_ledger.txt`，逐支 md5 还原对账）：
+`G1` `permits` 恒真、`G2` `restrictable` 恒 `null`（结构上没人受约束）、`G3` `narrow` 不裁剪、
+`G4` `update` 只判请求体那一侧的组（少掉"库里那一行"的第二道判据）、`G5` 签发时不带 `permission`（把列丢回装饰）、
+`G6` 四支按 id 的端点的闸摘掉、`G7` 点名要别组时只裁剪不给拒绝、`G8` `permits` 里管理员那一支不优先、
+`G9` 留空当成"一组都不碰"（向后兼容那半支摘掉）、`G10` 改 `permission` 不再作废会话、
+`G11` 只要请求里带了 `permission` 就算变了（误踢）——**11/11 KILLED-exact**。
+其中 `G8` 值得记一笔：摘掉 `permits` 开头的 `isAdmin()` 之后，`JobInfoControllerGroupAccessTest` **十例全绿**——
+不是代码有洞，而是 `restrictable` 对 ADMIN 提前短路，那一支在 `/jobinfo/*` 上结构上不可达。
+第一版把预期红挂在 controller 层，量到的是 `SURVIVED`；改挂到身份层
+（`LoginSessionStoreTest` 的"ADMIN 带着 `permission=1` 仍然要 permits(2)"）才红得下来。
+**⇒ 预期红集要按"谁读这个值"来派生，不能按主题挂。**
 
-### 9′. 真机读数：`p22.sh`（250，MySQL 8，构件 `0f1248b` / md5 `a0ba15d6…`）
+### 9′. 真机读数：`p22.sh`（250，MySQL 8，构件 `44acc07` / md5 `ad33b6e5…`）
 
 上表那张"谁来红"是 H2 + 手写替身级别的证据；`p22.sh` 把同一批主张拿到真进程上重打一遍，
 **同时用两台**：常驻的 18098 没配 `accessToken`（演示模式），临时那台配了（把门关起来）。
@@ -474,7 +503,10 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 于是脚本顺序 = S（起关门实例 → 用共享密钥种账号）→ A（打常驻演示实例）→ B（回到关门实例验撤销）→ C（收尾）。
 这个顺序变化本身就是 #28 的兑现面：它把"第一个管理员从哪来"从一句口头答案变成了一条**每天真跑的路径**（S.6）。
 
-09-26 21:36 与 21:37 连跑两次，同读数：**55 条 PASS / 0 FAIL / 3 条观察**（全文落 `logs/p22.txt`）。
+09-26 22:14、22:15、22:30 连跑三次，同读数：**76 条 PASS / 0 FAIL / 4 条观察**（全文落 `logs/p22.txt`；
+22:30 那次跑的就是本节提交时的 `p22.sh`，两端 md5 逐字节相同：`9c6a8d0dab20f9881c17b02277bfa2f3`）。
+上一格是 55 条 PASS / 0 FAIL / 3 条观察，多出来的 21 条 = `D` 段的 19 条 PASS（`D.13` 是观察不是判红）
++ 两支构件形状判据 `0.4b`/`0.4c`；4 条观察里新增的是 `D.13`。
 挑几条只有真机才给得出的：
 
 | 判据 | 读数 |
@@ -485,6 +517,13 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 | `A.22` 两道网互不依赖 | 已登出的 ADMIN 令牌在演示模式里退化成匿名 ⇒ 铸 ADMIN 仍被拒。这一条**不证明撤销生效**（撤销在演示模式量不到，见上面的 blockquote），它证明的是铸权闸不把安全性押在"撤销有没有落地"上 |
 | `S.6` / `S.10` 两道闸的红长得不一样 | 关门实例上匿名 = **403 `accessToken 不合法`**（过滤器，压根进不了 controller）；演示实例上匿名 = **200 + `code:500` 铸权理由**（controller）。读消息后缀就能分清是哪一道闸在起作用 |
 | `S.9` 库里那一列到底是什么 | `password = md5(登录口令)` 的 32 位十六进制，与登录侧算出的散列逐字节相等 ⇒ 比对的是散列。**观察 `S.9b`**：这是**无盐** MD5——同口令必同散列，整库可反查彩虹表；换 bcrypt/argon2 是独立的一格，#28 没动它 |
+| `0.4b`/`0.4c` 按组分权也**在跑着的那个文件**里 | 同 `0.3`/`0.4` 那套路子：`javap` 出来的 `GroupAccess` 常量池里有 `z_schedule_user.permission`、`LoginSession` 有 `permits(int)`。没有这两支，`D` 段红了也无法排除"量的是旧字节"（判据见 §1′ 的"只认 argv + md5"） |
+| `D.4` 列表被裁到自己那一组 | peon 的 `permission=3`：`/jobinfo/list` 里有 A 组那行、没有 B 组那行。**裁剪发生在返回前，不是替数据库少查**——所以 `D.13` 那份没裁的组列表才是真漏，不是读数误差 |
+| `D.5` 点名要别的组是**拒绝**而不是一张空表 | HTTP 200 + `code:500`，理由里带着组号（controller 那一层，见坑 23）；`D.6` 阳性对照：同一个人点名要自己那组照样给 |
+| `D.8`/`D.9`/`D.10`/`D.11` 闸落在写之前 | 越组的 trigger/stop/start/remove 全被拒，而且**库里那一行没动过**：B 组那行的日志行数 `0 → 0`、`trigger_status` 不变、行还在。两支阳性对照（同请求换 A 组那行：触发真落库=1 行、启停真把 `0→1→0`）证明那些零不是"这个口从来不写" |
+| `D.12` 管理员不受约束 | ADMIN 会话一份列表看得见两组；共享密钥建的任务照建（`D.2`）——收口只针对普通身份 |
+| `D.14`/`D.15`/`D.16` 改 `permission` 会踢掉旧会话 | 改完旧令牌 403（关门实例上看得见）、重新登录后**跟着新值走**（看得见 B 组、看不见 A 组），且别人那条会话不动。这一条是这一格顺手补上的：`permission` 一旦成为判据，"改了不撤销"就等于降权要等它自己过期 |
+| `D.13` 已知非交付（观察） | `/jobgroup/list` 仍把两个组都吐给受限会话：这份是执行器下拉的数据源，裁掉名字会让管理页只剩数字，要收口得连下拉一起改 |
 | `A.5` 令牌形状 | `base64url(32 字节)` = **43 字符**。（第一版在这里断成"64 位十六进制"，把自己跑红了：形状是 Base64 URL 安全集，不是 hex） |
 | `A.14` 角色闸真的有牙 | 同一条 `/user/add`、同一个请求体：普通会话 403，匿名 200。这两次只差"有没有自报身份" |
 | `S.2` 口令不进 argv | `pgrep -af '[j]ava' \| grep -c 'access-token=' = 0`（走 `Z_SCHEDULE_ACCESSTOKEN` 环境变量；`run.sh` 的 `ACCESS_TOKEN=` 那条路会把口令写进 argv） |
@@ -499,18 +538,28 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 
 **这一格没有做完的部分，别当成已经生效**：
 
-1. `permission` 列（逗号分隔的 jobGroup id）仍然**零读者**。`LoginSession` 刻意不带它——
-   一个没人读的字段就是第二个装饰。按 jobGroup 收口是独立的一格。
+1. `permission` 这一列（逗号分隔的 jobGroup id）**现在真的有读者了**（`LoginSession.permits` ← `GroupAccess`，
+   见上面的 `D` 段），但它此刻只管 `/jobinfo/*`：`/jobgroup/list` 仍把全部组吐给受限会话（观察 `D.13`）——
+   这一份是执行器下拉的数据源，裁掉名字会让管理页只剩一组数字，要收口得连下拉一起改，不在本格范围。
+   还有两条边界要说清：收口挂在**会话身份**上，共享密钥与匿名请求走 `restrictable` 的提前 `return null`，
+   结构上不受约束（这是刻意的：密钥=全权，匿名=演示模式），所以**演示模式下看不见按组分权**，
+   `D` 段整段跑在关了门的那台上；而 `permission` 留空 = 不限，是为了不把既有账号一夜之间锁死。
 2. 共享密钥 `z.schedule.accessToken` 不区分"是谁"，因此**不受角色闸约束**（它本来就是全权，
    #28 也刻意让它在铸管理员这一关上通过——`B.5`，配套注入 N3）。未配置它的演示模式下管理面对匿名敞开，
    但**出示了的**普通会话照样被拦（`演示模式下匿名全开但出示的会话仍被限角色`、`A.14`）。
 3. 会话只在本进程内存里：重启即全员重新登录，多实例部署下 A 机签的令牌在 B 机验不过。
    要跨实例得注册一个自己的 `LoginSessionStore`（那个 `@ConditionalOnMissingBean` 就是留给这事的口子）。
-4. 读侧（`/user/list`、`/jobinfo/*`、`/joblog/*`）暂不按角色收口。#28 只收窄了"谁能造管理员"，
-   **没有**给演示模式关门（`C.7` 实测：常驻那台的 `/user/list` 对匿名仍是 200）。
+4. 读侧只收口了一半：`/jobinfo/*` 现在按组裁剪（`D.4`/`D.7`），但 `/user/list`、`/joblog/*`
+   仍不按角色或分组收口（`C.7` 实测：常驻那台的 `/user/list` 对匿名仍是 200；`A.17` 同一条对普通会话也是 200）。
    界面侧还没有登录入口——z-opc 的 schedule 页面从来没调过 `/user/login`（实测该目录 `login|accessToken` 零命中），
-   所以这一格交付的是**后端的身份载体**，不是"用户能登录"这件事。
+   所以这一格交付的是**后端的身份载体 + 任务面的分权**，不是"用户能登录"这件事。
 5. `password` 列是**无盐 MD5**（`S.9`/`S.9b`）：库被读走看不到明文，但同口令同散列、可整库反查。
    换 bcrypt/argon2 会改动已发布的 `UserService` 语义与既有账号行，是独立的一格。
 6. 铸权闸只管 `role=ADMIN` 这一个值（`N4` 钉住"只有真的 ADMIN 才算提权"）。
-   `VIEWER` 之类的自定义角色、以及按 jobGroup 的 `permission`，都还没有语义。
+   `VIEWER` 之类的自定义角色仍然没有语义（`permission` 现在有了，见上面第 1 条；它只被 `/jobinfo/*` 读）。
+7. **这一列在有这张表的库里要靠 `ALTER`，而仓库里没有任何脚本做这件事**：`_doc/004_sql/z-schedule.sql:120`
+   把 `permission` 写在 `z_schedule_user` 的**建表语句**里（`varchar(512) NOT NULL DEFAULT ''`），
+   所以新建库天然就有（250 那台 E2E 库就是 `bootstrap_mysql.sh` 新建的，`D` 段的读数走的是这一条）；
+   而**已经建过这张表的库**（比如线上 `oc`）不会自动多出一列，`bootstrap_mysql.sh` 只做"DROP 条数必须为 0"
+   那道守卫再跑整份 DDL，**不 ALTER 既有表**。线上 `oc` 有没有这一列本轮**未复核**（我不拿仓库里的明文口令当凭证源）——
+   所以"收口在线上生效了没有"这个问题**别引用本节当答案**，先 `SHOW COLUMNS FROM z_schedule_user LIKE 'permission'`。

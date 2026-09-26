@@ -1,7 +1,7 @@
 #!/bin/bash
-# p22.sh — #19 的「登录态」+#28 的「铸权闸」在真机上到底兑现到哪一步（250，MySQL 8，两个实例两种模式）
+# p22.sh — #19 的「登录态」+#28 的「铸权闸」+「按 jobGroup 分权」在真机上到底兑现到哪一步（250，MySQL 8，两个实例两种模式）
 #
-# 为什么必须上真机、H2 那 285 例不够：#19/#28 改的都是**跨进程边界的凭证语义**——登录发什么、
+# 为什么必须上真机、H2 那 297 例不够：#19/#28 改的都是**跨进程边界的凭证语义**——登录发什么、
 # 过滤器认什么、controller 认哪种凭证、改角色/删账号之后旧令牌还在不在。单测里的过滤器与签发方
 # 是我自己 new 的对象，真机上是 Spring 装配出来的两个 bean；这两件事的差别在 #17/#18 已经付过学费
 # （「测试里接上了、生产里没人接线」）。
@@ -26,7 +26,7 @@ set -u
 cd "$(dirname "$0")"
 
 RESIDENT_PORT="${RESIDENT_PORT:-18098}"
-JAR_EXPECT="${JAR_EXPECT:-z-schedule-admin-svc-0f1248b-exec.jar}"
+JAR_EXPECT="${JAR_EXPECT:-z-schedule-admin-svc-44acc07-exec.jar}"
 PROBE_PW="p22-probe-only"
 LOG_DIR="${LOG_DIR:-logs}"
 OUT="$LOG_DIR/p22.txt"
@@ -70,6 +70,25 @@ add_user() {
 rowcount() { q -e "SELECT COUNT(*) FROM z_schedule_user WHERE username='$1'" | tr -d '[:space:]'; }
 usersql() { q -e "SELECT id,username,role FROM z_schedule_user WHERE username LIKE 'p22\_%' ORDER BY id"; }
 uid()     { q -e "SELECT id FROM z_schedule_user WHERE username='$1'" | tr -d '[:space:]'; }
+gid()     { q -e "SELECT id FROM z_schedule_job_group WHERE app_name='$1'" | tr -d '[:space:]'; }
+jid()     { q -e "SELECT id FROM z_schedule_job_info WHERE job_desc='$1' ORDER BY id DESC LIMIT 1" | tr -d '[:space:]'; }
+logrows() { q -e "SELECT COUNT(*) FROM z_schedule_job_log WHERE job_id=$1" | tr -d '[:space:]'; }
+status_of() { q -e "SELECT trigger_status FROM z_schedule_job_info WHERE id=$1" | tr -d '[:space:]'; }
+# raw <method> <url> [body] ⇒ "http_code<TAB>完整响应体"（不截断）。
+# D 段要在一份列表里找某一行的 id，而 req 把体切到 220 字符——"没找到"可能只是被切掉了，
+# 那会把一次成功的裁剪读成失败。需要看全文的用 raw，日志里另外打截断版。
+raw() {
+  local m="$1" u="$2" d="${3:-}" body code
+  if [ -n "$d" ]; then
+    body=$(curl -s -m 15 -X "$m" -H 'Content-Type: application/json' -d "$d" -w $'\n%{http_code}' "$u")
+  else
+    body=$(curl -s -m 15 -X "$m" -w $'\n%{http_code}' "$u")
+  fi
+  code=${body##*$'\n'}
+  printf '%s\t%s' "$code" "$(printf '%s' "$body" | sed '$d' | tr -d '\n')"
+}
+# 列表里有没有这一行：后面必须不是数字，否则 "id":4 会命中 "id":41
+has_row() { printf '%s' "$1" | grep -Eq "\"id\":$2([^0-9]|$)"; }
 
 echo "===================== p22 登录态 + 铸权闸真机验 =====================" | tee -a "$OUT"
 
@@ -93,9 +112,23 @@ if javap -c -p -classpath "$LOG_DIR/p22-cls" com.zifang.z.schedule.web.filter.To
 else
   bad "0.4 构件里没有 #28 的标记属性 ⇒ A.1 会红在旧语义上，读数无意义"; exit 1
 fi
+if javap -c -p -classpath "$LOG_DIR/p22-cls" com.zifang.z.schedule.web.auth.GroupAccess | grep -q 'z_schedule_user.permission'; then
+  ok "0.4b GroupAccess 的常量池里有那一列的列名 ⇒ D 段量的这道按组收口在跑的构件里（不是旧字节在演示「已经收口了」）"
+else
+  bad "0.4b 构件里没有 GroupAccess 的那句理由串 ⇒ D 段会红在旧语义上，读数无意义"; exit 1
+fi
+if javap -p -classpath "$LOG_DIR/p22-cls" com.zifang.z.schedule.web.auth.LoginSession | grep -q 'permits(int)'; then
+  ok "0.4c LoginSession 有 permits(int) ⇒ 身份带着 permission 这一维"
+else
+  bad "0.4c LoginSession 没有 permits ⇒ 这一列还没进身份，D 段无从收口"; exit 1
+fi
 rm -rf "$LOG_DIR/p22-starter.jar" "$LOG_DIR/p22-cls"
 # 干净起点：上一轮崩在中间留下的行会让 S.9/A.3 的行数断言毫无意义
 q -e "DELETE FROM z_schedule_user WHERE username LIKE 'p22\_%'" >/dev/null
+# D 段的探针数据也一起清：它按 job_desc/app_name 取回自己那两行，多留一行就取错
+q -e "DELETE FROM z_schedule_job_log WHERE job_id IN (SELECT id FROM z_schedule_job_info WHERE job_desc LIKE 'p22\_%')" >/dev/null
+q -e "DELETE FROM z_schedule_job_info WHERE job_desc LIKE 'p22\_%'" >/dev/null
+q -e "DELETE FROM z_schedule_job_group WHERE app_name LIKE 'p22\_%'" >/dev/null
 [ "$(q -e "SELECT COUNT(*) FROM z_schedule_user WHERE username LIKE 'p22\_%'" | tr -d '[:space:]')" = "0" ] \
   && ok "0.5 探针账号已从库里清干净（LIKE 用了反斜杠转义，p22x 这类名字不会被误删）" \
   || { bad "0.5 清场后仍有残留：$(usersql | tr '\n' ' ')"; exit 1; }
@@ -312,7 +345,135 @@ case "$(req POST "$BB/user/login" "{\"username\":\"p22_gate\",\"password\":\"$PR
   *) ok "B.17 已删账号登录被拒 ⇒ 与 B.16 是两个独立的闸（一个在签发侧、一个在已发令牌上），少一条另一条都能绿" ;;
 esac
 
-echo "--- C) 收尾：库、常驻实例、leader 归属 ---" | tee -a "$OUT"
+echo "--- D) 按 jobGroup 收口：permission 这一列第一次有读者（关门实例）---" | tee -a "$OUT"
+# 为什么只能在关了门的这台量：演示模式下匿名请求没有身份，GroupAccess.restrictable 直接回 null，
+# 收口在结构上不可能显形——和 A.20 那格是同一个可见性问题，不是重复。
+# 两个探针组、每组一个任务；peon 的 permission 先给 A 组。
+GRA=$(req POST "$BB/jobgroup/add?accessToken=$SECRET" '{"appName":"p22_grp_a","title":"p22 组A","addressType":0,"addressList":""}')
+GRB=$(req POST "$BB/jobgroup/add?accessToken=$SECRET" '{"appName":"p22_grp_b","title":"p22 组B","addressType":0,"addressList":""}')
+GA=$(gid p22_grp_a); GB=$(gid p22_grp_b)
+[ -n "$GA" ] && [ -n "$GB" ] && [ "$GA" != "$GB" ] && ok "D.1 两个执行器分组落库：A=$GA B=$GB" \
+  || bad "D.1 建组没成：$(msg_of "$GRA") / $(msg_of "$GRB")"
+new_job() {   # new_job <组> <描述>
+  req POST "$BB/jobinfo/add?accessToken=$SECRET" "{\"jobGroup\":$1,\"jobDesc\":\"$2\",\"author\":\"p22\",\"executorHandler\":\"demoHandler\",\"executorRouteStrategy\":\"ROUND\",\"executorBlockStrategy\":\"SERIAL_EXECUTION\",\"triggerType\":\"FIX_RATE\",\"fixInterval\":60000,\"jobCron\":\"\",\"misfireStrategy\":\"DO_NOTHING\",\"executorTimeout\":0,\"executorFailRetryCount\":0}"
+}
+JA_R=$(new_job "$GA" "p22_任务A"); JB_R=$(new_job "$GB" "p22_任务B")
+JA=$(jid p22_任务A); JB=$(jid p22_任务B)
+[ -n "$JA" ] && [ -n "$JB" ] && ok "D.2 两行任务落库：A组 $JA / B组 $JB（共享密钥建任务不受收口影响，它就是全权）" \
+  || bad "D.2 建任务没成：$(msg_of "$JA_R") / $(msg_of "$JB_R")"
+add_user "$PORT" p22_peon NORMAL "$SECRET" >/dev/null
+ID_P=$(uid p22_peon)
+SCOPE_R=$(req POST "$BB/user/update?accessToken=$SECRET" "{\"id\":$ID_P,\"permission\":\"$GA\"}")
+case "$SCOPE_R" in
+  *'"code":200'*) ok "D.3 给 p22_peon 写上 permission=$GA（这一列从此不是装饰，写它的人也不多）" ;;
+  *) bad "D.3 写 permission 失败：$(msg_of "$SCOPE_R")" ;;
+esac
+[ "$(q -e "SELECT permission FROM z_schedule_user WHERE id=$ID_P" | tr -d '[:space:]')" = "$GA" ] \
+  && ok "D.3b 库里那一列读回来正是 $GA" || bad "D.3b 库里那一列不是 $GA"
+T_P=$(login "$PORT" p22_peon)
+[ -n "$T_P" ] && ok "D.3c peon 登录拿到令牌（收口不拦登录，/user/login 本来就是公开口）" || bad "D.3c peon 登录失败"
+
+if [ -z "$GA" ] || [ -z "$GB" ] || [ -z "$JA" ] || [ -z "$JB" ] || [ -z "$T_P" ]; then
+  obs "D.4 起跳过：前置数据没齐（组=$GA/$GB 任务=$JA/$JB 令牌=${#T_P} 字符）⇒ 后面的按组收口无从判"
+else
+  PP="accessToken=$T_P"
+  RL=$(raw GET "$BB/jobinfo/list?$PP")
+  case "$RL" in 200*) : ;; *) bad "D.4 peon 打 /jobinfo/list 连门都没进：http=$(printf '%s' "$RL" | cut -f1)";; esac
+  if has_row "$(printf '%s' "$RL" | cut -f2-)" "$JA" && ! has_row "$(printf '%s' "$RL" | cut -f2-)" "$JB"; then
+    ok "D.4 列表被裁到自己那一组：有 $JA、没有 $JB（裁剪发生在返回前，不是替数据库少查）"
+  else
+    bad "D.4 列表形状不对：有 $JA=$(has_row "$(printf '%s' "$RL" | cut -f2-)" "$JA" && echo y || echo n) 有 $JB=$(has_row "$(printf '%s' "$RL" | cut -f2-)" "$JB" && echo y || echo n)"
+  fi
+
+  RB=$(raw GET "$BB/jobinfo/list?jobGroup=$GB&$PP")
+  case "$RB" in
+    200*'"code":500'*) printf '%s' "$RB" | grep -q "jobGroup=$GB" \
+        && ok "D.5 点名要 B 组是**拒绝**而不是一张空表，理由里带着组号（HTTP 200 + code:500 ⇒ 这是 controller 的第二层，过滤器的 403 在前面，见坑 23）" \
+        || bad "D.5 拒绝理由没指名组号：$(printf '%s' "$RB" | cut -c1-200)" ;;
+    403*) bad "D.5 这条被过滤器拦了（403）⇒ 收口没走到，说明角色闸比它更宽，读数无意义" ;;
+    *) bad "D.5 peon 竟然看得见 B 组的整页：$(printf '%s' "$RB" | cut -c1-200)" ;;
+  esac
+  RA=$(raw GET "$BB/jobinfo/list?jobGroup=$GA&$PP")
+  case "$RA" in 200*'"code":200'*) ok "D.6 阳性对照：同一个人点名要 A 组照样给 ⇒ D.5 的红不是「list 这个口坏了」";; *) bad "D.6 自己的组也被拒：$(printf '%s' "$RA" | cut -c1-200)";; esac
+
+  RG=$(raw GET "$BB/jobinfo/get?id=$JB&$PP"); RR=$(raw GET "$BB/jobinfo/get?id=$JA&$PP")
+  case "$RG" in *'"code":500'*) ok "D.7 读单行同样认库里那一行的组（$JB 在 B 组，读不到）";; *) bad "D.7 按 id 直读绕过了收口：$(printf '%s' "$RG" | cut -c1-200)";; esac
+  # 模式里要带 $JA 的**值**，所以这一段不能用单引号包；改用 has_row（双引号 + 尾随非数字）
+  if printf '%s' "$RR" | grep -q '"code":200' && has_row "$(printf '%s' "$RR" | cut -f2-)" "$JA"; then
+    ok "D.7b 阳性对照：A 组那行按 id 读得到"
+  else
+    bad "D.7b 自己的行按 id 读不到：$(printf '%s' "$RR" | cut -c1-200)"
+  fi
+
+  LB0=$(logrows "$JB")
+  RT=$(req POST "$BB/jobinfo/trigger?id=$JB&$PP" '{}')
+  case "$RT" in
+    *'"code":500'*) [ "$(logrows "$JB")" = "$LB0" ] \
+        && ok "D.8 越组触发被拒，而且库里 B 组那行的日志行数没变（$LB0 → $(logrows "$JB")）⇒ 闸落在写之前" \
+        || bad "D.8 说了拒绝却已经把任务跑了一遍：日志行数 $LB0 → $(logrows "$JB")" ;;
+    *) bad "D.8 越组触发竟然放行：$(printf '%s' "$RT" | cut -c1-200)" ;;
+  esac
+  req POST "$BB/jobinfo/trigger?id=$JA&$PP" '{}' >/dev/null
+  if [ "$(logrows "$JA")" -gt 0 ]; then
+    ok "D.9 阳性对照：同一条请求换成 A 组那行，触发真的落了库（日志行数 $(logrows "$JA")）⇒ D.8 的零不是「触发这个口从来不写日志」"
+  else
+    bad "D.9 自己那组的触发也没留下日志行 ⇒ 这条量具看不见写侧，D.8 的结论无效"
+  fi
+
+  ST0=$(status_of "$JB")
+  for op in stop start remove; do
+    R=$(req POST "$BB/jobinfo/$op?id=$JB&$PP" '{}')
+    case "$R" in
+      *'"code":500'*) : ;;
+      *) bad "D.10 越组 $op 竟然放行：$(printf '%s' "$R" | cut -c1-160)";;
+    esac
+  done
+  [ "$(status_of "$JB")" = "$ST0" ] && [ -n "$(jid p22_任务B)" ] \
+    && ok "D.10 越组的 stop/start/remove 三支都被拒，B 组那行既没被停也没被删（trigger_status 仍 $ST0）" \
+    || bad "D.10 被拒的写侧改动了库：status $(status_of "$JB")（原本 $ST0）/ 行还在吗 $([ -n "$(jid p22_任务B)" ] && echo y || echo n)"
+  req POST "$BB/jobinfo/start?id=$JA&$PP" '{}' >/dev/null
+  S1=$(status_of "$JA"); req POST "$BB/jobinfo/stop?id=$JA&$PP" '{}' >/dev/null; S0=$(status_of "$JA")
+  [ "$S1" = "1" ] && [ "$S0" = "0" ] && ok "D.11 阳性对照：peon 对自己那组启停真的生效（$JA trigger_status 0→1→0）⇒ D.10 不是「启停口全坏了」" \
+    || bad "D.11 自己组的启停没落地：$S1/$S0（期望 1/0）"
+
+  RADM=$(raw GET "$BB/jobinfo/list?accessToken=$TB_A")
+  if has_row "$(printf '%s' "$RADM" | cut -f2-)" "$JA" && has_row "$(printf '%s' "$RADM" | cut -f2-)" "$JB"; then
+    ok "D.12 管理员会话一份列表看得见两组（收口只针对普通身份，没把管理员一起锁小）"
+  else
+    bad "D.12 管理员会话也被裁了：$(printf '%s' "$RADM" | cut -c1-200)"
+  fi
+  RGP=$(raw GET "$BB/jobgroup/list?$PP")
+  if printf '%s' "$RGP" | grep -q "p22_grp_b"; then
+    obs "D.13 已知非交付：/jobgroup/list 仍把两个组都吐给 peon。这一份是执行器下拉的数据源，裁掉名字会让管理页只剩数字；要收口得连下拉一起改，不在本格范围"
+  else
+    ok "D.13 /jobgroup/list 也一并收了口（比本格的承诺更多）"
+  fi
+
+  # 改列要立刻生效：会话里带着 permission，不撤销就等于"收口要等它自己过期"
+  req POST "$BB/user/update?accessToken=$SECRET" "{\"id\":$ID_P,\"permission\":\"$GB\"}" >/dev/null
+  case "$(req GET "$BB/jobinfo/list?$PP")" in
+    403*) ok "D.14 改 permission ⇒ 已签发的会话立刻作废（关门实例上 403 看得见；和 B.11 改角色同一类，只是这一列以前没人读）" ;;
+    *) bad "D.14 改完分组，旧令牌还带着旧分组在跑：$(raw GET "$BB/jobinfo/list?$PP" | cut -c1-160)" ;;
+  esac
+  T_P2=$(login "$PORT" p22_peon)
+  RC=$(raw GET "$BB/jobinfo/list?accessToken=$T_P2")
+  if has_row "$(printf '%s' "$RC" | cut -f2-)" "$JB" && ! has_row "$(printf '%s' "$RC" | cut -f2-)" "$JA"; then
+    ok "D.15 重新登录之后跟着新值走：看得见 B 组、看不见 A 组 ⇒ 这一列是真的判据，不是写进去好看的"
+  else
+    bad "D.15 重新登录后收口没跟着新值：$(printf '%s' "$RC" | cut -c1-200)"
+  fi
+  case "$(req GET "$BB/jobinfo/list?accessToken=$TB_A")" in
+    200*) ok "D.16 收口一个人不把别人一并踢下线（invalidateUser 按 userId 精确撤销）" ;;
+    *) bad "D.16 改 peon 的分组把管理员会话也踢了" ;;
+  esac
+fi
+# 探针数据自己收走：任务、日志、分组都按 p22_ 前缀删，账号留给 C 段
+q -e "DELETE FROM z_schedule_job_log WHERE job_id IN (SELECT id FROM z_schedule_job_info WHERE job_desc LIKE 'p22\_%')" >/dev/null
+q -e "DELETE FROM z_schedule_job_info WHERE job_desc LIKE 'p22\_%'" >/dev/null
+q -e "DELETE FROM z_schedule_job_group WHERE app_name LIKE 'p22\_%'" >/dev/null
+DLEFT=$(q -e "SELECT (SELECT COUNT(*) FROM z_schedule_job_info WHERE job_desc LIKE 'p22\_%') + (SELECT COUNT(*) FROM z_schedule_job_group WHERE app_name LIKE 'p22\_%')" | tr -d '[:space:]')
+[ "$DLEFT" = "0" ] && ok "D.17 探针任务与探针分组已清干净（$DLEFT）" || bad "D.17 还剩 $DLEFT 行探针数据，会污染下一轮的行数断言"
+
 kill -TERM "$BPID" 2>/dev/null || true
 for i in $(seq 1 30); do sleep 1; kill -0 "$BPID" 2>/dev/null || { say "  C.1 临时实例 ${i}s 内退出"; break; }; done
 say "  C.2 临时实例日志里的 stepDown 行数=$(grep -icE 'stepped down' "$LOG_DIR/p22_b_instance.out")（它是 follower 时应为 0，抢到过一次 leader 则必须有）"
