@@ -2,10 +2,13 @@ package com.zifang.z.schedule.web.controller;
 
 import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.core.model.User;
+import com.zifang.z.schedule.web.auth.LoginSession;
+import com.zifang.z.schedule.web.filter.TokenAuthFilter;
 import com.zifang.z.schedule.web.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import javax.servlet.http.HttpServletRequest;
 import java.util.List;
 
 /**
@@ -13,15 +16,16 @@ import java.util.List;
  * <p>
  * API 基础路径: /user
  * 所属模块: z-schedule-admin
- * 鉴权: 由调度管理端统一拦截,需登录态校验
+ * 鉴权: 由 {@code TokenAuthFilter} 统一拦；建/改/删账号只接受 ADMIN 会话（见其 ADMIN_ONLY_PATHS）
  *
  * <p>主要端点:
  * <ul>
  *   <li>GET /user/list — 获取用户列表</li>
- *   <li>POST /user/add — 新增用户</li>
- *   <li>POST /user/update — 更新用户</li>
- *   <li>POST /user/remove?id= — 删除用户</li>
- *   <li>POST /user/login — 用户登录</li>
+ *   <li>POST /user/add — 新增用户（ADMIN）</li>
+ *   <li>POST /user/update — 更新用户（ADMIN）</li>
+ *   <li>POST /user/remove?id= — 删除用户（ADMIN）</li>
+ *   <li>POST /user/login — 用户登录，换取会话令牌</li>
+ *   <li>POST /user/logout — 撤销当前会话令牌</li>
  * </ul>
  */
 @RestController("scheduleUserController")
@@ -79,12 +83,28 @@ public class UserController {
      * 用户登录.
      *
      * @param param 登录参数，包含 username 和 password
-     * @return 操作结果（成功返回 token=用户名）
+     * @return 操作结果（成功时 content 是服务端签发的会话令牌，后续请求用 accessToken 参数或
+     *         {@code X-Access-Token} 头出示）
      */
     @PostMapping("/login")
     public ReturnT<String> login(@RequestBody java.util.Map<String, String> param) {
         String username = param.get("username");
         String password = param.get("password");
         return userService.login(username, password);
+    }
+
+    /**
+     * 注销当前会话.
+     * <p>
+     * 令牌从请求上下文取（{@code TokenAuthFilter} 已验过它），不从请求体取：
+     * 能注销任意字符串的那个口，等于给持有他人令牌的人一个"帮你退出"的入口。
+     */
+    @PostMapping("/logout")
+    public ReturnT<String> logout(HttpServletRequest request) {
+        LoginSession identity = TokenAuthFilter.currentIdentity(request);
+        if (identity == null) {
+            return ReturnT.fail("当前请求没有登录态");
+        }
+        return userService.logout(identity.getToken());
     }
 }

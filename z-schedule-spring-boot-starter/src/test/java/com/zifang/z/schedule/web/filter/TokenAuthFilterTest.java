@@ -1,7 +1,10 @@
 package com.zifang.z.schedule.web.filter;
 
 import com.zifang.z.schedule.core.config.ScheduleProperties;
+import com.zifang.z.schedule.web.auth.LoginSession;
+import com.zifang.z.schedule.web.auth.LoginSessionStore;
 import com.zifang.z.schedule.web.config.ZScheduleAutoConfiguration;
+import com.zifang.z.schedule.web.domain.entity.UserDO;
 import org.junit.Test;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 
@@ -130,13 +133,17 @@ public class TokenAuthFilterTest {
     public void 过滤器必须注册在整个应用入口上() {
         ScheduleProperties props = new ScheduleProperties();
         props.setAccessToken("secret");
+        LoginSessionStore store = new LoginSessionStore();
         FilterRegistrationBean<TokenAuthFilter> registration =
-                new ZScheduleAutoConfiguration().tokenAuthFilterRegistration(props);
+                new ZScheduleAutoConfiguration().tokenAuthFilterRegistration(props, store);
 
         assertEquals("urlPattern 必须是 /*，否则管理面根本不经过鉴权",
                 Collections.singletonList("/*"), new ArrayList<String>(registration.getUrlPatterns()));
         assertTrue("注册进去的必须是那个会自己判路径的过滤器",
                 registration.getFilter() instanceof TokenAuthFilter);
+        // 签发方与校验方各自一张表 = "登录成功但每个请求都 403"，装配时最容易写错的就是这一条
+        assertSame("过滤器拿到的必须是那个正在发号的服务",
+                store, fieldOf(registration.getFilter(), "sessionStore"));
     }
 
     @Test
@@ -206,12 +213,161 @@ public class TokenAuthFilterTest {
         assertEquals(403, response.status);
     }
 
+    // ---- 会话令牌：登录换来的凭证，以及它带进来的那个"是谁" ----
+
+    @Test
+    public void 会话令牌本身就是凭证() throws Exception {
+        LoginSessionStore store = new LoginSessionStore();
+        String token = store.issue(user(1, "zoe", "NORMAL")).getToken();
+
+        RecordingChain c = new RecordingChain();
+        filter("secret", store).doFilter(bearer("/jobinfo/list", token), new RecordingResponse().proxy(), c);
+
+        assertTrue("出示登录换来的令牌就该等于已登录", c.called);
+        // 阳性对照：同一把令牌在另一张会话表里验不过，说明上面通过的是"这张表认识它"而不是"全都放行"
+        RecordingChain other = new RecordingChain();
+        filter("secret", new LoginSessionStore())
+                .doFilter(bearer("/jobinfo/list", token), new RecordingResponse().proxy(), other);
+        assertFalse("别的实例签的令牌不算数", other.called);
+    }
+
+    @Test
+    public void 过期或伪造的令牌仍按未登录处理() throws Exception {
+        LoginSessionStore shortLived = new LoginSessionStore(10, 30L);
+        String stale = shortLived.issue(user(2, "amy", "ADMIN")).getToken();
+        Thread.sleep(70L);
+
+        RecordingChain expiredChain = new RecordingChain();
+        RecordingResponse expiredResponse = new RecordingResponse();
+        filter("secret", shortLived).doFilter(bearer("/jobinfo/list", stale), expiredResponse.proxy(), expiredChain);
+        assertFalse("过期令牌不得混进门", expiredChain.called);
+        assertEquals(403, expiredResponse.status);
+
+        RecordingChain unknownChain = new RecordingChain();
+        RecordingResponse unknownResponse = new RecordingResponse();
+        filter("secret", new LoginSessionStore())
+                .doFilter(bearer("/executor/callback", stale), unknownResponse.proxy(), unknownChain);
+        assertFalse("另一张会话表不认识的令牌同样不算数", unknownChain.called);
+        assertEquals(403, unknownResponse.status);
+    }
+
+    @Test
+    public void 会话身份挂进请求而共享密钥不挂() throws Exception {
+        LoginSessionStore store = new LoginSessionStore();
+        String token = store.issue(user(21, "gina", "ADMIN")).getToken();
+
+        Map<String, Object> attributes = new LinkedHashMap<String, Object>();
+        RecordingChain c = new RecordingChain();
+        filter("secret", store).doFilter(bearer("/dashboard/stats", token, attributes),
+                new RecordingResponse().proxy(), c);
+        assertTrue(c.called);
+
+        LoginSession identity = (LoginSession) attributes.get(TokenAuthFilter.IDENTITY_ATTRIBUTE);
+        assertNotNull("身份必须落在约定的属性上，否则下游拿不到“是谁”", identity);
+        assertEquals(21, identity.getUserId());
+        assertEquals("gina", identity.getUsername());
+        assertTrue(identity.isAdmin());
+
+        // 反方向：共享密钥进得来，但它不区分是谁——硬造一个身份出来只会骗过下游
+        Map<String, Object> sharedKeyAttributes = new LinkedHashMap<String, Object>();
+        RecordingChain byKey = new RecordingChain();
+        filter("secret", store).doFilter(bearer("/dashboard/stats", "secret", sharedKeyAttributes),
+                new RecordingResponse().proxy(), byKey);
+        assertTrue("共享密钥本来就是凭证", byKey.called);
+        assertNull("共享密钥不该带出会话身份",
+                sharedKeyAttributes.get(TokenAuthFilter.IDENTITY_ATTRIBUTE));
+        assertNull(TokenAuthFilter.currentIdentity(request("", "/user/list", "", "/user/list",
+                null, null, sharedKeyAttributes)));
+    }
+
+    @Test
+    public void 普通会话改不了账号而管理员会话能() throws Exception {
+        LoginSessionStore store = new LoginSessionStore();
+        String normal = store.issue(user(31, "peon", "NORMAL")).getToken();
+        String admin = store.issue(user(32, "boss", "ADMIN")).getToken();
+
+        for (String path : new String[]{"/user/add", "/user/update", "/user/remove"}) {
+            RecordingChain c = new RecordingChain();
+            RecordingResponse r = new RecordingResponse();
+            filter("secret", store).doFilter(bearer(path, normal), r.proxy(), c);
+            assertFalse(path + " 不该让普通会话通过", c.called);
+            assertEquals(path + " 应返回 403", 403, r.status);
+            assertTrue(path + " 的拒绝理由要说清是角色不够: " + r.body(), r.body().contains("需要管理员角色"));
+
+            RecordingChain ok = new RecordingChain();
+            filter("secret", store).doFilter(bearer(path, admin), new RecordingResponse().proxy(), ok);
+            assertTrue(path + " 管理员会话必须能过（否则上面那组只是“全拦”）", ok.called);
+        }
+        // 阳性对照：读侧不收口，普通会话照样能看列表
+        RecordingChain read = new RecordingChain();
+        filter("secret", store).doFilter(bearer("/user/list", normal), new RecordingResponse().proxy(), read);
+        assertTrue(read.called);
+    }
+
+    @Test
+    public void 共享密钥不受角色闸约束() throws Exception {
+        // 它是“全权”这件事是本版本的设计：机器/执行器没有会话，也没有角色可言。
+        // 这条断言钉的是"闸没有误伤唯一一种非会话凭证"，不是认可它继续敞开。
+        RecordingChain c = new RecordingChain();
+        filter("secret", new LoginSessionStore())
+                .doFilter(bearer("/user/add", "secret"), new RecordingResponse().proxy(), c);
+
+        assertTrue(c.called);
+    }
+
+    @Test
+    public void 演示模式下匿名全开但出示的会话仍被限角色() throws Exception {
+        LoginSessionStore store = new LoginSessionStore();
+        String normal = store.issue(user(41, "peon", "NORMAL")).getToken();
+
+        RecordingChain anonymous = new RecordingChain();
+        filter(null, store).doFilter(on("/user/add"), new RecordingResponse().proxy(), anonymous);
+        assertTrue("未配置 token 时管理面对匿名敞开（启动日志里那条 warn 就是这件事）", anonymous.called);
+
+        RecordingChain identified = new RecordingChain();
+        filter(null, store).doFilter(bearer("/user/add", normal), new RecordingResponse().proxy(), identified);
+        assertFalse("敞开的门不该让一个自报的普通会话顺手拿到改账号的权力", identified.called);
+    }
+
     // ---- 替身 ----
 
     private static TokenAuthFilter filter(String accessToken) {
+        return filter(accessToken, null);
+    }
+
+    private static TokenAuthFilter filter(String accessToken, LoginSessionStore store) {
         ScheduleProperties properties = new ScheduleProperties();
         properties.setAccessToken(accessToken);
-        return new TokenAuthFilter(properties);
+        return new TokenAuthFilter(properties, store);
+    }
+
+    /** 一条带着会话/密钥令牌的具体路径请求（令牌走请求头，与参数路径共用同一段判断）。 */
+    private static HttpServletRequest bearer(String path, String token) {
+        return bearer(path, token, new LinkedHashMap<String, Object>());
+    }
+
+    private static HttpServletRequest bearer(String path, String token, Map<String, Object> attributes) {
+        Map<String, String> headers = new LinkedHashMap<String, String>();
+        headers.put("X-Access-Token", token);
+        return request(path, path, "", null, null, headers, attributes);
+    }
+
+    private static UserDO user(int id, String username, String role) {
+        UserDO d = new UserDO();
+        d.setId(id);
+        d.setUsername(username);
+        d.setRole(role);
+        return d;
+    }
+
+    private static Object fieldOf(Object target, String fieldName) {
+        try {
+            Field field = target.getClass().getDeclaredField(fieldName);
+            field.setAccessible(true);
+            return field.get(target);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("找不到字段 " + fieldName + "，装配形状变了：" + e, e);
+        }
     }
 
     /**
@@ -233,6 +389,14 @@ public class TokenAuthFilterTest {
     private static HttpServletRequest request(final String servletPath, final String requestURI,
                                               final String contextPath, final String pathInfo,
                                               final String accessToken, final Map<String, String> headers) {
+        return request(servletPath, requestURI, contextPath, pathInfo, accessToken, headers,
+                new LinkedHashMap<String, Object>());
+    }
+
+    private static HttpServletRequest request(final String servletPath, final String requestURI,
+                                              final String contextPath, final String pathInfo,
+                                              final String accessToken, final Map<String, String> headers,
+                                              final Map<String, Object> attributes) {
         return (HttpServletRequest) Proxy.newProxyInstance(
                 TokenAuthFilterTest.class.getClassLoader(),
                 new Class<?>[]{HttpServletRequest.class},
@@ -256,6 +420,13 @@ public class TokenAuthFilterTest {
                         }
                         if ("getHeader".equals(name)) {
                             return headers == null ? null : headers.get((String) args[0]);
+                        }
+                        if ("setAttribute".equals(name)) {
+                            attributes.put((String) args[0], args[1]);
+                            return null;
+                        }
+                        if ("getAttribute".equals(name)) {
+                            return attributes.get((String) args[0]);
                         }
                         if ("getRemoteAddr".equals(name)) {
                             return "127.0.0.1";

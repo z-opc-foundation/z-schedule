@@ -32,9 +32,10 @@ public class UserServiceImpl implements UserService {
     private UserMapper userMapper;
 
     /**
-     * 登录态载体。由 {@code @ComponentScan("...schedule.web")} 提供的单例，
+     * 登录态载体。由 {@code ZScheduleAutoConfiguration} 以 {@code @ConditionalOnMissingBean} 提供，
      * 与 {@code TokenAuthFilter} 拿到的是同一个实例——签发方与校验方各自一张表的话，
-     * 登录换来的令牌会永远验不过。
+     * 登录换来的令牌会永远验不过。bean 名刻意叫 {@code sessionStore}（= 本字段名），
+     * 让 {@code @Resource} 按名命中，宿主自己注册实现时也不会变成两个同类型候选。
      */
     @Resource
     private LoginSessionStore sessionStore;

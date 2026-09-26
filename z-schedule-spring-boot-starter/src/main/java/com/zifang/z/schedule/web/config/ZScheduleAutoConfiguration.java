@@ -3,6 +3,7 @@ package com.zifang.z.schedule.web.config;
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import com.zifang.z.boot.datasource.starter.ModuleDataSourceTemplate;
 import com.zifang.z.schedule.core.config.ScheduleProperties;
+import com.zifang.z.schedule.web.auth.LoginSessionStore;
 import com.zifang.z.schedule.web.filter.TokenAuthFilter;
 import com.zifang.z.schedule.web.service.AlarmService;
 import com.zifang.z.schedule.web.service.impl.DefaultAlarmService;
@@ -95,17 +96,33 @@ public class ZScheduleAutoConfiguration extends ModuleDataSourceTemplate {
     }
 
     /**
+     * 登录会话表（{@code /user/login} 换来的令牌 → 用户身份）。
+     * <p>
+     * 与 {@link AlarmServiceConfiguration} 同一个理由：直挂 {@code @Component} 的话，
+     * 宿主想换成共享存储（多实例部署下 A 机签发的令牌在 B 机验不过）就会撞成两个同类型候选，
+     * 装配期直接启动失败。方法名 {@code sessionStore} = 各注入点的字段名，按名命中。
+     */
+    @Bean
+    @ConditionalOnMissingBean(LoginSessionStore.class)
+    public LoginSessionStore sessionStore() {
+        return new LoginSessionStore();
+    }
+
+    /**
      * Token 认证过滤器注册。
      * <p>
      * 挂在 {@code /*} 上，由 {@link TokenAuthFilter} 自己按路径决定要不要校验：
      * 只注册 {@code /executor/*} 的话，管理面（建任务/删任务/看日志/改用户/dashboard/actuator）
      * 根本不会经过这个过滤器，配了 accessToken 也等于没配——过滤器里的路径判断会永远"通过"，
      * 测试再怎么断言 403 也照样绿。
+     *
+     * <p>{@code sessionStore} 必须和签发方是同一个实例：两张表就是"登录成功但每个请求都 403"。
      */
     @Bean
-    public FilterRegistrationBean<TokenAuthFilter> tokenAuthFilterRegistration(ScheduleProperties props) {
+    public FilterRegistrationBean<TokenAuthFilter> tokenAuthFilterRegistration(ScheduleProperties props,
+                                                                              LoginSessionStore sessionStore) {
         FilterRegistrationBean<TokenAuthFilter> registration = new FilterRegistrationBean<>();
-        registration.setFilter(new TokenAuthFilter(props));
+        registration.setFilter(new TokenAuthFilter(props, sessionStore));
         registration.addUrlPatterns("/*");
         registration.setName("tokenAuthFilter");
         registration.setOrder(1);

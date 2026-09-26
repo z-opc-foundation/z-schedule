@@ -3,7 +3,6 @@ package com.zifang.z.schedule.web.auth;
 import com.zifang.z.schedule.web.domain.entity.UserDO;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.springframework.stereotype.Component;
 
 import java.security.SecureRandom;
 import java.util.Base64;
@@ -25,8 +24,10 @@ import java.util.Map;
  * <p>
  * 过期靠"被出示时才判"（{@link #resolve}）+ 容量上限逐出，没有清扫线程：
  * 一个永不出示的过期条目最多多活到被逐出为止，而它此时已经无法通过 {@link #resolve}。
+ * <p>
+ * 注册方式：由 {@code ZScheduleAutoConfiguration} 以 {@code @ConditionalOnMissingBean} 给出，
+ * 所以宿主想换成共享存储（Redis 之类）时注册一个同类型 bean 即可，不必改本仓源码。
  */
-@Component
 public class LoginSessionStore {
 
     private static final Logger logger = LogManager.getLogger(LoginSessionStore.class);
@@ -75,7 +76,6 @@ public class LoginSessionStore {
                 user.getId() == null ? 0 : user.getId(),
                 user.getUsername(),
                 user.getRole(),
-                user.getPermission(),
                 now + ttlMillis);
         synchronized (sessions) {
             sessions.put(token, session);

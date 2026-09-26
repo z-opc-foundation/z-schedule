@@ -28,6 +28,14 @@ import java.util.Set;
  * 默认对<b>全部</b>入口校验 accessToken，只有登录口与静态外壳放行；未配置 token 时跳过验证
  * （演示模式，但会在启动时把"管理面全开"这件事打出来，不再静默）。
  * <p>
+ * 认可的凭证有两种：
+ * <ul>
+ *   <li>{@code z.schedule.accessToken} 那个共享密钥 —— 配了它的人拿到的就是全权（机器/执行器用它，
+ *       它没有"是谁"的概念，也就无从分权）</li>
+ *   <li>{@code /user/login} 换来的会话令牌 —— 解析回具体的用户与角色，作为
+ *       {@link #IDENTITY_ATTRIBUTE} 挂到请求上，并按 {@link #ADMIN_ONLY_PATHS} 收窄可及范围</li>
+ * </ul>
+ * <p>
  * token 来源优先级：请求参数 {@code accessToken} &gt; 请求头 {@code X-Access-Token}。
  */
 public class TokenAuthFilter implements Filter {
@@ -36,6 +44,9 @@ public class TokenAuthFilter implements Filter {
 
     private static final String PARAM_ACCESS_TOKEN = "accessToken";
     private static final String HEADER_ACCESS_TOKEN = "X-Access-Token";
+
+    /** 会话身份挂在请求上的属性名；下游（控制器、按角色放行的判断）从这里取"是谁"。 */
+    public static final String IDENTITY_ATTRIBUTE = "z.schedule.loginSession";
 
     /**
      * 不需要 token 就能到的路径。
@@ -51,14 +62,46 @@ public class TokenAuthFilter implements Filter {
     /** 静态资源前缀（把打好的前端放进 {@code static/} 时不至于连壳都下不下来）。 */
     private static final String[] PUBLIC_PREFIXES = {"/assets/", "/static/", "/public/"};
 
+    /**
+     * 只有管理员会话能碰的路径。
+     * <p>
+     * 这一组是 {@code role} 列的读者：建/改/删账号决定了"谁能拿到 ADMIN"，
+     * 交给普通会话就等于谁都能给自己提权。
+     * <p>
+     * 只约束<b>会话</b>身份的两种例外，都是现状而不是漏：共享密钥 {@code accessToken} 本来就不区分
+     * "是谁"（它就是全权）；未配置 token 的演示模式下整个管理面是敞开的，这里单独拦一个口没有意义。
+     * 读侧（{@code /user/list}）暂不按角色收口——它吐出的是用户名与角色，不含口令散列（见
+     * {@code DoMapper.toDTO}），而"按 jobGroup 限权"是 {@code permission} 列的另一件事。
+     */
+    private static final Set<String> ADMIN_ONLY_PATHS = new HashSet<String>(Arrays.asList(
+            "/user/add", "/user/update", "/user/remove"));
+
     private final ScheduleProperties scheduleProperties;
 
+    /** 会话令牌 → 身份。为 {@code null} 时本过滤器只认共享密钥（令牌一律走 403 分支）。 */
+    private final LoginSessionStore sessionStore;
+
     public TokenAuthFilter(ScheduleProperties scheduleProperties) {
+        this(scheduleProperties, null);
+    }
+
+    public TokenAuthFilter(ScheduleProperties scheduleProperties, LoginSessionStore sessionStore) {
         this.scheduleProperties = scheduleProperties;
+        this.sessionStore = sessionStore;
     }
 
     public ScheduleProperties getScheduleProperties() {
         return scheduleProperties;
+    }
+
+    /**
+     * 这次请求是谁。
+     *
+     * @return 出示了有效会话令牌时给出身份；共享密钥进来的、演示模式匿名进来的都回 {@code null}
+     */
+    public static LoginSession currentIdentity(HttpServletRequest request) {
+        Object attribute = request.getAttribute(IDENTITY_ATTRIBUTE);
+        return attribute instanceof LoginSession ? (LoginSession) attribute : null;
     }
 
     @Override
@@ -86,6 +129,26 @@ public class TokenAuthFilter implements Filter {
             return;
         }
 
+        // 出示的凭证：参数优先于请求头（与历史行为一致）
+        String presented = httpRequest.getParameter(PARAM_ACCESS_TOKEN);
+        if (presented == null || presented.trim().isEmpty()) {
+            presented = httpRequest.getHeader(HEADER_ACCESS_TOKEN);
+        }
+
+        // 先认会话令牌：它带着"是谁"，是两种凭证里唯一能被分权使用的那一种
+        LoginSession identity = sessionStore == null ? null : sessionStore.resolve(presented);
+        if (identity != null) {
+            if (ADMIN_ONLY_PATHS.contains(uri) && !identity.isAdmin()) {
+                log.warn("非管理员会话尝试改账号被拒, uri={}, username={}, role={}, remoteAddr={}",
+                        uri, identity.getUsername(), identity.getRole(), httpRequest.getRemoteAddr());
+                sendForbidden(httpResponse, "需要管理员角色");
+                return;
+            }
+            httpRequest.setAttribute(IDENTITY_ATTRIBUTE, identity);
+            chain.doFilter(request, response);
+            return;
+        }
+
         String configuredToken = scheduleProperties.getAccessToken();
 
         // 未配置 token → 跳过验证
@@ -94,18 +157,12 @@ public class TokenAuthFilter implements Filter {
             return;
         }
 
-        // 从请求参数或请求头中获取 token
-        String requestToken = httpRequest.getParameter(PARAM_ACCESS_TOKEN);
-        if (requestToken == null || requestToken.trim().isEmpty()) {
-            requestToken = httpRequest.getHeader(HEADER_ACCESS_TOKEN);
-        }
-
-        // 校验 token
-        if (tokenMatches(configuredToken, requestToken)) {
+        // 再认共享密钥
+        if (tokenMatches(configuredToken, presented)) {
             chain.doFilter(request, response);
         } else {
             log.warn("accessToken 不合法, uri={}, remoteAddr={}", uri, httpRequest.getRemoteAddr());
-            sendForbidden(httpResponse);
+            sendForbidden(httpResponse, " accessToken 不合法");
         }
     }
 
@@ -164,11 +221,13 @@ public class TokenAuthFilter implements Filter {
 
     /**
      * 返回 403 JSON 响应。
+     * <p>
+     * 区分"凭证不对"和"凭证对但角色不够"：前者让人去翻口令，后者让人去申请提权。
      */
-    private void sendForbidden(HttpServletResponse response) throws IOException {
+    private void sendForbidden(HttpServletResponse response, String reason) throws IOException {
         response.setStatus(HttpServletResponse.SC_FORBIDDEN);
         response.setContentType("application/json;charset=UTF-8");
-        String body = "{\"code\":403,\"msg\":\" accessToken 不合法\"}";
+        String body = "{\"code\":403,\"msg\":\"" + reason + "\"}";
         PrintWriter writer = response.getWriter();
         writer.write(body);
         writer.flush();

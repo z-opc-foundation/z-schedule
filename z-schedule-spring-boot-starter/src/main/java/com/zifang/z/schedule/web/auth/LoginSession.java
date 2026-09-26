@@ -4,7 +4,8 @@ package com.zifang.z.schedule.web.auth;
  * 一次登录换来的身份：把"出示的令牌"绑定回"哪个用户、什么角色"。
  * <p>
  * 不可变，且刻意不带密码或其散列——令牌泄露时不该连带泄露口令材料。
- * {@link #getToken()} 只在签发和撤销时用得到，鉴权判断一律看角色。
+ * 也<b>不带</b> {@code permission} 列：那一列是"能操作哪些 jobGroup"的维度，
+ * 而本版本还没有任何按 jobGroup 的判据，带进身份只会多一个没人读的字段。
  */
 public class LoginSession {
 
@@ -15,16 +16,13 @@ public class LoginSession {
     private final int userId;
     private final String username;
     private final String role;
-    private final String permission;
     private final long expireAtMillis;
 
-    LoginSession(String token, int userId, String username, String role,
-                 String permission, long expireAtMillis) {
+    LoginSession(String token, int userId, String username, String role, long expireAtMillis) {
         this.token = token;
         this.userId = userId;
         this.username = username;
         this.role = role;
-        this.permission = permission;
         this.expireAtMillis = expireAtMillis;
     }
 
@@ -42,10 +40,6 @@ public class LoginSession {
 
     public String getRole() {
         return role;
-    }
-
-    public String getPermission() {
-        return permission;
     }
 
     public long getExpireAtMillis() {
