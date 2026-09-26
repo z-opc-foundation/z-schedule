@@ -5,7 +5,6 @@ import com.zifang.z.schedule.core.model.JobLog;
 import com.zifang.z.schedule.web.service.AlarmService;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.springframework.stereotype.Service;
 
 /**
  * 内置的兜底 {@link AlarmService}：<b>只记账，不发任何东西</b>。
@@ -13,8 +12,13 @@ import org.springframework.stereotype.Service;
  * <p>{@code alarm_email} 留空 ⇒ 原样返回，日志保持"无需告警"(1)。
  * <p>{@code alarm_email} 配了 ⇒ 置 3（告警失败）并 warn 一行：内置实现没有邮件通道，
  * 配了邮箱也不会收到信。曾经这里置的是 2（告警成功），属于对运维的谎报。
+ *
+ * <p><b>故意不带 {@code @Service}</b>：这个类是"宿主没提供实现时才有"的兜底，
+ * 由 {@code ZScheduleAutoConfiguration.AlarmServiceConfiguration} 以
+ * {@code @Bean @ConditionalOnMissingBean(AlarmService.class)} 的形式注册。
+ * 带上 {@code @Service} 就会被 {@code @ComponentScan} 抢先注册成固定 bean，
+ * 宿主再注册自己的实现就变成两个同类型候选，且条件注解也救不回来。
  */
-@Service
 public class DefaultAlarmService implements AlarmService {
 
     private static final Logger log = LogManager.getLogger(DefaultAlarmService.class);

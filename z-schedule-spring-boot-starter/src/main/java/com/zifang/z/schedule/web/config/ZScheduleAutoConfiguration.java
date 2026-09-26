@@ -4,14 +4,18 @@ import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import com.zifang.z.boot.datasource.starter.ModuleDataSourceTemplate;
 import com.zifang.z.schedule.core.config.ScheduleProperties;
 import com.zifang.z.schedule.web.filter.TokenAuthFilter;
+import com.zifang.z.schedule.web.service.AlarmService;
+import com.zifang.z.schedule.web.service.impl.DefaultAlarmService;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.mybatis.spring.annotation.MapperScan;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -47,6 +51,7 @@ import javax.sql.DataSource;
  */
 @Configuration
 @ComponentScan(basePackages = "com.zifang.z.schedule.web")
+@Import(ZScheduleAutoConfiguration.AlarmServiceConfiguration.class)
 @EnableScheduling
 @MapperScan(
         basePackages = "com.zifang.z.schedule.web.domain.mapper",
@@ -61,6 +66,28 @@ public class ZScheduleAutoConfiguration extends ModuleDataSourceTemplate {
     @ConfigurationProperties(prefix = "z.schedule")
     public ScheduleProperties scheduleProperties() {
         return new ScheduleProperties();
+    }
+
+    /**
+     * {@link AlarmService} 的扩展点。
+     *
+     * <p>放在这里而不是给 {@code DefaultAlarmService} 挂 {@code @Service}：
+     * {@code @ComponentScan} 注册的 bean 不受条件注解约束，宿主一旦自己注册实现，
+     * {@code JobTriggerServiceImpl} 的 {@code @Resource AlarmService} 就面对两个同类型候选，
+     * 装配期直接启动失败——即"想换告警通道 = 必须先改本仓源码"。
+     *
+     * <p>bean 名刻意叫 {@code alarmService}（= 注入点的字段名）：
+     * {@code @Resource} 先按名匹配，所以即使在 {@code @Import} 路径下条件判定早于宿主 bean 注册、
+     * 兜底实现没能退让，注入也仍能确定地落在一个 bean 上，而不是抛 NoUniqueBeanDefinitionException。
+     */
+    @Configuration(proxyBeanMethods = false)
+    public static class AlarmServiceConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean(AlarmService.class)
+        public AlarmService alarmService() {
+            return new DefaultAlarmService();
+        }
     }
 
     /**
