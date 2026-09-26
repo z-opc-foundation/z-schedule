@@ -15,6 +15,7 @@ import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -609,6 +610,11 @@ public class JobScheduleEngine {
     /**
      * 全量对齐 DB（Leader 切换、周期性 reconcile）。只查 {@code trigger_status=1} 的行，
      * 不再全表捞出后在内存里过滤。
+     * <p>
+     * <b>调度输入没变的任务沿用原排期</b>，不按 reconcile 时刻重算：新建/新启动的 FIX_RATE 行
+     * {@code trigger_last_time} 还是 0，重算得到"当前时间 + 间隔"，于是每 15 秒的 reconcile 都把首次
+     * 触发往后推 15 秒，间隔大于该周期的任务永远跑不到（而 trigger_status 一直是 1）。FIX_DELAY 同理：
+     * 它在执行期间故意不挂轮，重算等于"现在再跑一次"，间隔被踩成每 15 秒一轮，COVER_EARLY 下还会打断在跑的那次。
      */
     public void reloadJobs() {
         reloadJobs(System.currentTimeMillis());
@@ -631,12 +637,32 @@ public class JobScheduleEngine {
             running = Collections.emptyList();
         }
 
+        Map<Integer, ScheduledJob> previous = new HashMap<Integer, ScheduledJob>(scheduled);
+        Map<Integer, Long> armedAt = new HashMap<Integer, Long>();
+        for (Integer jobId : previous.keySet()) {
+            // 0 有两种含义：还没挂上，或这一次正在跑（poll 会把已触发的条目摘出 scheduledSec）
+            armedAt.put(jobId, ring.nextFireTime(jobId));
+        }
+
         Map<Integer, ScheduledJob> reloaded = new ConcurrentHashMap<Integer, ScheduledJob>();
         ring.clear();
         int loaded = 0;
         for (JobInfo info : running) {
             try {
-                ScheduledJob job = toScheduledJob(info, now);
+                ScheduledJob kept = previous.get(info.getId());
+                Long armed = armedAt.get(info.getId());
+                ScheduledJob job;
+                if (kept == null || armed == null || !sameSchedulePlan(kept.info, info)) {
+                    job = toScheduledJob(info, now);
+                } else if (armed > 0L) {
+                    job = new ScheduledJob(info, kept.cron, armed);
+                } else if (TriggerTypeEnum.FIX_DELAY.getCode().equals(triggerTypeOf(info))) {
+                    // 在跑的这一轮还没回调 completeJob，保持不挂轮
+                    job = new ScheduledJob(info, kept.cron, 0L);
+                } else {
+                    // 刚触发完、还没来得及重挂：按 DB 里的 last_time 算，别停在原地
+                    job = toScheduledJob(info, now);
+                }
                 if (job == null) {
                     continue;
                 }
@@ -661,6 +687,18 @@ public class JobScheduleEngine {
 
         logger.info("[z-schedule] Engine loaded {} jobs into ring (ringTotal={}, overflow={}, dropped={})",
                 loaded, ring.totalSize(), ring.overflowSize(), scheduled.size() - loaded);
+    }
+
+    /** 两个定义里"会改变排期结果"的字段是否一致；不一致才允许 reconcile 重算下次触发时间。 */
+    private static boolean sameSchedulePlan(JobInfo a, JobInfo b) {
+        return triggerTypeOf(a).equals(triggerTypeOf(b))
+                && a.getFixInterval() == b.getFixInterval()
+                && eq(a.getJobCron(), b.getJobCron())
+                && eq(a.getMisfireStrategy(), b.getMisfireStrategy());
+    }
+
+    private static boolean eq(String a, String b) {
+        return a == null ? b == null : a.equals(b);
     }
 
     // ---- FIX_DELAY 回调 ----

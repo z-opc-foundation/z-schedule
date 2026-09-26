@@ -406,6 +406,139 @@ public class JobScheduleEngineTest {
         assertEquals(0, triggerService.invocations.size());
     }
 
+    /**
+     * 生产里 Leader 每 15 秒 reconcile 一次（{@code JobTriggerServiceImpl.reloadRunningJobs} 的 fixedDelay）。
+     * 新建或刚启动的 FIX_RATE 行 {@code trigger_last_time} 是 0，而 {@code start()} 不写这一列，
+     * 所以按"当前时间 + 间隔"重算等于每次 reconcile 都把首次触发往后推 15 秒 ——
+     * 间隔大于 15 秒的任务因此在 Leader 活着的时候永远跑不到（trigger_status 一直是 1，界面上看着正常）。
+     */
+    @Test
+    public void reconcile不能把FIX_RATE的首次触发往后推() {
+        jobInfoService.store.put(161, fixRateJob(161, 60_000L));
+        engine.reloadJobs(base);
+        long armed = engine.nextFireTime(161);
+        assertEquals(base + 60_000L, armed);
+
+        for (int sec = 0; sec < 15; sec++) {
+            engine.tick(base + sec * 1000L);
+        }
+        engine.reloadJobs(base + 15_000L);
+        assertEquals("reconcile 把首次触发推后了", armed, engine.nextFireTime(161));
+
+        for (int sec = 15; sec <= 61; sec++) {
+            engine.tick(base + sec * 1000L);
+        }
+        assertEquals("60 秒间隔的任务到点必须触发一次", 1, awaitCount(triggerService.invocations, 1));
+    }
+
+    /**
+     * FIX_DELAY 的下一轮只能由完成回调挂（见 {@code fixDelay只在执行完成后重挂}）。
+     * reconcile 若把它当新装载的任务重算，正在跑的那一次还没结束就又被排了一次，
+     * 间隔被踩成"每 15 秒一轮"。
+     */
+    @Test
+    public void reconcile不能在FIX_DELAY执行中途再排一轮() {
+        triggerService.blockOnGate = true;
+        jobInfoService.store.put(162, fixDelayJob(162, 60_000L, null));
+        engine.reloadJobs(base);
+        for (int sec = 0; sec <= 2; sec++) {
+            engine.tick(base + sec * 1000L);
+        }
+        triggerService.awaitStarted();
+        assertEquals(1, countIds(162));
+
+        for (int sec = 3; sec < 15; sec++) {
+            engine.tick(base + sec * 1000L);
+        }
+        engine.reloadJobs(base + 15_000L);
+        for (int sec = 15; sec <= 20; sec++) {
+            engine.tick(base + sec * 1000L);
+        }
+        // 这一次不必等第一次跑完就能看见：多余的那次触发正躺在串行队列里
+        assertEquals("reconcile 在执行期间又排了一轮", 0L, engine.blockStrategyCounters().get("queued"));
+
+        triggerService.releaseGate();
+        triggerService.awaitQuietly();
+        assertEquals("执行期间被 reconcile 追加了触发", 1, countIds(162));
+    }
+
+    /** 同上，但阻塞策略是 COVER_EARLY：重排的那一次会真去打断在跑的执行。 */
+    @Test
+    public void reconcile不能打断COVER_EARLY任务的在跑执行() {
+        triggerService.blockOnGate = true;
+        jobInfoService.store.put(163, fixDelayJob(163, 60_000L, ExecutorBlockStrategyEnum.COVER_EARLY));
+        engine.reloadJobs(base);
+        for (int sec = 0; sec <= 2; sec++) {
+            engine.tick(base + sec * 1000L);
+        }
+        triggerService.awaitStarted();
+
+        for (int sec = 3; sec < 15; sec++) {
+            engine.tick(base + sec * 1000L);
+        }
+        engine.reloadJobs(base + 15_000L);
+        for (int sec = 15; sec <= 20; sec++) {
+            engine.tick(base + sec * 1000L);
+        }
+        assertEquals("reconcile 触发了覆盖", 0L, engine.blockStrategyCounters().get("covered"));
+
+        triggerService.releaseGate();
+        triggerService.awaitQuietly();
+        assertFalse("reconcile 引起的一次多余触发把在跑的执行打断了", triggerService.interruptSeen.get());
+        assertEquals(1, countIds(163));
+    }
+
+    /**
+     * 反向上限：上面三条要求 reconcile 别乱动已排期的任务，这条要求它**必须**动改过的。
+     * 没有这一例，"保留原计划"可以被偷懒实现成"reconcile 什么都不重算"。
+     */
+    @Test
+    public void reconcile必须采纳改过的间隔() {
+        jobInfoService.store.put(164, fixRateJob(164, 60_000L));
+        engine.reloadJobs(base);
+        assertEquals(base + 60_000L, engine.nextFireTime(164));
+
+        // 另一个节点（或直接改 SQL）把间隔从 60 秒改成 5 秒
+        jobInfoService.store.put(164, fixRateJob(164, 5_000L));
+        engine.reloadJobs(base + 15_000L);
+
+        long next = engine.nextFireTime(164);
+        assertTrue("改了间隔却不按新值重排: next=" + next + ", now=" + (base + 15_000L),
+                next > base + 15_000L && next <= base + 20_000L);
+    }
+
+    /** 改了 cron 属于调度输入变了，reconcile 必须重算（两个表达式在任何时刻的下一次触发都不相同）。 */
+    @Test
+    public void reconcile必须采纳改过的cron() {
+        jobInfoService.store.put(165, cronJob(165, "0 0 2 * * ?"));
+        engine.reloadJobs(base);
+        long armed = engine.nextFireTime(165);
+        assertTrue(armed > base);
+
+        // 另一个节点或直接改 SQL 换掉了表达式
+        jobInfoService.store.put(165, cronJob(165, "0 0 3 * * ?"));
+        engine.reloadJobs(base);
+        assertTrue("改了 cron 却不重排: " + engine.nextFireTime(165),
+                engine.nextFireTime(165) != armed);
+    }
+
+    /**
+     * "沿用原排期"不能把解析好的 cron 表达式一起丢掉：丢了之后本次触发就算不出下次，
+     * 任务从轮上消失，要等到下一次 reconcile 才被捞回来（秒级 cron 因此漏掉中间每一秒）。
+     * 所以这里两次 reconcile 之间留出足够的 tick，不给它"下一次 reload 顺手复活"的机会。
+     */
+    @Test
+    public void reconcile之后cron任务必须继续重挂() {
+        jobInfoService.store.put(166, cronJob(166, "* * * * * ?"));
+        engine.reloadJobs(base);
+        engine.reloadJobs(base + 500L);
+
+        for (int sec = 1; sec <= 4; sec++) {
+            engine.tick(base + sec * 1000L);
+        }
+        assertEquals("沿用排期后 cron 任务只触发了部分秒", 4, awaitCount(triggerService.invocations, 4));
+    }
+
     @Test
     public void 五千个同秒任务的tick延迟() {
         int count = 5000;
@@ -450,6 +583,21 @@ public class JobScheduleEngineTest {
         job.setJobGroup(1);
         job.setTriggerStatus(1);
         job.setTriggerType(TriggerTypeEnum.FIX_RATE.getCode());
+        job.setFixInterval(intervalMs);
+        job.setMisfireStrategy(MisfireStrategyEnum.DO_NOTHING.getCode());
+        job.setExecutorHandler("demoHandler");
+        if (strategy != null) {
+            job.setExecutorBlockStrategy(strategy.getCode());
+        }
+        return job;
+    }
+
+    private JobInfo fixDelayJob(int id, long intervalMs, ExecutorBlockStrategyEnum strategy) {
+        JobInfo job = new JobInfo();
+        job.setId(id);
+        job.setJobGroup(1);
+        job.setTriggerStatus(1);
+        job.setTriggerType(TriggerTypeEnum.FIX_DELAY.getCode());
         job.setFixInterval(intervalMs);
         job.setMisfireStrategy(MisfireStrategyEnum.DO_NOTHING.getCode());
         job.setExecutorHandler("demoHandler");
