@@ -58,6 +58,9 @@ logs/
 **/application-local.properties
 **/application-local.yaml
 
+# ⚠️ 真机验证环境的库口令（_doc/003_script/e2e/bootstrap_mysql.sh 生成它，600 权限，仓库外使用）
+**/mysql.env
+
 # ---------- OS scratch ----------
 *.swp
 *.swo
