@@ -12,6 +12,7 @@ import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -23,10 +24,12 @@ import java.util.Map;
  *
  * <p>主要端点:
  * <ul>
- *   <li>POST /executor/beat   — 执行器心跳, 维持在线状态</li>
- *   <li>POST /executor/run    — 触发执行器运行指定任务(直接代理到本地 JobTriggerService)</li>
- *   <li>POST /executor/kill   — 终止任务执行</li>
- *   <li>GET  /executor/log    — 拉取指定日志的执行结果</li>
+ *   <li>POST /executor/beat      — 执行器心跳, 维持在线状态</li>
+ *   <li>POST /executor/run       — 记录一行"已下发"的调度日志, content 回带 logId(不在本机执行)</li>
+ *   <li>POST /executor/callback  — 用 handleCode/handleMsg/handleTime 回写那一行日志</li>
+ *   <li>POST /executor/kill      — 终止任务执行</li>
+ *   <li>GET  /executor/log       — 拉取指定日志的执行结果</li>
+ *   <li>GET  /executor/activeCount — 在线执行器分组数</li>
  * </ul>
  */
 @RestController
@@ -51,8 +54,21 @@ public class ExecutorCallbackController {
     public ReturnT<String> beat(@RequestParam(required = false) String appName,
                                 @RequestParam(required = false) String address,
                                 @RequestBody(required = false) Map<String, Object> body) {
-        if (appName == null && body != null) appName = (String) body.get("appName");
-        if (address == null && body != null) address = (String) body.get("address");
+        // 只对"真正取来用"的那个字段判类型：直接强转会把调用方写错的字段类型变成 HTTP 500
+        if (appName == null && body != null) {
+            Object appField = body.get("appName");
+            if (appField != null && !(appField instanceof String)) {
+                return ReturnT.fail(400, "appName 必须是字符串");
+            }
+            appName = (String) appField;
+        }
+        if (address == null && body != null) {
+            Object addressField = body.get("address");
+            if (addressField != null && !(addressField instanceof String)) {
+                return ReturnT.fail(400, "address 必须是字符串");
+            }
+            address = (String) addressField;
+        }
         if (appName == null || address == null) {
             return ReturnT.fail("appName/address 不能为空");
         }
@@ -63,31 +79,38 @@ public class ExecutorCallbackController {
      * 触发任务执行(由执行器侧 RPC 拉取).
      *
      * @param triggerParam 触发参数,执行器根据 jobId/executorHandler/executorParams 执行任务
+     * @return content 携带本次派发的 {@code logId}; 执行器必须以它为键回调 {@code /executor/callback}
      */
     @PostMapping("/run")
-    public ReturnT<String> run(@RequestBody TriggerParam triggerParam) {
+    public ReturnT<Map<String, Object>> run(@RequestBody TriggerParam triggerParam) {
         logger.info("Executor run, param={}", triggerParam);
         if (triggerParam == null || triggerParam.getJobId() <= 0) {
             return ReturnT.fail(400, "jobId 不能为空");
         }
-        // 此处不直接执行,而是返回 OK 表示调度中心已记录分发(实际执行由执行器侧完成).
-        // 真正的执行结果通过 /executor/log 异步回传.
+        // 此处不直接执行,而是记录一行"已下发"的调度日志(实际执行由执行器侧完成),
+        // 真正的执行结果通过 /executor/callback 异步回写到这一行上.
         JobLog log = new JobLog();
         log.setJobId(triggerParam.getJobId());
         log.setJobGroup(0);
         log.setExecutorHandler(triggerParam.getExecutorHandler());
         log.setExecutorParam(triggerParam.getExecutorParams());
+        // 调度时间必须由下发这一刻落库: statsBetween/dailyStats 都以 trigger_time 为窗口列,
+        // 留空的日志在统计里永久隐形
+        log.setTriggerTime(new Date());
         log.setTriggerCode(ReturnT.SUCCESS_CODE);
         log.setTriggerMsg("已下发到执行器");
         log.setExecutorFailRetryCount(triggerParam.getExecutorFailRetryCount());
         long logId = jobLogService.save(log);
         Map<String, Object> content = new HashMap<>();
         content.put("logId", logId);
-        return ReturnT.success("已派发", null);
+        return ReturnT.success("已派发", content);
     }
 
     /**
      * 终止任务（由执行器调用上报）。
+     * <p>
+     * {@code jobId} 与 {@code logId} 必须指向同一次执行：只认 logId 会让任何一个持 token 的执行器
+     * 终止别的任务的日志；而 logId 定位不到日志时返回成功，等于告诉执行器"已经停了"。
      */
     @PostMapping("/kill")
     public ReturnT<String> kill(@RequestBody KillParam killParam) {
@@ -95,13 +118,18 @@ public class ExecutorCallbackController {
         if (killParam == null || killParam.getJobId() <= 0) {
             return ReturnT.fail(400, "jobId 不能为空");
         }
-        // 通过 jobId 查找最近的日志并终止
-        JobLog log = jobLogService.getById(killParam.getLogId());
-        if (log != null && log.getId() > 0) {
-            jobTriggerService.killJob(log.getId());
-            return ReturnT.success("已终止任务", null);
+        if (killParam.getLogId() <= 0) {
+            return ReturnT.fail(400, "logId 不能为空");
         }
-        return ReturnT.success("已通知终止", null);
+        JobLog log = jobLogService.getById(killParam.getLogId());
+        if (log == null || log.getId() <= 0) {
+            return ReturnT.fail("日志不存在");
+        }
+        if (log.getJobId() != killParam.getJobId()) {
+            return ReturnT.fail("logId " + log.getId() + " 属于 jobId=" + log.getJobId() + ", 与请求的 jobId 不符");
+        }
+        jobTriggerService.killJob(log.getId());
+        return ReturnT.success("已终止任务", null);
     }
 
     /**
@@ -119,14 +147,40 @@ public class ExecutorCallbackController {
     }
 
     /**
-     * 简化版:直接接收执行器回调的执行结果(覆盖 handleCode/handleMsg).
+     * 简化版:接收执行器回调的执行结果(覆盖 handleCode/handleMsg).
+     * <p>
+     * 只认执行侧的三个字段。执行器回传的是一整个 {@link JobLog}，而它的 int 字段
+     * (jobId/jobGroup/triggerCode/alarmStatus) 在没赋值时是 0 而不是 null——
+     * MyBatis-Plus 的 {@code updateById} 按 null 决定是否进 SET 子句，
+     * 直接拿回调体去更新会把这条日志的归属和调度结果一并写成 0。
+     * 因此这里以库里的行为底稿，只覆盖 handle_* 三列。
+     * <p>
+     * 已知边界（有意保持现状）：回写是 last-write-wins 的，只挡"时间戳更早的乱序回调"；
+     * 一条比库里更新的回调即便与终止记录冲突仍会生效。执行失败的告警目前也只覆盖
+     * 进程内执行链路，回调链路不触发 {@code AlarmService}。
      */
     @PostMapping("/callback")
     public ReturnT<String> callback(@RequestBody JobLog log) {
         if (log == null || log.getId() <= 0) {
             return ReturnT.fail("logId 不能为空");
         }
-        jobLogService.update(log);
+        JobLog stored = jobLogService.getById(log.getId());
+        if (stored == null || stored.getId() <= 0) {
+            return ReturnT.fail("日志不存在");
+        }
+        // 缺省按"此刻"计：回调若不落时间，列表页的执行时间列会永久空白
+        Date handleTime = log.getHandleTime() == null ? new Date() : log.getHandleTime();
+        if (stored.getHandleTime() != null && handleTime.before(stored.getHandleTime())) {
+            // 重发/乱序的旧回调：结果已经更新，不能用旧结论盖掉它。
+            // 仍报成功，否则执行器会对一条已完成的回调无限重试
+            logger.info("[z-schedule] 忽略早于已记录结果的回调, logId={}, 回调时间={}, 已记录时间={}",
+                    log.getId(), handleTime, stored.getHandleTime());
+            return ReturnT.success("回调早于已记录的结果，已忽略", null);
+        }
+        stored.setHandleCode(log.getHandleCode());
+        stored.setHandleMsg(log.getHandleMsg());
+        stored.setHandleTime(handleTime);
+        jobLogService.update(stored);
         return ReturnT.success();
     }
 
