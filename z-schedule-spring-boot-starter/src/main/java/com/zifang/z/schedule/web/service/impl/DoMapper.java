@@ -207,6 +207,13 @@ final class DoMapper {
         return d;
     }
 
+    /**
+     * UserDO -&gt; User：刻意<b>不</b>带出 password。
+     * <p>
+     * 列里存的是登录口令的散列，而读路径（{@code /user/list} 等）把它原样拷进 DTO 就等于
+     * 向任何能列出用户的人吐出可离线爆破的凭证。校验密码的 {@code login()} 直接读 DO，
+     * 不走这里；更新时"password 为 null 表示不改密码"，所以留空也不会误清列值。
+     */
     static User toDTO(UserDO d) {
         if (d == null) {
             return null;
@@ -216,7 +223,6 @@ final class DoMapper {
             u.setId(d.getId());
         }
         u.setUsername(d.getUsername());
-        u.setPassword(d.getPassword());
         u.setRole(d.getRole());
         u.setPermission(d.getPermission());
         u.setAddTime(d.getAddTime());

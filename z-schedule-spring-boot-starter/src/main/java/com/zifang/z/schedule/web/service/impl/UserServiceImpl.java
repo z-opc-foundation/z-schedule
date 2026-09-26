@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Date;
@@ -95,7 +96,21 @@ public class UserServiceImpl implements UserService {
             return ReturnT.fail("用户不存在");
         }
 
-        if (user.getUsername() != null) exist.setUsername(user.getUsername());
+        if (user.getUsername() != null) {
+            if (user.getUsername().trim().isEmpty()) {
+                // 置空后这一行再也查不回来（登录按用户名精确匹配），等于把账号销毁
+                return ReturnT.fail("用户名不能为空");
+            }
+            // 只排除自己：把用户名改成自己当前的值不算重名
+            UserDO taken = userMapper.selectOne(new LambdaQueryWrapper<UserDO>()
+                    .ne(UserDO::getId, user.getId())
+                    .eq(UserDO::getUsername, user.getUsername()));
+            if (taken != null) {
+                // 不先查就直接撞上 uk_username，唯一键违例会以 500 的形式抛给调用方
+                return ReturnT.fail("用户名已存在");
+            }
+            exist.setUsername(user.getUsername());
+        }
         if (user.getRole() != null) exist.setRole(user.getRole());
         if (user.getPermission() != null) exist.setPermission(user.getPermission());
         // 如果传入了密码，做 MD5 哈希后更新
@@ -149,7 +164,9 @@ public class UserServiceImpl implements UserService {
     private static String md5(String input) {
         try {
             MessageDigest md = MessageDigest.getInstance("MD5");
-            byte[] digest = md.digest(input.getBytes());
+            // 必须显式指定 UTF-8：默认的 String.getBytes() 按 JVM 的 file.encoding 取字节，
+            // 同一个含非 ASCII 字符的密码在 GBK 机器和 UTF-8 机器上散列不同——账号在一边建、另一边登不上。
+            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder();
             for (byte b : digest) {
                 sb.append(String.format("%02x", b));
