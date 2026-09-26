@@ -118,19 +118,19 @@ public class JobLogControllerGroupAccessTest {
     }
 
     @Test
-    public void 调度时间为空的行排在最后而不是把合并撞死() {
-        // 组 2 那两行 trigger_time 为空：库里它们会落在最新一页的末尾（替身按同一规则排），
-        // 合并这一侧必须既不被 null 撞出 NPE，也不把它们当成"最新"顶到有名有姓的那两条前面。
-        logs.rows.add(log(11, 1, 11, 10));
-        logs.rows.add(log(12, 1, 11, 30));
-        logs.rows.add(log(21, 2, 21, -1));
-        logs.rows.add(log(22, 2, 21, -1));
+    public void 逐组合并必须重排序且不被空时间撞死() {
+        // 空 trigger_time 的两行刻意放在**先查的那个组**：逐组各查一页拼起来的原始顺序就是
+        // "组 1 两条（时间都为空）+ 组 2 两条"，不重排序就会让它们顶掉组 2 里有名有姓的那两条。
+        logs.rows.add(log(31, 1, 11, -1));
+        logs.rows.add(log(32, 1, 11, -1));
+        logs.rows.add(log(41, 2, 21, 10));
+        logs.rows.add(log(42, 2, 21, 30));
 
         ReturnT<List<JobLog>> result = controller.list(0, 0, 0, 3, scoped("1,2"));
 
         assertEquals(Arrays.asList("query:1/0/-1/3", "query:2/0/-1/3"), logs.queryCalls);
-        assertEquals("空时间的行不该顶掉有名有姓的那两条: " + ids(result.getContent()),
-                Arrays.asList(12L, 11L, 22L), ids(result.getContent()));
+        assertEquals("合并后要按调度时间重排，空时间的排最后: " + ids(result.getContent()),
+                Arrays.asList(42L, 41L, 32L), ids(result.getContent()));
     }
 
     @Test
