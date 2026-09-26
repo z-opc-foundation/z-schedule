@@ -125,12 +125,39 @@ public class LoginSessionStoreTest {
         assertTrue(session.toString().contains("nick"));
     }
 
+    @Test
+    public void permission列进了身份就参与判定() {
+        LoginSessionStore store = new LoginSessionStore();
+
+        // 这一列从 UserDO 到 LoginSession 的那一段：签发时漏带，后面所有分权判据都成了摆设
+        assertEquals("1,2", store.issue(user(20, "peon", "NORMAL", "1,2")).getPermission());
+        assertNull("库里那一列可以为 NULL，原样带过来，和空串一样算不限",
+                store.issue(user(21, "peon", "NORMAL", null)).getPermission());
+
+        LoginSession scoped = store.issue(user(22, "peon", "NORMAL", "1, abc ,2"));
+        assertTrue(scoped.permits(1));
+        assertTrue("逗号两侧的空格要吃得掉，这一列是人手填的", scoped.permits(2));
+        assertFalse(scoped.permits(3));
+        assertFalse("非数字那一段只是不匹配，不等于全都算", scoped.permits(99));
+
+        assertTrue("留空=不限：现存 NORMAL 账号这一列全是空串",
+                store.issue(user(23, "peon", "NORMAL", "")).permits(7));
+        // 管理员这一支由 permits 自己认账。调用方（GroupAccess.restrictable）现在会提前短路，
+        // 但 permits 是公开的判据，它的成立不能靠"恰好没人那么调"。
+        assertTrue("role 优先于 permission 列",
+                store.issue(user(24, "boss", "ADMIN", "1")).permits(2));
+    }
+
     private static UserDO user(int id, String username, String role) {
+        return user(id, username, role, "");
+    }
+
+    private static UserDO user(int id, String username, String role, String permission) {
         UserDO d = new UserDO();
         d.setId(id);
         d.setUsername(username);
         d.setRole(role);
-        d.setPermission("");
+        d.setPermission(permission);
         return d;
     }
 }
