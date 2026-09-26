@@ -88,15 +88,33 @@ if [ -f app.pid ] && kill -0 "$(cat app.pid)" 2>/dev/null; then
   log "关停旧实例 $(cat app.pid)"; kill "$(cat app.pid)"; sleep 3
 fi
 log "启动实例（无 token，纯性能窗口）"
-nohup ./run.sh > "$LOGF" 2>&1 & echo $! > app.pid
+# JAR 必须显式给：这四个脚本以前都是裸 `./run.sh`，于是静默用了 run.sh 的默认构件
+# （`z-schedule-admin-1.0.0-exec.jar`，在本机上它是写放大修复**之前**那一版）。
+# 性能读数要能对上一个具体的 md5，jar 文件名不算证据。
+JAR="${JAR:?必须显式指定 JAR，性能结论要能对上构件 md5}"
+nohup env JAR="$JAR" PORT="$PORT" ./run.sh > "$LOGF" 2>&1 & echo $! > app.pid
 for i in $(seq 1 40); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 1; done
 log "就绪 pid=$(cat app.pid)"
+# 端口被"上一个别人起的实例"占住时，本脚本启动的实例会在 bind 处死掉，而 curl 照样 200、
+# job_log 照样在涨——于是整条阶梯量的是那个陌生实例（今天真就是这么跑出一档 497 次/s 的）。
+# app.pid 只记本脚本自己起的进程，救不了这种情况，所以必须直接看日志判生死。
+# 要等而不是单次 grep：Tomcat 在 context refresh 中途就绑上端口了，"Started" 那行是 refresh
+# 走完才打的——单次 grep 会撞进"端口已 200、日志还没有 Started"的窗口，把健康的实例误判成 FATAL。
+for i in $(seq 1 20); do grep -q "Started ZScheduleAdminApplication" "$LOGF" && break; sleep 1; done
+if ! grep -q "Started ZScheduleAdminApplication" "$LOGF"; then
+  echo "FATAL: $LOGF 里没有 'Started ZScheduleAdminApplication'（多半是端口 $PORT 已被占用：" \
+       "grep 'already in use' $LOGF）。本脚本不许在陌生实例上量数。"
+  grep -c "already in use" "$LOGF" | sed 's/^/  already-in-use 行数: /'
+  exit 1
+fi
+log "确认本实例已启动（Started 行数=$(grep -c 'Started ZScheduleAdminApplication' "$LOGF")）"
 
 ladder() { # $1=handler 字面值 $2=这一组的说明
   local h="$1" label="$2" n i LOADED s0 s1
   for n in $SIZES; do
     echo
-    echo "--- [$label] N=$n，窗口 ${W}s ---"
+    # 台阶标题必须带墙上时间：p19 的连接并发采样是按 30s 分桶的，没有这个戳就对不上哪档并发是多少
+    echo "--- [$label] N=$n，窗口 ${W}s，起点 $(date +%H:%M:%S) ---"
     seed "$n" "$h"
     # 等 reconcile 真的把 n 个装进轮（reconcile 15s 一次）；装不满就别测，
     # 带着脏轮跑下一档只会把"没装上"误读成"扛不住"。

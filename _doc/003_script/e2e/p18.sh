@@ -74,7 +74,11 @@ echo "--- 2) 带负载时数连接：app 起的连接池到底几条 ---"
 if [ -f app.pid ] && kill -0 "$(cat app.pid)" 2>/dev/null; then
   log "关停旧实例 $(cat app.pid)"; kill "$(cat app.pid)"; sleep 3
 fi
-nohup ./run.sh > "$LOGF" 2>&1 & echo $! > app.pid
+# JAR 必须显式给：这四个脚本以前都是裸 `./run.sh`，于是静默用了 run.sh 的默认构件
+# （`z-schedule-admin-1.0.0-exec.jar`，在本机上它是写放大修复**之前**那一版）。
+# 性能读数要能对上一个具体的 md5，jar 文件名不算证据。
+JAR="${JAR:?必须显式指定 JAR，性能结论要能对上构件 md5}"
+nohup env JAR="$JAR" PORT="$PORT" ./run.sh > "$LOGF" 2>&1 & echo $! > app.pid
 for i in $(seq 1 40); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 1; done
 log "就绪 pid=$(cat app.pid)"
 seed "$N"

@@ -24,8 +24,14 @@ spring:
     username: ${SPRING_DATASOURCE_USERNAME:root}
     password: ${SPRING_DATASOURCE_PASSWORD:}    # ✅ 必须从环境变量读, 严禁明文
     druid:
-      initial-size: 5
-      min-idle: 5
+      # ⚠ 这一段配的池**不是调度引擎用的那个**：starter 的 `dataSourceSchedule`
+      # 由 z-boot 的 ModuleDataSourceTemplate 自建，只读 `z.base.db.schedule.*`（见下面那块）。
+      # 这里是 Spring Boot 自己的 DataSource（actuator 的 db 健康检查用的就是它）。
+      # 实测（250，2026-09-26）：一个空闲的 admin 实例挂着 10 条连接 = 5 条引擎在用 + 5 条这个空转池，
+      # 而 `max-active` 改这里对吞吐毫无影响（改 `z.base.db.schedule.max-active` 才有，316 → 540 次/s）。
+      # 所以它降到 0 起步：不白占连接，被健康检查用到时才建。
+      initial-size: 0
+      min-idle: 0
       max-active: 20
       max-wait: 60000
       time-between-eviction-runs-millis: 60000
@@ -54,6 +60,18 @@ spring:
     scheduling:
       pool:
         size: 2
+
+# 调度引擎自己的连接池（starter 的 dataSourceSchedule 读这里，不读上面 spring.datasource.druid.*）。
+# 250 真机 N=800 个 1Hz 任务、30s 窗口实测：max-active 20 ⇒ 316 次/s，40 ⇒ 540 次/s，80 ⇒ 808 次/s，
+# 而忙连接峰值每次都正好等于上限 ⇒ 池就是那堵墙（每条语句墙钟从 31.6 ms 涨到 49.5 ms，所以是次线性）。
+# 取 40：拿到 +71 % 而只多用 20 条连接。**抬之前必须确认 MySQL 侧 max_connections 有余量**
+# （这套库是被同机其他服务共用的），所以 starter/`ModuleDataSourceTemplate` 的默认值仍是 20，
+# 这里只对独立部署的 admin 显式抬高；嵌入方请按自己的库容量决定。
+z:
+  base:
+    db:
+      schedule:
+        max-active: ${Z_SCHEDULE_DB_MAX_ACTIVE:40}
 
 # Z-Schedule 配置
 # 注意：真正生效的前缀只有 `z.schedule.*`（ZScheduleAutoConfiguration 上 @ConfigurationProperties("z.schedule")）。

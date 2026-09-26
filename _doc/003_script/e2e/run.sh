@@ -34,6 +34,13 @@ EXTRA_ARGS=()
 if [ -n "${ACCESS_TOKEN:-}" ]; then
   EXTRA_ARGS+=("--z.schedule.access-token=${ACCESS_TOKEN}")
 fi
+# APP_ARGS：透传任意 `--key=value` 给应用，用来 A/B 服务端旋钮而不改代码
+# （例：APP_ARGS="--z.base.db.schedule.max-active=40" 量连接池对吞吐的影响）。
+# 按空格切分，所以值里不能带空格；带空格的参数请另写脚本，别塞这里。
+if [ -n "${APP_ARGS:-}" ]; then
+  read -r -a _app_args <<< "$APP_ARGS"
+  EXTRA_ARGS+=("${_app_args[@]}")
+fi
 
 mkdir -p logs
 # 连的是哪个库要打在日志里（口令不打）——上一轮就是靠这行才把"连错容器"和"口令不对"分开的
