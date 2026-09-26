@@ -43,7 +43,7 @@ public final class GroupAccess {
 
     /** 裁剪结果集：留下这个身份碰得到的那些组。{@code null} 身份原样返回，不复制一份。 */
     public static <T> List<T> narrow(List<T> rows, LoginSession identity, Function<T, Integer> groupOf) {
-        if (true) {
+        if (identity == null || rows == null || rows.isEmpty()) {
             return rows;
         }
         List<T> kept = new ArrayList<T>(rows.size());
