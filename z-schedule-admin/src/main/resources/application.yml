@@ -48,7 +48,17 @@ spring:
       health:
         show-details: always
 
+  # Leader 续约与周期 reconcile 都挂在 @Scheduled 上，Spring 默认只给 1 条调度线程，
+  # 两者会互相排队（续约窗口 30s、reconcile 15s）；独立应用直接开 2 条。
+  task:
+    scheduling:
+      pool:
+        size: 2
+
 # Z-Schedule 配置
+# 注意：真正生效的前缀只有 `z.schedule.*`（ZScheduleAutoConfiguration 上 @ConfigurationProperties("z.schedule")）。
+# 下面这段 `zschedule.*` 是从 xxl-job 风格的样例配置抄来的，本工程没有任何代码读它——
+# 留着是因为 executor/addresses 属于"远程派发"那件还没实现的事，删掉会丢掉意图；但它不参与启动。
 zschedule:
   admin:
     addresses: ${ZSCHEDULE_ADMIN_ADDRESSES:http://localhost:18086/schedule}
@@ -65,7 +75,9 @@ zschedule:
 logging:
   level:
     root: info
-    io.github.yuku123.z.schedule: debug
+    # 包名在 1.0.x 从 io.github.yuku123.z.schedule 改成 com.zifang.z.schedule，这行当时没跟着改，
+    # 于是引擎/调度的 debug 日志（"Engine loaded N jobs into ring" 这类）在演示应用里一直是哑的。
+    com.zifang.z.schedule: debug
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{50} - %msg%n"
   file:

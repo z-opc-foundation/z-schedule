@@ -248,10 +248,22 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <executions>
                     <execution>
+                        <!--
+                            execution id 必须是 repackage：spring-boot-starter-parent 自带一个同 id 的
+                            repackage execution，不覆盖它就会出现两次 repackage——主 jar 先被就地换成 fat，
+                            再由这里 attach 一个 exec。2026-09-26 在 250 真机起 exec jar 时实测到：
+                            两次的输入输出串了，exec jar 的 Start-Class 变成 JarLauncher，
+                            java -jar 直接 ClassNotFoundException。z-wf-admin 早写过这条注释，本模块漏了 id。
+
+                            同时刻意不写 mainClass：手写全限定类名等于第二处真源，包名一改就静默失效——
+                            这里原本写着改名前的 io.github.yuku123.z.schedule.admin.ZScheduleAdminApplication，
+                            于是 exec jar 的 Start-Class 指向一个不存在的类，"独立可启动演示应用"一次都没启动过。
+                            交给插件从 thin jar 里找唯一带 main 的类，找不到或有多个时构建当场失败。
+                        -->
+                        <id>repackage</id>
                         <goals><goal>repackage</goal></goals>
                         <configuration>
                             <classifier>exec</classifier>
-                            <mainClass>io.github.yuku123.z.schedule.admin.ZScheduleAdminApplication</mainClass>
                         </configuration>
                     </execution>
                 </executions>
