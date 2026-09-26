@@ -1067,3 +1067,108 @@ P18 自己带一支猎物：一份"改前形状"的文件（`DB_PORT` 退回 `:-
    能兜住这类噪声，但别指望它逐条识别病根。
 4. **对 #32 的证据已经顺手量到了**：选 A（自带库容器）的形状就是 P8e + P8f——initdb 从提交树那份 DDL 建出 6 张表、
    与 app 同网、别名做 `DB_HOST`、就绪判据用表数。仍等点头，没有动仓库。
+
+## 13. Mode 2/3 彩排：前端镜像第一次真建出来，反代那几条第一次有人探（#36，`p26.sh`）
+
+12.5 第 2 条末尾那句"留作下一格"就是这一格。`p26.sh` 静态 6 项（S1/S1b/S2/S2b/S3/S4）+ 运行时 28 项
+（Z0 + Mode 2 的 20 项 + Mode 3 的 6 项 + 收口对账 Z2），09-27 在 250 上跑：
+**run1 29/3**（三条红全是尺自己的错，见 13.3）、**run2 33/0**、**run3 34/0**（B5b 就是第 28 项运行时臂）、
+**run4 27/0**（同一份档 `P26_SKIP_CLUSTER=1` 只跑 Mode 2：B5b 换成"照文档那条命令真去敲一遍并要求 UP"之后
+的重验，判据改了而仓库字节没动，静态 6 + Z0 + Mode 2 那 20 项 = 27）、**run5 27/0**（run4 那遍的消息里
+把拆分手抄错了，改成从尺里取变量之后重跑一遍，见 13.3 第四条）。
+每遍收口对账都是 容器/卷/网络 = 0/0/0，常驻 18098 的 pid 逐字未变。
+
+### 13.1 两条"从没被跑过"的缺陷，各自的原文症状
+
+| # | 缺陷 | 原文读数 | 修法 | 判据臂 |
+|---|------|---------|------|--------|
+| 1 | `Dockerfile.frontend` 只 COPY 应用层，组件层根本不在镜像里 | `sh: cd: line 0: can't cd to ../z-schedule-frontend-component: No such file or directory` → `The command '/bin/sh -c npm run build' returned a non-zero code: 2` | builder 里摆成**兄弟目录**（`/src/z-schedule-frontend` 与 `/src/z-schedule-frontend-component`），产物路径跟着改成 `--from=builder /src/z-schedule-frontend/dist` | S1 / S1b / B1 / B1b / B1c |
+| 2 | vite 的 `base` 写死 `/meta/`，而这个镜像是 nginx 在 `/` 上服务 SPA | 只翻旋钮重造一份镜像后，页面要 `/meta/assets/index-B3o72KK5.js`，探它 **`404 text/html`** | `base` 改从 `VITE_BASE` 进来、**默认值仍 `/meta/`**（Mode 1 那份 dist 依赖它，admin pom 不设这个 env 所以行为逐字不变），镜像里用 `ARG FRONTEND_BASE=/` 拧到根 | S2 / S2b / B2 / B7 / **B7c** |
+
+为什么"兄弟目录"是硬要求而不是风格：`package.json` 的依赖写着 `"@yuku123/z-schedule-frontend-component":
+"file:../z-schedule-frontend-component"`、`build` 脚本第一步是 `cd ../z-schedule-frontend-component`、
+`src/App.jsx` 从它 `import { JobListView }`——三个 `../` 都指同一个父目录。组件层那份 `dist/index.js`
+还是它自己 `vite build`（lib 模式）的产物，所以**一次构建里必须有两次 vite build**，B1b 数就是这个
+（run2：2 次，其中 1 处署名 `@yuku123/z-schedule-frontend-component@0.1.0`）。
+
+第 2 条值得单独说一句：它**不会**在"修好第 1 条"之后自己显形。构建会成功、两个容器会 healthy、
+`GET /` 会 200 —— 交出去是一个整页白屏的 Mode 2。所以 B7c 不做"我记得旧形状会白屏"这种回忆，
+而是拿同一份 Dockerfile 只翻 `FRONTEND_BASE` 这个旋钮重造一份镜像、真起一个容器去探它自己要的那个 js。
+`404` 而不是回退页这件事也能从模板里读出来：`location ~* \.(js|css|…)$` 那条正则比 `location /` 优先，
+而它没有 `try_files`，root 下又没有 `meta/` 这层目录 ⇒ 结构性 404（这一句是从读数 + 模板推的，
+没单独造臂去验"是哪条 location 答的"）。
+
+### 13.2 Mode 2 的对外契约，按文档字面敲（run2 读数；run3 是全档第 3 遍，Mode 2 + Mode 3 共 34 项全绿）
+
+| 臂 | 敲的是哪句文档 | 读数 |
+|----|--------------|------|
+| B1 | 清单里的 `build: dockerfile: deploy/Dockerfile.frontend` | rc=0，构建上下文 103.6 MB（57 MB 是只算前端那一份；jar 落进 `target/` 后是 103.6 MB） |
+| B2/B2b | 镜像产物与 healthcheck 用得上的命令 | `index.html` 引 `/assets/index-B3o72KK5.js` + `index-CUyu9iPG.css`，`/meta/assets/` 0 处；镜像里有 `wget` |
+| B5 | 两份清单各自那条 healthcheck | backend 探 2 次、frontend 探 1 次后各自 healthy |
+| B5b | 分体清单第 82 行与 `bin/start-mode2.sh` 教人敲的那条 `docker exec -it z-schedule-backend curl http://127.0.0.1:18086/meta/actuator/health` | 照敲真拿到 `"status":"UP"`（量具里去掉了 `-it`：非 TTY 下 `docker exec -t` 自己就报错，与镜像无关）；顺带量到镜像里 `curl` 与 `wget` **都在**（p25/P11b 只证过 wget，curl 此前没人探） |
+| B6 | README「访问前端：http://localhost/」 | `200 text/html`，body 里有 `<div id="root">` |
+| B7/B7b | 同上（页面能不能真跑起来） | `GET /assets/index-B3o72KK5.js` → `200 application/javascript`，144633 字节；css → 200 |
+| B8 | `location = /healthz` | `200`，body 逐字 `ok` |
+| B9 | README「验证反代：curl …/api/actuator/health（应返回 UP）」 | `200` + `{"status":"UP","groups":["liveness","readiness"]}` |
+| B10 | 反代到的是一个**连着这个库**的后端 | `/api/jobgroup/list` 回显 B3 插进去的 `p26 rehearsal`（接口 1 处 / 库里 1 行） |
+| B11 | SPA 回退与反代各守其界 | `/jobinfo/list` → 200 且是 index.html；`/api/__p26_nope__` → **404 且 body 里没有 `#root`**（后端答的，不是 nginx 的回退页） |
+| B12 | 「不映射 18086 到 host（仅 internal network 访问）」 | 宿主 18086 `closed`，同一条 URL 在网内 `UP` ⇒ 不是"服务没起"造成的假阴 |
+| B13 | 停止 | 容器残留 0、发布口释放（`down rc` 只作读数：`make down` 三条都挂着 `|| true`，恒 0，拿它当证据等于没证据） |
+
+### 13.3 四处尺伤（都是本档自己写的），以及各自教的那条
+
+- **B7c 第一遍是假红**：猎物容器被 `docker run` 扔到默认 bridge 上，那里没有按名字的 DNS，nginx
+  在配置解析阶段就退出（正是 B7d 量到的那条），而我读到的是"路径为空 + code=000"，被写成"猎物没复现
+  ⇒ 尺没有牙"。⇒ **猎物的运行环境也要与被测物同形**；且 build rc / run rc / 容器状态三个读数必须分开记，
+  混成一个就只剩猜。现在 prey 显式挂进 Mode 2 那张网，并等它真答一次才判。
+- **C5 抄了 Mode 2 的容器名**：Mode 3 的前端叫 `<project>-z-schedule-frontend-1`（那份清单**故意没钉**
+  `container_name`，否则 `--scale` 会被拒），探一个不存在的容器恒为 0；再叠一条 `^Address: ` 不认这台
+  busybox 的输出形状。⇒ 名字从 `docker ps` 现取，数法退到"抽非回环 IPv4 去重"，并拿**前端自己的服务名**
+  当 1-vs-N 对照：一把尺在两个名字上数出同一个数，它数到的就不是地址。
+- **C6 的残留判据抓了别人**：`--filter name=z-schedule-` 把共享机上跑了 15 小时的 `z-schedule-e2e-mysql`
+  算成"本档残留"。那条容器不该被本档碰，也确实一条命令都没对它下过（现在读数里明写"另有 N 个别人的"）。
+  ⇒ 残留只数本档自己起的那两个服务名。
+- **B5b 的第一版把拆分手抄进了消息**：它跑出来的是"…的地方 2 处：清单 2 + start-mode2.sh"，而 2 的真
+  拆分是 分体清单 1 + 集群清单 0 + 脚本 1——我把求和用的三个被加数猜成了两个。⇒ 消息里凡是拆分/占比，
+  一律从尺里取变量（现在三个 `DOC3/DOC4/DOC5` 各自量），否则一条绿消息里可以藏一个假数。
+  同一轮里还有一件与尺无关的事：一个后台完成通知带着"run5 已跑到 B5b/B6"的读数回来，而当时 `run5.log`
+  只有 24 行、进程还在 B3 建库 ⇒ **通知正文里的输出也是待证断言**，判进度只认盘上文件 + `pgrep`。
+
+### 13.4 Mode 3 的读数，和一条关于 nginx 什么时候解析名字的事实
+
+- **C1** `bash bin/start-mode3.sh 3`（= `make cluster N=3` 的真身，250 没装 make）rc=0；
+  真实容器名 `deploy-z-schedule-backend-1/-2/-3`、`deploy-z-schedule-frontend-1`（project 取 `deploy/` 的
+  目录名）。清单原文那句 `docker stop z-schedule-backend-z-schedule-backend-1` 是个**这台机器上不存在的名字**，
+  已改成一条与 project 无关的命令。
+- **C2** 4/4 容器 healthy（三副本共用同一个临时库，各自的 healthcheck 都真跑过）。
+- **C3 只有一个 Leader**：逐容器 `Became LEADER` 计数，run1 = `1=1 2=0 3=0`、run2 = `1=0 2=0 3=1`、
+  run3 = `1=0 2=0 3=1`
+  （**谁当主不确定，所以判据不钉编号**，钉了就会随运气翻红）；库里 `z_schedule_job_leader` 那行的 `host`
+  正是打过那条日志的容器（`29b8abf41001` / `0a3cec7853cd` / `ed210ad4c36a`）。顺带一条时钟证据：`db_now`
+  与 `lease_expire` 同侧（19:59:10 / 19:59:38、20:05:13 / 20:05:42、20:09:41 / 20:10:07）——租约是 Java 侧写、
+  DB 侧比的，跨了时区就会在这一行显形。
+  ⇒ 副本数不放大调度（这一条只在"调度语义"层面，不等于吞吐会跟着涨，见 §性能那几档）。
+- **C4** 停掉一个后端（run2 停的正好是当时那个 Leader）之后，**第 1 次**探 `/api/actuator/health` 就 200 UP。
+- **C5** 服务名 `z-schedule-backend` 在前端容器里解析出 **3 个地址**（对照：同一条尺数 `z-schedule-frontend`
+  得 1 个）。
+- **B7d（顺手量到的一条事实，比上面几条更影响文档怎么写）**：给 nginx 一个当下不存在的服务名，它在
+  **配置解析阶段**就退出——`host not found in upstream "p26-no-such-service" in /etc/nginx/conf.d/default.conf:30`。
+  ⇒ `proxy_pass` 里那个名字是**启动时解析一次**的。两条后果：
+  ① 前端必须在后端之后起。两份清单里的 `depends_on: condition: service_healthy` 不是装饰（B7d 只是给出了
+  "没有它会怎样"的形状，**这一条是从两次测量推的**，没单独造臂去验"摘掉 depends_on 会红"）；
+  ② 之后 `--scale` 扩出来的副本 nginx **看不见**，要 reload。所以清单原文那句"nginx 自动负载均衡到 3 个后端"
+  成立范围是"nginx 启动时**已存在**的那 3 个"，cluster 清单的验证步骤已按这个范围改写。
+
+### 13.5 这一档没做的
+
+1. **没有真浏览器读数**。B7 只到"脚本取得到、类型是 javascript"这一层，"页面渲染出任务表格"没有量具——
+   `_frontend` 那个桩里一次 API 调用都没有（12.5 第 2 条原文，`grep -rnE "fetch\(|axios|/api" src/` 零命中）。
+   所以 Mode 2/3 的前端**仍是**装饰，这一档改的是"它能不能被构建、被服务、被反代"，不是"它有没有用"。
+2. **k8s 那一侧只跟着改了会波及的两处文本**（同一个 base 旋钮、同一个宿主端口），`kubectl apply` 依旧没集群（§11.2）。
+3. **与常驻 18098 的共存只证了"没碰它"**：Z0 开工读到 pid=30182、Z2 收口逐字未变。
+   没证"两种模式与常驻实例同时跑不抢端口"（本档一律用 `bind(0)` 取空闲口）。
+4. **B5b 从"命令在不在"升级成"照命令敲拿不拿得到承诺的读数"**（run3 加的第一版只探 `curl` 存在，
+   run4/run5 这一版真去 `docker exec` 里敲那条 URL 并要求 `"status":"UP"`；跑法是 Mode 2-only，
+   `P26_SKIP_CLUSTER=1`）。为什么不只探存在性：`curl` 在不在镜像里不是文档的事，但"有 curl"和"这一串
+   URL 答 UP"是两件事——前者绿而后者的 URL 写错，文档仍然是一次空验收。
+   这一臂顺手把 `deploy/bin/start-mode2.sh:27` 也拉进被核对的面（它 echo 给用户的正是同一条命令）。

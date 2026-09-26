@@ -1,10 +1,21 @@
 # Z-Schedule 前端 nginx 镜像（Mode 2 分体 / Mode 3 集群用）
-# 输入：_frontend/z-schedule-frontend/ 的**源码**（package.json + src/；dist/ 在镜像里产出，不从宿主拷）
+# 输入：_frontend/z-schedule-frontend/ 与 _frontend/z-schedule-frontend-component/ 的**源码**
+#   （dist/ 在镜像里产出，不从宿主拷）
 # 输出：nginx 静态服务 + /api 反代到 backend（BACKEND_SERVICE 由 compose/清单注入）
 #
 # 构建前置：无——npm ci 与 vite build 都在下面的 builder 阶段里跑。
 #   （从前这里写的是"先在宿主跑 npm ci && npm run build"，那是假的：本文件一个字都没 COPY dist/，
 #     照那句做完构建仍会成功，白跑一遍而已。）
+#
+# ⚠ 250 上实测出两条必红的形状（取证在 _doc/003_script/e2e/p26.sh 的 B1/B2）：
+#   1) 只 COPY _frontend/z-schedule-frontend/ ⇒ 组件层根本不在镜像里，而 app 的 `npm run build`
+#      第一步就是 `cd ../z-schedule-frontend-component`：
+#      `sh: cd: line 0: can't cd to ../z-schedule-frontend-component: No such file or directory`（rc=2）。
+#      app 的 package.json 以 `file:../z-schedule-frontend-component` 依赖它、src/App.jsx 从它
+#      import JobListView，两个 `../` 都指同一个父目录 ⇒ builder 里必须摆成**兄弟目录**。
+#   2) app 的 vite base 默认 '/meta/'（Mode 1 那份 dist 由 Spring 挂在 /meta context-path 下才对），
+#      而这个镜像是 nginx 在 `/` 上服务 SPA：index.html 里的 /meta/assets/*.js 在容器里没有 ⇒ 白屏。
+#      所以 base 从 env 进来，这里钉 '/'。
 #
 # 构建命令（版本别抄死在这里，走 bin/build-images.sh 或 compose 的 build，
 #   两处都用 ${OCI_REGISTRY}/z-schedule-frontend:${IMAGE_VERSION}，与清单里的 image: 名字逐字一致）：
@@ -13,16 +24,25 @@
 # ---- 构建阶段：基于 node 跑 vite build ----
 FROM node:18-alpine AS builder
 
-WORKDIR /build
+# SPA 的挂载点。nginx 在根上服务 ⇒ 资源前缀必须是 /。
+# Mode 1 那份 dist（admin pom 复制进 jar、/meta context-path 下服务）用仓里的默认值，不受这里影响。
+ARG FRONTEND_BASE=/
+ENV VITE_BASE=${FRONTEND_BASE}
+
+# 兄弟目录布局：/src/z-schedule-frontend 与 /src/z-schedule-frontend-component
+WORKDIR /src
+
+# 组件层先落盘：app 的 build 脚本会 cd 进这个兄弟目录跑 vite build（lib 模式出 dist/index.js）
+COPY _frontend/z-schedule-frontend-component/ ./z-schedule-frontend-component/
 
 # 仅拷 package.json 利用 docker layer 缓存
-COPY _frontend/z-schedule-frontend/package.json ./
-COPY _frontend/z-schedule-frontend/package-lock.json* ./
-RUN npm ci --no-audit --no-fund
+COPY _frontend/z-schedule-frontend/package.json ./z-schedule-frontend/
+COPY _frontend/z-schedule-frontend/package-lock.json* ./z-schedule-frontend/
+RUN cd z-schedule-frontend && npm ci --no-audit --no-fund
 
-# 拷源码 + build
-COPY _frontend/z-schedule-frontend/ ./
-RUN npm run build
+# 拷源码 + build（build 脚本自己先构建组件层，再 vite build 应用层）
+COPY _frontend/z-schedule-frontend/ ./z-schedule-frontend/
+RUN cd z-schedule-frontend && npm run build
 
 # ---- 运行阶段：nginx 静态服务 ----
 FROM nginx:1.25-alpine
@@ -31,7 +51,7 @@ FROM nginx:1.25-alpine
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
 
 # 拷 build 产物
-COPY --from=builder /build/dist /usr/share/nginx/html
+COPY --from=builder /src/z-schedule-frontend/dist /usr/share/nginx/html
 
 EXPOSE 80
 

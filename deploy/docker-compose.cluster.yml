@@ -73,8 +73,15 @@ networks:
 
 # 验证步骤：
 # 1. 启动 3 副本：docker compose -f docker-compose.cluster.yml up -d --scale z-schedule-backend=3
+#    （不带 container_name 是这一份与 docker-compose.split.yml 唯一的形状差：钉了名字，--scale 会被
+#     compose 直接拒。判据在 p26.sh 的 S4。）
 # 2. docker compose -f docker-compose.cluster.yml ps（应看到 1 个 frontend + 3 个 backend 容器）
-# 3. 访问前端：http://localhost/（nginx 自动负载均衡到 3 个后端）
-# 4. 查看后端轮询：curl http://localhost/api/actuator/health（连续多次，看是否命中不同后端实例）
-# 5. 验证某个后端挂了还能服务：docker stop z-schedule-backend-z-schedule-backend-1，
-#    再 curl http://localhost/api/actuator/health（应仍返回 UP，nginx 自动跳过挂了的后端）
+#    真实容器名是 <project>-z-schedule-backend-<序号>，project 默认取 deploy/ 的目录名
+#    （250 实测：deploy-z-schedule-backend-1 / -2 / -3、deploy-z-schedule-frontend-1）
+# 3. 访问前端：http://localhost/（HTTP_PORT 被占时改 env/.env 里的 HTTP_PORT）
+# 4. 验证反代：curl http://localhost/api/actuator/health（应返回 UP；p26/B9 真机验过）
+#    ⚠ 响应体里没有任何实例身份，所以"数一数命中了哪台后端"这件事靠这条命令做不到（p26/C5 只
+#    能数出 DNS 给了几个地址，见 README §13）。
+# 5. 验证某个后端挂了还能服务：
+#    docker stop "$(docker ps --format '{{.Names}}' | grep -- '-z-schedule-backend-' | head -1)"
+#    再 curl http://localhost/api/actuator/health（250 实测第 1 次探就 200 UP，见 p26/C4）
