@@ -328,6 +328,12 @@ docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" z-schedule-e2e-mysql mysql -h127
     实测（18098）：`/`=200、`/jobinfo/list`=200、`/api/schedule/job/list`=404、`/schedule/`=404。
     宿主应用里才带前缀（`z-opc` 用 `--server.servlet.context-path=/meta`）。
     ⇒ 判存活要拿 200 且**形状对**的响应（坑见 `feedback-service-probe-status-code`）。
+20. **注入脚本用 `shutil.copy2` 还原源码 = 把 mtime 一起倒回变异之前**：被变异编过的那份
+    `.class` 反而比还原后的 `.java` 新，下一次 `mvn test`（不带 `clean`）**不重编它**，
+    于是你测的是上一支变异的字节码。09-26 实测：8 支全 KILLED-exact 之后跑全量，
+    `过滤器必须注册在整个应用入口上` 红在"两个不同的 store 实例"上——磁盘上的源码是对的，
+    红的是 M8 留下的旧 class。⇒ 还原后必须 `os.utime(path, None)` 抬时间戳，
+    或者干脆 `mvn clean test`。**"文件已按字节还原"和"下一次量的是还原后的字节"是两件事。**
 
 ## 7. 路由策略：广告与兑现的差（④ 的收口）
 
@@ -379,7 +385,38 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 # 计数只吃报告文件，不吃 mvn 的 stdout（坑 16）；输入为空必须 FATAL
 ```
 
-09-26 提交树（`0b9ac0f` + 本轮 ②③④ 改动）实测：**23 份报告 / 259 例 / 0 失败 / 0 错 / 0 跳过**，
-`BUILD SUCCESS`。其中 `JobTriggerServiceImplBehaviorTest` 15 例（含钉住分片广播语义的那 1 例）、
+09-26 提交树（#19 的登录态那一格之后）`mvn clean test` 实测：**24 份报告 / 278 例 / 0 失败 / 0 错 / 0 跳过**，
+`BUILD SUCCESS`（core 45 + starter 233）。上一格是 23 份 / 259 例，多出来的一报告是
+`LoginSessionStoreTest`（9 例），`TokenAuthFilterTest` 从 14 涨到 20、`UserServiceImplH2Test` 从 18 涨到 22。
+其中 `JobTriggerServiceImplBehaviorTest` 15 例（含钉住分片广播语义的那 1 例）、
 `ZSchedulePoolDefaultTest` 4 例（② 的池默认）。
 先 `rm -rf surefire-reports` 再数：不清会把你**本轮没跑到的**类的旧报告一起加进来（历史上报出过 +1 类）。
+**跑过注入脚本之后必须 `mvn clean`**：还原只写回字节不改 mtime，增量编译会接着用上变异体的 class（坑 20）。
+
+## 9. 登录态与角色：这一格兑现到哪一步（#19）
+
+改之前要知道的现状，全部由代码 + 测试钉住，不靠这段话：
+
+| 事实 | 落在哪里 | 谁来红 |
+|---|---|---|
+| `/user/login` 换回的是一串 256 bit 不透明令牌，**不再是用户名** | `UserServiceImpl.login` → `LoginSessionStore.issue` | `登录用明文密码比对库里的散列`（M3 摘掉即红） |
+| 令牌解析回 `{userId, username, role}`，挂成请求属性 `z.schedule.loginSession` | `TokenAuthFilter.doFilter` | `会话身份挂进请求而共享密钥不挂`（M2） |
+| 建/改/删账号三个口只认 ADMIN 会话；普通会话 403 且理由写"需要管理员角色" | `TokenAuthFilter.ADMIN_ONLY_PATHS` | `普通会话改不了账号而管理员会话能`（M1） |
+| 会话 30 min 过期、上限 1000 条按"最久没被出示"逐出 | `LoginSessionStore` | `过期令牌解析为空并且不再占位`（M6）、`容量满时逐出最久没被出示的那条`（M7） |
+| 改角色 / 删账号 ⇒ 该用户的会话立刻全部作废 | `UserServiceImpl.update/delete` | `改角色会把该用户的旧会话踢下线`（M4）、`删账号会把他的会话一并撤销`（M5） |
+| `/user/logout` 幂等：不回答"这把令牌先前在不在用" | `UserController.logout` | `令牌能过过滤器而登出后过不了` |
+| 过滤器与签发方共用**同一个** store 实例 | `ZScheduleAutoConfiguration.tokenAuthFilterRegistration` | `过滤器必须注册在整个应用入口上`（M8，就是坑 20 那条红） |
+
+八支注入的读数：`8/8 KILLED-exact`（每支都只红在预期的那条具名判据上，还原后 md5 逐支对账）。
+
+**这一格没有做完的部分，别当成已经生效**：
+
+1. `permission` 列（逗号分隔的 jobGroup id）仍然**零读者**。`LoginSession` 刻意不带它——
+   一个没人读的字段就是第二个装饰。按 jobGroup 收口是独立的一格。
+2. 共享密钥 `z.schedule.accessToken` 不区分"是谁"，因此**不受角色闸约束**（它本来就是全权）。
+   未配置它的演示模式下管理面对匿名敞开，但**出示了的**普通会话照样被拦（`演示模式下匿名全开但出示的会话仍被限角色`）。
+3. 会话只在本进程内存里：重启即全员重新登录，多实例部署下 A 机签的令牌在 B 机验不过。
+   要跨实例得注册一个自己的 `LoginSessionStore`（那个 `@ConditionalOnMissingBean` 就是留给这事的口子）。
+4. 读侧（`/user/list`、`/jobinfo/*`、`/joblog/*`）暂不按角色收口。
+   界面侧还没有登录入口——z-opc 的 schedule 页面从来没调过 `/user/login`（实测该目录 `login|accessToken` 零命中），
+   所以这一格交付的是**后端的身份载体**，不是"用户能登录"这件事。

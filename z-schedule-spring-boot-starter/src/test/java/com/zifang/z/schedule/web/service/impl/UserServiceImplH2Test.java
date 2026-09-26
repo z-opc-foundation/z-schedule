@@ -21,6 +21,8 @@ import org.junit.Test;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
@@ -262,8 +264,14 @@ public class UserServiceImplH2Test {
         HttpServletResponse response = (HttpServletResponse) Proxy.newProxyInstance(
                 UserServiceImplH2Test.class.getClassLoader(),
                 new Class<?>[]{HttpServletResponse.class},
-                (proxy, method, args) -> method.getReturnType() == boolean.class ? Boolean.FALSE
-                        : method.getReturnType() == int.class ? Integer.valueOf(0) : null);
+                (proxy, method, args) -> {
+                    // 被拒的那次会写 403 响应体：没有 writer 的替身会让"应当被拒"这条断言炸成 NPE
+                    if ("getWriter".equals(method.getName())) {
+                        return new PrintWriter(new StringWriter());
+                    }
+                    return method.getReturnType() == boolean.class ? Boolean.FALSE
+                            : method.getReturnType() == int.class ? Integer.valueOf(0) : null;
+                });
         filter.doFilter(request, response, (req, res) -> reached[0] = true);
         return reached[0];
     }
