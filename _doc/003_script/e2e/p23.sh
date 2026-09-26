@@ -10,7 +10,10 @@
 #
 # 这两条都不是"看一眼 200"能验的：必须**把库弄坏一次**看 readiness 会不会跟着倒。
 # 但常驻服务挂在 250 上是共享的，不能拿它做破坏性实验 ⇒ 本档全程只起临时实例，
-# 且只伤临时实例自己的 Spring 池（引擎池 dataSourceSchedule 仍指向真库，任务照跑）。
+# 且第 2 臂只伤这台临时实例的 Spring 池、第 3 臂只伤它的引擎池（两臂各伤一侧，
+# 才知道 readiness 守的到底是哪一侧；常驻那台一直连真库、照常跑任务）。
+#
+# 三臂共 19 条判据：健康臂 8 条、Spring 池故障臂 6 条、引擎池故障臂 5 条。
 #
 # 用法：./p23.sh                     默认验常驻实例正在跑的那个构件（从 argv 取，不认文件名）
 #       JAR=z-schedule-admin-svc-xxx-exec.jar ./p23.sh   点名验另一个构件（A/B 用）
@@ -52,8 +55,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# boot <额外参数> —— 起一台临时实例并等 Started；成功时把 java pid 追加进 PIDS
+# boot <额外参数> —— 起一台临时实例并等 Started；成功时把 java pid 追加进 PIDS，并留在 LASTPID 里
+# （LASTPID 是给"argv 里到底有没有我那条 override"这种自证用的——见 3.2）
 BOOTLOG=""
+LASTPID=""
 boot() {
   BOOTLOG="logs/p23_instance_$(date +%s).out"
   local UP="" i
@@ -65,6 +70,7 @@ boot() {
   local pid
   pid=$(ss -ltnp 2>/dev/null | grep ":$PORT " | sed "s/.*pid=\([0-9]*\).*/\1/" | head -1)
   [ -n "$pid" ] && PIDS="$PIDS $pid"
+  LASTPID="$pid"
   [ "$UP" = "yes" ] && [ -n "$pid" ]
 }
 stopall() { for p in $PIDS; do kill "$p" 2>/dev/null; done; sleep 3; PIDS=""; }
@@ -150,10 +156,14 @@ else
 fi
 
 # 互补的另一层：liveness 的明细里不许出现 db 组件——否则 2.4 的 UP 可能只是它没被判过
-if grep -aq '"db"' "$BODY"; then
+# 这一支原先只 grep `"db"`，于是**空 body 也算绿**（旧构件上 404、body 什么都没有，它就 PASS 了，
+# 而那正是它该说话的时候）。现在先要求这一份 body 真的答了状态，再去判里面有没有 db。
+if ! grep -aq '"status"' "$BODY"; then
+  bad "2.5 liveness 那一份 body 里连 status 都没有，无从判定分组：$(flat "$BODY")"
+elif grep -aq '"db"' "$BODY"; then
   bad "2.5 liveness 明细里出现了 db（两组分工被改坏）：$(flat "$BODY")"
 else
-  ok "2.5 liveness 判的是 ping/livenessState，与 readiness 的判定集不同形"
+  ok "2.5 liveness 答的是 status 且明细里没有 db，与 readiness 的判定集不同形"
 fi
 
 # 阳性对照总闸：故障臂上 readiness 与 liveness 必须给出**不同**的状态码，
@@ -164,6 +174,64 @@ if [ "$R" != "$L" ]; then
   ok "2.6 同一故障下 readiness=$R 而 liveness=$L，两码不同 ⇒ 这档确实分得开两组"
 else
   bad "2.6 readiness 与 liveness 同为 $R：判不出分工（要么没造出故障，要么两组同形）"
+fi
+
+# ── 3) 引擎池臂：只坏 starter 自建的 dataSourceSchedule，Spring 池仍指真库 ──────────
+# 这一臂才是产品本体那一侧：调度引擎读写任务用的是 `dataSourceSchedule`（`z.base.db.schedule.*`），
+# 而 2) 坏掉的是 Spring 那个空转池。如果 readiness 只认后者，第 2 节全绿也等于没守住——
+# 实测结论（构件 7ea14eb，show-details=always 才看得见子项）：`db` 是 composite，
+# 两个子项 `dataSource` / `dataSourceSchedule` 都在里面，引擎池单独坏时 readiness 一样 503。
+note "--- 3) 只坏引擎池（--z.base.db.schedule.port=33999），Spring 池仍指真库 ---"
+stopall
+if boot "--z.base.db.schedule.port=33999 --z.base.db.schedule.max-wait=3000 --management.endpoint.health.show-details=always"; then
+  ok "3.1 引擎池臂起来了"
+else
+  bad "3.1 引擎池臂没起来，这一组无法判定（tail 见下）"; tail -6 "$BOOTLOG" | tee -a "$OUT"; exit 1
+fi
+# 3.2 先证这条 override 真的进了 argv——上一轮就是因为 ssh 外层引号把 `--spring.datasource.url`
+#     带成了字面 `"…"`，override 从未应用，我差点据此写下"spring.datasource.* 是惰性的"。
+NA=$(tr "\0" "\n" < "/proc/$LASTPID/cmdline" 2>/dev/null | grep -c 'z\.base\.db\.schedule\.port=33999')
+if [ "$NA" = "1" ]; then
+  ok "3.2 override 确实在 argv 里（1 条，不是被引号吃掉的字面量）"
+else
+  bad "3.2 argv 里 $NA 条 override ⇒ 本臂根本没把引擎池弄坏，下面三条不作数"
+fi
+# jget <点分路径>：从上一次取回的 body 里按路径取值。body 是空的（404 就是这么回事）也要老实
+# 报一个 - 而不是抛 traceback——红消息必须可读，否则"实得"那一格是空的，读的人分不出
+# "组件是 UP"和"这条路径根本不存在"。
+jget() { python3 - "$BODY" "$1" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    print('-'); raise SystemExit(0)
+for k in sys.argv[2].split('.'):
+    d = d.get(k) if isinstance(d, dict) else None
+    if d is None:
+        break
+print('-' if d is None else (d if isinstance(d, str) else 'OBJ'))
+PY
+}
+
+R=$(code /actuator/health/readiness "$BODY")
+SCHED=$(jget components.db.components.dataSourceSchedule.status)
+SPRING=$(jget components.db.components.dataSource.status)
+if [ "$R" = "503" ]; then
+  ok "3.3 引擎池坏了 readiness 也 503 ⇒ readiness 守的确实是调度引擎那一侧（不只是 Spring 那个空转池）"
+else
+  bad "3.3 期望 readiness 503，实得 $R body=$(flat "$BODY")"
+fi
+if [ "$SCHED" = "DOWN" ] && [ "$SPRING" = "UP" ]; then
+  ok "3.4 db 的两个子项分开倒了：dataSourceSchedule=$SCHED 而 dataSource=$SPRING ⇒ 这一臂坏的只有引擎池"
+else
+  bad "3.4 期望 dataSourceSchedule=DOWN 且 dataSource=UP，实得 $SPRING / $SCHED（两池同倒或压根没分开判，readiness 的红就说明不了是什么）"
+fi
+L=$(code /actuator/health/liveness "$BODY")
+LDB=$(jget components.db.status)
+if [ "$L" = "200" ] && [ "$LDB" = "-" ]; then
+  ok "3.5 引擎池坏了 liveness 仍 200 且明细里没有 db ⇒ 库坏了进程不会被重启掉（两组的分工在这一臂也成立）"
+else
+  bad "3.5 期望 liveness 200 且无 db 组件，实得 code=$L db=$LDB body=$(flat "$BODY")"
 fi
 
 echo "===================== p23 结果：PASS=$PASS FAIL=$FAIL OBS=$OBS（全文 $OUT）=====================" | tee -a "$OUT"

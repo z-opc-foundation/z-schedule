@@ -81,11 +81,11 @@ javap -c  /tmp/x.class | grep -c 'stepDown'         # 例：#18 的关停释放�
 
 口径是"服务常驻 250"。常驻意味着**别人会拿它当"能用"的证据**，所以它的身份要写死在这里：
 
-| 项 | 值（09-26 23:15 实测，随每次换构件会变） | 怎么复现这个读数 |
+| 项 | 值（09-27 00:42 实测，随每次换构件会变） | 怎么复现这个读数 |
 |---|---|---|
-| jar | `~/z-schedule-e2e/z-schedule-admin-svc-a16473a-exec.jar`，md5 `100082780a5f4ea35bc5922c5a01010a`（含 #19 的登录态 + #28 的铸权闸 + `/jobinfo/*`、`/joblog/*` 两套按组收口 + 逐组合并；`44acc07`/`baa4458`/`0f1248b`/`7c9de99` 等旧版仍在同目录，别拿文件名当版本）。**编号取"最后一次改动 starter 源码的提交"**（`git log -1 --format=%h -- z-schedule-spring-boot-starter/src/main/java`），之后的提交只动测试与 `_doc/`，所以名字不等于 HEAD——判据永远是 md5 ＋ `javap` | `md5sum z-schedule-admin-svc-*.jar`（**文件名不算证据**，见上一节） |
+| jar | `~/z-schedule-e2e/z-schedule-admin-svc-7ea14eb-exec.jar`，md5 `90ead3a693034dbb60b49960a1e701f3`，56,234,848 B（含 #19 的登录态 + #28 的铸权闸 + `/jobinfo/*`、`/joblog/*` 两套按组收口 + 逐组合并 + **§10 那段顶层 `management.*` 探针配置**；`a16473a`（`100082780a…`）与 `44acc07`/`baa4458`/`0f1248b`/`7c9de99` 等旧版仍在同目录，别拿文件名当版本）。**编号从这一版起取 HEAD**：原先的口径是"最后一次改动 starter 源码的提交"（`git log -1 --format=%h -- z-schedule-spring-boot-starter/src/main/java`），那个号自 `a16473a` 起就没再动，而这一格改的是 **admin 的 `application.yml`** ⇒ 旧口径下两版会撞名。判据永远是 md5 ＋ **从 jar 里读出的字节**：这次不是 `javap` 而是 `unzip -p <jar> BOOT-INF/classes/application.yml \| grep -c probes`（旧构件 0、新构件 1，一条负向一条正向） | `md5sum z-schedule-admin-svc-*.jar`（**文件名不算证据**，见上一节） |
 | 端口 | `18098`（**故意不用 18086**：那是 `p16/p20` 的性能台架端口，撞上就会量到一个"我没控制、不知道配置"的实例——坑 14） | `ss -ltnp \| grep 18098` |
-| 存活判据 | `GET /` → 200；`GET /jobinfo/list` → 200；`GET /joblog/list` → 200（23:26 换构件后实测三条都是 200） | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18098/joblog/list` |
+| 存活判据 | `GET /` → 200；`GET /jobinfo/list` → 200；`GET /joblog/list` → 200；`GET /actuator/health` → `{"status":"UP","groups":["liveness","readiness"]}`（body 里没有 `components`，明细不外铺）；`/actuator/health/liveness`、`/actuator/health/readiness` → 200。**换构件前同一台同一端口这两条都是 404**（00:40:01 实测），所以它们是这一格的读数不是背景 | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18098/joblog/list` |
 | 真跑一次 | `./svc_smoke.sh`（播种 → 数 `handle_code=200` → 停用） | 见第 3 节 |
 
 换构件重跑的完整动作（`0b9ac0f` → `7c9de99`、`44acc07` → `a16473a` 都是这么走的；
@@ -99,6 +99,15 @@ javap -c  /tmp/x.class | grep -c 'stepDown'         # 例：#18 的关停释放�
 ⇒ 6.317 / 6.458 / 6.499 / 6.501 / 6.61 / 6.693，**外加一次 12.745**：那一回是紧接三轮 p20（库里刚灌完
 1,600 个任务、12.9 MB 日志）之后起的 ⇒ 启动耗时在这台机器上会翻倍，写"6.5 s"要连着写它的条件）。**日志本轮改成一构件一文件**（`service_18098_a16473a.out`）：
 沿用同一个文件时，"等因果那行"的 `grep -q` 会先命中上一版的启动行，把一次没起来的实例读成起来了。
+
+09-27 00:40 第三次走这四步（`a16473a` → `7ea14eb`，就是 §10 那格换构件）：`kill -TERM` 后**第一次采样端口就已无人监听**
+（循环步长 0.5 s，所以读数只能说 "<0.5 s"，别写成"1 s"——那是上一轮的读数不是这一轮的），
+旧日志 `Stepped down from LEADER` 1 行；新进程 `Started ZScheduleAdminApplication in 6.865 seconds`
+（第 8 个读数，仍落在上面那条区间内），`Became LEADER` 在 Started 之后 **61 ms**
+（00:40:45.551 → 00:40:45.612）⇒ 等旧租约的时间依旧是 0。换完当场复验身份：`/proc/<pid>/cmdline` 里
+是 `z-schedule-admin-svc-7ea14eb-exec.jar`、`md5sum` 与本机逐字节相同、`deploy: JAR=… db=127.0.0.1:33060/zschedule_e2e`
+那行连的库没变。**换构件后 `./svc_smoke.sh` 与 `./p23.sh` 各跑一遍**（前者证"还会真执行任务"，后者证探针面），
+读数记在 §10。
 
 ```bash
 # 1) 本机出构件并一对一拷过去（多源 scp 到同一目录会造出同名影子文件）
@@ -196,8 +205,9 @@ curl -s -X POST "http://127.0.0.1:$PORT/user/add?accessToken=$SECRET" \
 | `p20.sh` | **固定需求只改池上限**（`max-active` 20/40/80），同时量吞吐与忙连接 ⇒ 池是不是那堵墙 | 天花板归属（见第 4 节，答案是"是"） |
 | `p21.sh` | **一次执行的 2 条语句里钱花在哪**：同一批 id 上 narrow(4 列) / wide(12 列) 两臂判"形状"，pair2(2 次提交) / pair1(1 次提交) 两臂判"次数" | ③ 的前提：收窄 SET 到底值不值（答案：不值，见 §4.4） |
 | `p22.sh` | **登录态 + 铸权闸 + 按组分权在真机上兑现到哪一步**：S 段先起一台配了 `accessToken` 的关门实例（`Z_SCHEDULE_ACCESSTOKEN` 走环境变量、argv 0 命中）并用共享密钥种下第一个 ADMIN，A 段打常驻那台（演示模式：签发形状 / 角色闸 / **匿名铸 ADMIN 被拒**＋NORMAL 阳性对照），B 段回到关门实例逐条验三种撤销，**D 段在关门实例上验 `permission` 那一列真的参与判定**（建两个分组 + 两行任务 ⇒ 列表裁剪、点名要别组被拒、读/触发/停/启/删五支越组被拒且**库里那一行没被写过**、ADMIN 不受约束、改 `permission` 会踢掉旧会话），**E 段把同一套收口打到日志那一侧**（`job_log.job_group` 是另一张表：派发行的组号由写侧兑现、`/joblog/*` 四口都认行上那一组、不限组时逐组合并重排并与 MySQL 现算的期望序对拍、`clear` 的"没删"配一支"会删"的猎物、`limit` 远超上限时收窄到 1000），收尾数库、验租约 | #19、#28（见 §9′；两台是必需的——撤销在演示模式下观察不到，而种子账号在演示模式下已经铸不出来） |
+| `p23.sh` | **运维探针面在真机上兑现到哪一步**（三臂 19 条，全程只起**临时实例**：常驻那台是共享的，不能拿它做破坏性实验）。待验构件取自常驻进程的 `/proc/<pid>/cmdline`（不认文件名）。**1) 健康臂**：`health` 200 且 body 含 `groups[liveness,readiness]`、`info` 200、两条组路径各 200、`env`/`metrics` 404（暴露面白名单的反向对照）、匿名拿不到组件明细。**2) 只坏 Spring 池**（`--spring.datasource.url` → 没人听的 33999）：`health` 503 / `readiness` 503 / `liveness` 仍 200 且明细里没有 `db`；收尾 2.6 要求同一故障下两组**返回不同码**——相等就意味着要么没造出故障、要么两组同形。**3) 只坏引擎池**（`--z.base.db.schedule.port` → 33999，也就是调度本体那一侧）：3.2 先证那条 override 真的进了 argv（防被引号吃掉），3.3 判 `readiness` 503，3.4 判 body 里 `dataSourceSchedule=DOWN` 而 `dataSource=UP`（两池分开倒，red 才说明得了是什么），3.5 判 `liveness` 仍 200 | #29（见 §10：键位失配 + Boot 自动 `readiness` 不含数据源；2.6 与 3.2 存在的意义都是"本档不许在从未红过的情况下绿"） |
 | `run_p20_and_restore.sh` | **带复原义务的测量包装**：p20 必须在常驻实例停掉时跑（一台库只有一个 leader），而"停了忘了起"是这类脚本最容易犯的错 ⇒ 关停、量、起回、复验写死在同一条脚本里，中途任一步失败也往下走到复原段 | 服务挂在 250 上不是为这次测量服务的（见 §4 开头那段） |
-| `svc_smoke.sh` | **常驻实例现在还活着吗**：播种 3 个 2 s 任务 → 数 `handle_code=200` → 用 handler 自己那行日志做阳性对照 → 停用。两处基线（`job_log` 的 `MAX(id)` 与日志文件行数）把**上一次运行**的行排除在外——不加基线时实测过 `成功=72`，其中 42 行是历史 | 0b9ac0f 的 `IJobHandler` 派发支要在真机上被观察到；陈旧正对照/陈旧计数 |
+| `svc_smoke.sh` | **常驻实例现在还活着吗**：播种 3 个 2 s 任务 → 数 `handle_code=200` → 用 handler 自己那行日志做阳性对照 → 停用。两处基线（`job_log` 的 `MAX(id)` 与日志文件的行号）把**上一次运行**的行排除在外——不加基线时实测过 `成功=72`，其中 42 行是历史；日志落点现在从 `/proc/<pid>/fd/1` 取而不是拼路径（拼死的那版在换构件后把自己判红了，见 §10.4） | 0b9ac0f 的 `IJobHandler` 派发支要在真机上被观察到；陈旧正对照/陈旧计数 |
 
 ## 4. 天花板到底压在哪一层
 
@@ -507,6 +517,12 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 # 计数只吃报告文件，不吃 mvn 的 stdout（坑 16）；输入为空必须 FATAL
 ```
 
+09-27 提交树 `7ea14eb`（§10 那一格）`mvn -o clean package` 全量实测：
+**28 份报告 / 320 例 / 0 失败 / 0 错 / 0 跳过**（core 5 份 45 + starter 22 份 269 + **admin 1 份 6**）。
+314 → 320 恰好是新增的 `ManagementConfigBindingTest` 那 6 例，而 `z-schedule-admin/target/surefire-reports/`
+里那份报告是**这个模块的第一份**——在此之前 admin 一条测试都没有，所有测试都住在 starter 里
+（这也是为什么 §10.1 那条键位缺陷能安静存活：admin 的 yml 从来没有被判过）。
+
 09-26 提交树 `04326ac`（`/joblog/*` 四口按组收口 + 逐组合并落地之后）`mvn test` 实测：
 **27 份报告 / 314 例 / 0 失败 / 0 错 / 0 跳过**（core 5 份 45 例 + starter 22 份 269 例）。
 上一格是 `44acc07` 的 26 份 / 297 例（再往前 25 份 / 285 例），多出来的 17 例分三处、两处各量一遍对得上：
@@ -687,3 +703,137 @@ FAIL 消息把两侧原样贴出来 + 改完复跑立刻归零（下一段记的
    而**已经建过这张表的库**（比如线上 `oc`）不会自动多出一列，`bootstrap_mysql.sh` 只做"DROP 条数必须为 0"
    那道守卫再跑整份 DDL，**不 ALTER 既有表**。线上 `oc` 有没有这一列本轮**未复核**（我不拿仓库里的明文口令当凭证源）——
    所以"收口在线上生效了没有"这个问题**别引用本节当答案**，先 `SHOW COLUMNS FROM z_schedule_user LIKE 'permission'`。
+
+---
+
+## 10. 探针面：一块从没生效的 yml，和两条只在真机上才红的缺陷（#29）
+
+这一格两条缺陷的共同点是**都不会让启动失败**：第一条是配置写在没人读的前缀下，第二条是探测路径答 200
+而这个 200 一个字都没问过库。所以单测抓不到它（admin 模块此前**一条测试都没有**，见 §8），
+"服务起来了、页面能开"也抓不到——只有把探针面本身当成被测对象、并且**故意把库弄坏**才现形。
+
+### 10.1 键位：`spring.actuator.*` 里整块是死配置
+
+`application.yml` 把暴露面 / 明细 / 探针组写在 `spring:` 底下（属性名于是成了 `spring.actuator.*`），
+而 Boot 读的是顶层 `management.*`。250 真机、跑着的构件 `a16473a`，不带任何 override：
+
+| 路径 | 改前（`a16473a`） | 改后（`7ea14eb`） | 这一格说明什么 |
+|---|---|---|---|
+| `/actuator/health` | 200 `{"status":"UP"}` | 200 `{"status":"UP","groups":["liveness","readiness"]}` | 探针组根本没建 ⇒ 组那几行是死的 |
+| `/actuator/info` | **404** | 200 | `exposure.include` 从未生效（默认只暴露 health） |
+| `/actuator/health/liveness` | **404** | 200 | `deploy/k8s/01-deployment-backend.yaml` 的 `livenessProbe` 探的就是这条 |
+| `/actuator/health/readiness` | **404** | 200 | 同上，`readinessProbe` |
+| `/actuator/env`、`/actuator/metrics` | 404 | 404 | 白名单的反向对照：改后**仍然** 404，才证明 `include` 是白名单而不是摆设 |
+
+同一族的还有 `logging.level.io.github.yuku123.…`：包名 1.0.x 改成 `com.zifang.z.schedule` 时 yml 没跟着改，
+引擎 debug 日志哑了两周。`ManagementConfigBindingTest` 的 `everyLoggingLevelPackageIsReachable()`
+钉的就是这一族——每个 `logging.level.<pkg>` 都得能在 classpath 上解析出目录，解析不到就红。
+
+顺带纠一处**文档里的假话**：`_doc/001_arch/z-schedule-admin.md` 原先写"本应用开了 `show-details=always`，
+health 会把数据源信息吐给匿名访问者"。前半是错的（那段配置从未生效，实测 health 里没有 `components`）；
+后半之所以也没发生，是 `TokenAuthFilter` 把 `/actuator/*` 403 掉了——过滤器与这段 yml 无关，那条 403 一直是真的。
+**把"没发生的风险"写成"已经泄露"比漏写更糟**：它会让人以为这件事已经处置过了。现在 `show-details` 显式定为
+`when-authorized`，理由换成一条量过的：故障时 detail 里是连接池内部状态与驱动报错原文
+（实测含 `GetConnectionTimeoutException: wait millis 3000, active 0, maxActive 20, creating 4`），
+而演示模式（未配 `z.schedule.accessToken`）整个 HTTP 面对匿名敞开。
+
+### 10.2 `readiness` 不含数据源：200 不等于问过库
+
+三臂各起一台临时实例（`p23.sh` 的 1)/2)/3) 段；常驻那台不动，破坏性实验不能落在共享服务上）：
+
+| 臂 | `/actuator/health` | `…/readiness` | `…/liveness` |
+|---|---|---|---|
+| 库正常 | 200 UP | 200 UP | 200 UP |
+| 只坏 Spring 池（`--spring.datasource.url` → 没人听的 33999） | 503 DOWN | **503 DOWN**（改前：`a16473a` 是 404，因为组根本不存在；把键位修好而组还没显式写时它是 **200 UP**——那才是缺陷本体） | 200 UP，明细里没有 `db` |
+| 只坏引擎池（`--z.base.db.schedule.port` → 33999） | 503 DOWN（`dataSource` UP、`dataSourceSchedule` **DOWN**） | **503 DOWN** | 200 UP |
+
+第三臂是这一格最要紧的一读，它问的是"**产品本体那一侧的库**在不在 readiness 的判定集里"：
+调度引擎读写任务用的是 starter 自建的 `dataSourceSchedule`（`z.base.db.schedule.*`），
+而第二臂坏掉的 Spring 池平时根本不干活（§4 量过它空转）。`show-details=always` 取回的 body 给出分工：
+`db` 是 composite，`dataSource` 与 `dataSourceSchedule` **两个子项都在 readiness 的判定集里**
+⇒ 引擎池单独坏时 readiness 一样倒，不是只盯着那个空转池。这条判据现在是 `p23.sh` 的 3.3/3.4——
+**写第三臂之前它并不成立**：只有第二臂的话，全绿也证明不了 readiness 守的是哪一侧。
+
+机制上两条都得显式写：Boot 只在检测到 Kubernetes 平台时才自动建 `liveness`/`readiness` 两个组
+（⇒ 离集群它们天生 404，而部署文件承诺的探测一次都没被验过），而它自动建的 `readiness` 只含
+`readinessState`/`ping`、**不含 `db`**。于是 `probes.enabled=true` 让组在任何平台都存在，
+`group.readiness.include=readinessState,db` 把库拉进来，`group.liveness.include=ping,livenessState`
+**故意不含库**——库短暂抖动不该把进程重启掉（重启只会让 reconcile 更糟）。
+
+### 10.3 两支判据，和它们自己的自证
+
+`ManagementConfigBindingTest`（`z-schedule-admin` 的第一份测试；6 例，不起 Spring 上下文，
+`YamlPropertySourceLoader` 把 classpath 上那份 yml 读成 `MapPropertySource` 再按键判）。
+5 支注入变异逐支点名转红，**实际红集与期望红集逐字相等**（台账 `~/.cache/zsched_mgmt/ledger_7ea14eb.log`；
+变异只打在 `target/classes/application.yml` 那份被测副本上，每支跑完按 md5 双向对账还原）：
+
+| 变异 | 期望红 = 实际红 |
+|---|---|
+| M1 整块搬回 `spring:` 底下并改名 `actuator:`（= 原缺陷的形状） | `probeConfigSitsWhereBootReadsIt` + `exposureIsWhitelisted` + `probeGroupsExistOffCluster` + `readinessAsksTheDbAndLivenessDoesNot` + `detailsAreNotPublic`（5 支，不多不少） |
+| M2 `readiness` 组摘掉 `db`（回到 Boot 的自动组） | `readinessAsksTheDbAndLivenessDoesNot` |
+| M3 `liveness` 组塞进 `db`（库一抖就重启） | `readinessAsksTheDbAndLivenessDoesNot`（同一支，因为它判的是**分工**不是单侧） |
+| M4 `logging.level` 指回改名前的旧包 | `everyLoggingLevelPackageIsReachable` |
+| M5 `show-details` 改回 `always` | `detailsAreNotPublic` |
+
+`p23.sh` **同一份字节**（md5 `f7316ad7…`，两端 `md5sum` 相同）对两个构件各跑一遍——这是 A/B，不是复跑：
+
+| 待验构件（取自常驻进程 argv，不认文件名） | 结果 | 用时 | rc |
+|---|---|---|---|
+| `z-schedule-admin-svc-7ea14eb-exec.jar`（`90ead3a6…`） | **PASS=19 FAIL=0 OBS=0** | 81 s（00:58:10→00:59:31） | 0 |
+| `z-schedule-admin-svc-a16473a-exec.jar`（`100082780a…`，上一版） | **PASS=8 FAIL=11 OBS=0** | 61 s（00:59:31→01:00:32） | 1 |
+
+旧构件那 11 条红在 1.2 / 1.3 / 1.4×2 / 2.3 / 2.4 / 2.5 / 2.6 / 3.3 / 3.4 / 3.5；8 条绿是 1.1、1.5×2、1.6、
+2.1、2.2、3.1、3.2。**其中 1.6 与 2.2 在旧构件上也是绿的，各自都有理由**：1.6 判"匿名拿不到组件明细"，
+而旧构件本来就没明细 ⇒ 它不是这一格的判据，是防"改完反而把明细铺出去"的守卫；2.2 判顶层 health 503，
+顶层一直是对的（**缺陷在组路径那一侧**）。这一格踩到的一次真·判据空转也长在这里：
+`2.5` 原先只 grep body 里有没有 `"db"`，于是**404 的空 body 也算绿**——而 404 正是它该说话的时候。
+现在它先要求这份 body 真答了 `status` 再判明细（旧构件在 2.5 上由绿转红，就是上面那 11 条里的一条）。
+
+### 10.4 三条自伤：都是量具的错，记下来免得再犯
+
+1. **`APP_ARGS=\"…\"` 把字面引号送进了 argv**。在一条 `ssh '…'` 的单引号参数里写 `APP_ARGS="…"`，
+   那对引号不是 shell 语法而是**字符**，于是 `--spring.datasource.url=…` 带着 `"` 进 JVM、谁也不认识它
+   ⇒ override 从未应用，而 ORM 照常工作，我差点据此写下"`spring.datasource.*` 是惰性的"这条大结论。
+   `cat -A /proc/<pid>/cmdline` 一眼定性（能看见参数里的 `"`）。改成 `export APP_ARGS="…"` 后拿到了真读数。
+   **凡是"我改了参数而行为没变"的读数，先证明那条参数进了 argv**——这条现在写在 `p23.sh` 的 3.2 里，
+   不用等下一次踩到。
+2. **`svc_smoke.sh` 的日志路径写死 `logs/service_${PORT}.out`**。本轮起日志一构件一文件（§1″），
+   那个默认路径指向的是**上一个构件**的日志 ⇒ 库侧 21 条 `handle_code=200`（真执行了）而 handler 侧证 0 行，
+   冒烟把自己判红。现在落点从 `/proc/<pid>/fd/1` 读（带 ` (deleted)` 尾巴或拿不到就 FATAL，不猜路径），
+   当场打印"日志落点取自 fd/1"，重跑即 **VERDICT: OK**（36 行 / 36 成功 / handler 侧证 39 行，00:45:26→00:45:52）。
+3. **管道退出码遮蔽，第二次踩**：`md5sum 不存在的文件 | cut -d' ' -f1 || 备选支`——管道 rc 取的是
+   **最后一个命令**的（`cut` 恒 0），所以"备选支"永远不会跑，我据此差点把"远端脚本字节不一致"写成结论。
+   同一批里 `grep -c` 数为 0 时 rc=1 会**掐断 `&&` 链**（这次正好当正向对照用：旧构件那条链停在哪，
+   就说明它数到了 0）。判"文件不存在"的读数一律单独一条命令取。
+
+顺带一条**读数而不是缺陷**：同一份 `svc_smoke.sh` 两次跑出的成功行是 21 与 36（窗口都写死 25 s）。
+差的那些落在"新播种的任务要等下一轮 reconcile 才进 ring"这段，脚本的判据是"≥ `$N` 行"而不是"≥ 期望行数"，
+所以这个波动造不出假红——但打印里那句"期望约 37 行"是提示不是判据，别引用它当证据。
+
+### 10.5 这一格的换构件动作（09-27 00:40，`a16473a` → `7ea14eb`）
+
+照 §1″ 那四步走，读数：`kill -TERM` 后**第一次采样端口已无人监听**（循环步长 0.5 s，所以读数只能说
+"<0.5 s"，别抄上一轮的"1 s"）、旧日志 `Stepped down from LEADER` 1 行；新进程
+`Started ZScheduleAdminApplication in 6.865 seconds`，`Became LEADER` 在其后 **61 ms**
+（00:40:45.551 → 00:40:45.612）⇒ 等旧租约的时间仍是 0（#18 的兑现面每次换构件都被重打一遍）。
+换完复验身份：argv 里是 `z-schedule-admin-svc-7ea14eb-exec.jar`、两端 md5 `90ead3a6…` 逐字节相同、
+`deploy: JAR=… db=127.0.0.1:33060/zschedule_e2e` 那行连的库没变、`/` 与 `/jobinfo/list` 与 `/joblog/list` 照旧 200。
+**键位这件事也在构件字节里复验了**：`unzip -p <jar> BOOT-INF/classes/application.yml | grep -c probes`
+旧 0 / 新 1（一负一正两条对照，不靠文件名、不靠 mtime）。
+
+### 10.6 这一格没做的
+
+1. **`deploy/k8s/01-deployment-backend.yaml` 的 env 喂不到引擎池**：它只给了 `SPRING_DATASOURCE_PASSWORD`
+   （secretKeyRef）+ `SPRING_PROFILES_ACTIVE: "k8s"`，既没有 `SPRING_DATASOURCE_URL` / `USERNAME`，
+   也没有 `Z_BASE_DB_SCHEDULE_*`。而 `ModuleDataSourceTemplate` 的默认值是 `localhost:3306` + **空库名**
+   （`z.base.db.<module>.{host,port,username,password,database}`，逐个回落 `z.base.db.default.*` 再回落内置默认）
+   ⇒ 照这份 manifest 起，引擎池连的是 `jdbc:mysql://localhost:3306/`。`run.sh`（250 那条演练路径）两套都喂了，
+   所以这个缺口只在集群那条路上。**本轮仍未在真集群里验过**，manifest 那一半是下一格。
+2. `SPRING_PROFILES_ACTIVE=k8s` 在 `src/main/resources/` 里**没有对应文件**（只有 `application.yml`、
+   `application-dev.yml`、`application-local.yml.example`）——Boot 不报错，所以这行现在是惰性的，
+   而它给人"集群有一套专门配置"的错觉，那份配置并不存在。
+3. 探针面只到 `health` / `info`。`metrics` 是**刻意不暴露**的，代价是调度器没有指标出口，
+   §4 那几格吞吐全靠外部脚本数库；要接 Prometheus 得先决定暴露哪几个 gauge，是独立的一格。
+4. 常驻那台是演示模式（没配 `accessToken`），它的 `/actuator/health` 因此对匿名可探——这是 k8s 探测的
+   既成约束（探测不带 token），也正是 `show-details` 必须留在 `when-authorized` 的原因。
+   要连状态码都不给匿名，得为探针口单独定策略，本轮没动它。

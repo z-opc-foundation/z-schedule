@@ -19,8 +19,11 @@ GROUP="${GROUP:-90098}"
 PORT="${PORT:-18098}"
 N="${N:-3}"
 WINDOW="${WINDOW:-25}"
-# 日志按端口命名；换构件重启请沿用同一个文件（进程持有的是 inode，改名后仍会继续写）
-LOG="${LOG:-logs/service_${PORT}.out}"
+# 日志路径不硬编码、也不从命名约定推，而是问进程本身：`/proc/<pid>/fd/1` 指向哪份就数哪份。
+# 原先写作 LOG=logs/service_${PORT}.out，而这一轮起日志改成一构件一文件 ⇒ 默认路径指向的是
+# **上一个构件**的日志：09-27 换构件后首次实跑，库侧 21 条 handle_code=200（真执行了）而 handler 侧证 0 行，
+# 冒烟把自己的量具判成红。见 _doc/003_script/e2e/README.md §10。
+LOG="${LOG:-}"
 
 q() { ./q.sh -N -B --skip-column-names "$@" 2>&1; }
 
@@ -49,6 +52,18 @@ if [ -z "$CAND" ]; then
 fi
 JARLINE=$(sed -E 's/^[0-9]+ //; s/(--server\.port[= ]*)([0-9]+).*/jar 见 argv, port=\2/' <<< "$CAND")
 echo "  $JARLINE"
+if [ -z "$LOG" ]; then
+  # 只信这个进程自己说它往哪写：fd/1 是指向 stdout 落点的符号链接，
+  # 文件被改名/被截过会带 " (deleted)" 尾巴，那种情况下数不出对照 ⇒ 直接 FATAL，不猜。
+  LOGPID=$(sed -E 's/ .*//' <<< "$CAND")
+  LOG=$(readlink "/proc/$LOGPID/fd/1" 2>/dev/null | sed 's/ (deleted)$//')
+  if [ -z "$LOG" ] || [ ! -f "$LOG" ]; then
+    echo "FATAL: 拿不到进程 $LOGPID 的 stdout 落点（/proc/$LOGPID/fd/1 → '${LOG:-空}'）⇒ handler 侧证无从数起"
+    echo "       logs/ 下现有的：$(ls -1 logs 2>/dev/null | grep "service_${PORT}" | tr '\n' ' ')"
+    exit 1
+  fi
+  echo "  日志落点取自 fd/1：$LOG"
+fi
 HTTP=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/")
 echo "  HTTP=$HTTP（000/403 都不算通过）"
 [ "$HTTP" = "200" ] || { echo "FATAL: 管理面没答 200"; exit 1; }
