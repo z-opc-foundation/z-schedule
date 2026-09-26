@@ -71,14 +71,6 @@ public class JobInfoServiceImpl implements JobInfoService {
         if (jobInfo.getJobDesc() == null || jobInfo.getJobDesc().trim().isEmpty()) {
             return ReturnT.fail("任务描述不能为空");
         }
-        if (jobInfo.getJobCron() == null || jobInfo.getJobCron().trim().isEmpty()) {
-            return ReturnT.fail("Cron表达式不能为空");
-        }
-        try {
-            new CronExpression(jobInfo.getJobCron());
-        } catch (ParseException e) {
-            return ReturnT.fail("Cron表达式格式错误: " + e.getMessage());
-        }
 
         jobInfo.setTriggerStatus(0);
         jobInfo.setTriggerLastTime(0);
@@ -88,6 +80,23 @@ public class JobInfoServiceImpl implements JobInfoService {
         } else if (TriggerTypeEnum.match(jobInfo.getTriggerType()) == null) {
             return ReturnT.fail("触发类型不合法: " + jobInfo.getTriggerType()
                     + ", 可选 " + codesOf(TriggerTypeEnum.values()));
+        }
+        // cron 只在引擎真会读它的类型上必填：FIX_RATE/FIX_DELAY 走 fix_interval，
+        // 无条件要求 cron 会让这两种任务建不出来（250 真机实测被 "Cron表达式不能为空" 挡回，
+        // 只能塞一个假 cron 才提交得上去）。给了非空 cron 就一律要可解析，别留脏值。
+        if (jobInfo.getJobCron() == null || jobInfo.getJobCron().trim().isEmpty()) {
+            if (TriggerTypeEnum.CRON.getCode().equals(jobInfo.getTriggerType())) {
+                return ReturnT.fail("Cron表达式不能为空");
+            }
+            // 列定义是 varchar(128) NOT NULL 且没有默认值：留 null 会被 MySQL 1364 挡回，
+            // 空串才是"这个类型不读 cron"的可存表示。
+            jobInfo.setJobCron("");
+        } else {
+            try {
+                new CronExpression(jobInfo.getJobCron());
+            } catch (ParseException e) {
+                return ReturnT.fail("Cron表达式格式错误: " + e.getMessage());
+            }
         }
         if (jobInfo.getMisfireStrategy() == null || jobInfo.getMisfireStrategy().isEmpty()) {
             jobInfo.setMisfireStrategy(MisfireStrategyEnum.DO_NOTHING.getCode());
@@ -121,8 +130,13 @@ public class JobInfoServiceImpl implements JobInfoService {
         if (exist == null) {
             return ReturnT.fail("任务不存在");
         }
-        // 先判空再判"要不要改运行中的 cron"：空串是格式问题，跟任务在不在跑无关
-        if (jobInfo.getJobCron() != null && jobInfo.getJobCron().trim().isEmpty()) {
+        // 空串 cron 算不算错，取决于引擎会不会读它：FIX_* 任务清掉遗留的 cron 是合法收尾，
+        // 只有 CRON 类型（含没带触发类型的补丁）把 cron 清空才会让它不再触发。
+        String typeAfterUpdate = effectiveTriggerType(
+                jobInfo.getTriggerType() == null || jobInfo.getTriggerType().isEmpty()
+                        ? exist.getTriggerType() : jobInfo.getTriggerType());
+        boolean cronWillBeRead = TriggerTypeEnum.CRON.getCode().equals(typeAfterUpdate);
+        if (cronWillBeRead && jobInfo.getJobCron() != null && jobInfo.getJobCron().trim().isEmpty()) {
             return ReturnT.fail("Cron表达式不能为空");
         }
         if (exist.getTriggerStatus() != null && exist.getTriggerStatus() == 1) {
@@ -130,7 +144,8 @@ public class JobInfoServiceImpl implements JobInfoService {
                 return ReturnT.fail("请先停止任务再修改Cron表达式");
             }
         }
-        if (jobInfo.getJobCron() != null) {
+        // 空串到这里就意味着"清空"（FIX_* 类型才允许，CRON 类型已在上面挡回），不能拿去解析
+        if (jobInfo.getJobCron() != null && !jobInfo.getJobCron().trim().isEmpty()) {
             try {
                 new CronExpression(jobInfo.getJobCron());
             } catch (ParseException e) {
@@ -161,23 +176,22 @@ public class JobInfoServiceImpl implements JobInfoService {
         if (jobInfo.getExecutorParam() != null) exist.setExecutorParam(jobInfo.getExecutorParam());
         if (jobInfo.getExecutorBlockStrategy() != null)
             exist.setExecutorBlockStrategy(jobInfo.getExecutorBlockStrategy());
-        if (jobInfo.getExecutorTimeout() >= 0) exist.setExecutorTimeout(jobInfo.getExecutorTimeout());
-        if (jobInfo.getExecutorFailRetryCount() >= 0)
+        if (jobInfo.getExecutorTimeout() != null) exist.setExecutorTimeout(jobInfo.getExecutorTimeout());
+        if (jobInfo.getExecutorFailRetryCount() != null)
             exist.setExecutorFailRetryCount(jobInfo.getExecutorFailRetryCount());
         if (jobInfo.getTriggerType() != null && !jobInfo.getTriggerType().isEmpty())
             exist.setTriggerType(jobInfo.getTriggerType());
-        // DTO 的 fixInterval 是 primitive long：不带这个字段时反序列化成 0，而 0 对 FIX_* 任务是非法值，
-        // 所以只认正数为"调用方真的给了间隔"，其余保持列值不变。
-        if (jobInfo.getFixInterval() > 0) exist.setFixInterval(jobInfo.getFixInterval());
+        // null=补丁没带这一列，保持列值；给了值(含 0)就按字面写。装箱前这两件事都是 0，只能靠
+        // "> 0 才认"猜，代价是"把间隔改成 0/清空遗留间隔"这类合法操作会被静默丢弃。
+        if (jobInfo.getFixInterval() != null) exist.setFixInterval(jobInfo.getFixInterval());
         if (jobInfo.getMisfireStrategy() != null && !jobInfo.getMisfireStrategy().isEmpty())
             exist.setMisfireStrategy(jobInfo.getMisfireStrategy());
         if (jobInfo.getChildJobId() != null)
             exist.setChildJobId(jobInfo.getChildJobId());
 
         // 合并后的行必须自己成立：把 CRON 任务改成 FIX_* 却不带间隔，等于交出一个永不触发的任务
-        long mergedInterval = exist.getFixInterval() == null ? 0L : exist.getFixInterval();
         ReturnT<String> intervalCheck = checkFixedInterval(effectiveTriggerType(exist.getTriggerType()),
-                mergedInterval);
+                exist.getFixInterval());
         if (intervalCheck != null) {
             return intervalCheck;
         }
@@ -213,8 +227,7 @@ public class JobInfoServiceImpl implements JobInfoService {
         // 校验不过就改状态，只会得到"启动成功但永远不触发"的假象。
         String triggerType = effectiveTriggerType(exist.getTriggerType());
         if (isFixedIntervalType(triggerType)) {
-            ReturnT<String> intervalCheck = checkFixedInterval(triggerType,
-                    exist.getFixInterval() == null ? 0L : exist.getFixInterval());
+            ReturnT<String> intervalCheck = checkFixedInterval(triggerType, exist.getFixInterval());
             if (intervalCheck != null) {
                 return intervalCheck;
             }
@@ -319,8 +332,8 @@ public class JobInfoServiceImpl implements JobInfoService {
      *
      * @return 需要拒绝时返回失败结果，合法时返回 null
      */
-    private static ReturnT<String> checkFixedInterval(String triggerType, long fixInterval) {
-        if (isFixedIntervalType(triggerType) && fixInterval <= 0) {
+    private static ReturnT<String> checkFixedInterval(String triggerType, Long fixInterval) {
+        if (isFixedIntervalType(triggerType) && (fixInterval == null || fixInterval <= 0L)) {
             return ReturnT.fail(triggerType + " 任务必须配置正数间隔(fix_interval, 毫秒)");
         }
         return null;

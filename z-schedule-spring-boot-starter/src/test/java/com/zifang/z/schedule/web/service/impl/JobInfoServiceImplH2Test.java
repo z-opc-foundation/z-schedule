@@ -195,24 +195,112 @@ public class JobInfoServiceImplH2Test {
     }
 
     @Test
-    public void 不带间隔的更新保留原间隔() throws Exception {
+    public void 不带间隔字段的更新保留原间隔() throws Exception {
         int id = addFixRateJob("FIX_RATE", 60_000L);
 
-        // DTO 的 fixInterval 是 primitive long，"没带这个字段"反序列化后就是 0，两者无法区分。
-        // 所以 0 只能按"没给"解释：否则在页面上改个任务描述就会把 FIX_RATE 的间隔抹成 0，
-        // 引擎从此不再排期，而 trigger_status 仍是 1。
+        // 补丁里根本没有 fix_interval 这个键：装箱后的 DTO 读出来是 null，闸门按"没给"处理。
         JobInfo patch = new JobInfo();
         patch.setId(id);
         patch.setTriggerType("FIX_RATE");
-        patch.setFixInterval(0L);
         ReturnT<String> updated = service.update(patch);
         assertTrue(updated.getMsg(), updated.isSuccess());
         assertEquals(60_000L, number(row(id).get("fix_interval")));
+    }
 
-        patch.setFixInterval(-1L);
-        ReturnT<String> negative = service.update(patch);
-        assertTrue(negative.getMsg(), negative.isSuccess());
+    /**
+     * 调用方**给了**一个非法间隔，就不能再按"没给"糊过去。
+     * <p>
+     * 装箱前这办不到：primitive long 下"没带这个键"和"带了 0"都是 0，于是 {@code > 0} 的闸门顺手
+     * 把非法值也一起吞掉了——页面上填 0 保存，接口报成功，列值却还是 60000，用户以为自己改了。
+     */
+    @Test
+    public void 显式给0或负数的FIX间隔必须被拒绝() throws Exception {
+        int id = addFixRateJob("FIX_RATE", 60_000L);
+
+        JobInfo zero = new JobInfo();
+        zero.setId(id);
+        zero.setTriggerType("FIX_RATE");
+        zero.setFixInterval(0L);
+        ReturnT<String> rejected = service.update(zero);
+        assertFalse("显式 0 的 FIX_RATE 间隔不该被当成\"没给\"", rejected.isSuccess());
+        assertTrue(rejected.getMsg(), rejected.getMsg().contains("间隔"));
         assertEquals(60_000L, number(row(id).get("fix_interval")));
+
+        zero.setFixInterval(-1L);
+        assertFalse("负数间隔同样要拒绝", service.update(zero).isSuccess());
+        assertEquals(60_000L, number(row(id).get("fix_interval")));
+    }
+
+    /** 反向上限：CRON 任务不读 fix_interval，显式给 0 必须真的落 0（装箱不是"永不写")。 */
+    @Test
+    public void CRON任务可以显式清掉遗留的间隔() throws Exception {
+        int id = insertRaw("带着遗留间隔的 cron", GOOD_CRON, "CRON", 30_000L);
+        assertEquals("夹具没写进遗留间隔", 30_000L, number(row(id).get("fix_interval")));
+
+        JobInfo patch = new JobInfo();
+        patch.setId(id);
+        patch.setTriggerType("CRON");
+        patch.setFixInterval(0L);
+        ReturnT<String> updated = service.update(patch);
+        assertTrue("清间隔是合法操作: " + updated.getMsg(), updated.isSuccess());
+        assertEquals(0, number(row(id).get("fix_interval")));
+    }
+
+    // ==================== 更新：partial update 不许抹列 ====================
+
+    /**
+     * "补丁里没带的字段"不能被写成 0。
+     * <p>
+     * DTO 的 executorTimeout / executorFailRetryCount 是 primitive int：JSON 里没这个键时反序列化成 0，
+     * 与"调用方真的要设成 0"无法区分，而 {@code >= 0} 的合并闸门对 0 永远放行——于是任何只改描述的
+     * partial update 都会把超时和重试次数抹成 0（等于悄悄关掉超时保护与失败重试），接口还报成功。
+     */
+    @Test
+    public void 补丁不带超时与重试次数时保留列值() throws Exception {
+        int id = addJob("只改描述", GOOD_CRON);
+        setNumbers(id, 120, 3);
+        Map<String, Object> before = row(id);
+        // 猎物检查：列值确实是服务读得到的非零值，否则"没被抹"这条断言是在守一个空集
+        assertEquals("夹具没写进超时", 120, number(before.get("executor_timeout")));
+        assertEquals("夹具没写进重试次数", 3, number(before.get("executor_fail_retry_count")));
+
+        JobInfo patch = new JobInfo();
+        patch.setId(id);
+        patch.setJobDesc("改个描述");
+        // 刻意不调 setExecutorTimeout / setExecutorFailRetryCount：装箱前它们在这就是 0
+        ReturnT<String> updated = service.update(patch);
+
+        assertTrue(updated.getMsg(), updated.isSuccess());
+        Map<String, Object> after = row(id);
+        assertEquals("补丁给的那一列要真的改到", "改个描述", after.get("job_desc"));
+        assertEquals("partial update 把超时抹成了 0", 120, number(after.get("executor_timeout")));
+        assertEquals("partial update 把重试次数抹成了 0", 3, number(after.get("executor_fail_retry_count")));
+    }
+
+    /** 反向：调用方明确给了 0（"不限制超时"）就必须落 0，别把闸门焊成"这列永远改不动"。 */
+    @Test
+    public void 显式给0的超时与重试次数仍然生效() throws Exception {
+        int id = addJob("清掉超时", GOOD_CRON);
+        setNumbers(id, 120, 3);
+
+        JobInfo patch = new JobInfo();
+        patch.setId(id);
+        patch.setExecutorTimeout(0);
+        patch.setExecutorFailRetryCount(0);
+        ReturnT<String> updated = service.update(patch);
+
+        assertTrue(updated.getMsg(), updated.isSuccess());
+        Map<String, Object> row = row(id);
+        assertEquals("显式的\"不限超时\"该落 0", 0, number(row.get("executor_timeout")));
+        assertEquals("显式的\"不重试\"该落 0", 0, number(row.get("executor_fail_retry_count")));
+
+        patch.setExecutorTimeout(45);
+        patch.setExecutorFailRetryCount(2);
+        ReturnT<String> raised = service.update(patch);
+        assertTrue(raised.getMsg(), raised.isSuccess());
+        Map<String, Object> after = row(id);
+        assertEquals(45, number(after.get("executor_timeout")));
+        assertEquals(2, number(after.get("executor_fail_retry_count")));
     }
 
     @Test
@@ -242,6 +330,75 @@ public class JobInfoServiceImplH2Test {
         fix.setFixInterval(15_000L);
         ReturnT<String> withInterval = service.add(fix);
         assertTrue(withInterval.getMsg(), withInterval.isSuccess());
+    }
+
+    /**
+     * 250 真机实测：提交 {@code triggerType=FIX_DELAY, jobCron=""} 被打回 "Cron表达式不能为空"，
+     * 于是引擎侧的 FIX 能力只能靠塞一个假 cron 才建得出来。cron 该只在引擎真会读它的类型上必填。
+     */
+    @Test
+    public void 新增FIX_RATE任务不该要求cron() throws Exception {
+        JobInfo fix = job("纯 FIX_RATE 无 cron", null);
+        fix.setTriggerType("FIX_RATE");
+        fix.setFixInterval(5_000L);
+        ReturnT<String> added = service.add(fix);
+        assertTrue("FIX_RATE 不读 cron, 却被挡回: " + added.getMsg(), added.isSuccess());
+        int id = Integer.parseInt(added.getContent());
+        assertEquals("FIX_RATE", row(id).get("trigger_type"));
+        Object storedCron = row(id).get("job_cron");
+        assertTrue("cron 该保持空, 实际 " + storedCron,
+                storedCron == null || String.valueOf(storedCron).trim().isEmpty());
+
+        // 同一批里必须有猎物：CRON 类型缺 cron 仍然要拒，否则"放宽"是无条件放掉了整道闸
+        ReturnT<String> cronMissing = service.add(job("缺 cron 的 CRON", null));
+        assertFalse("CRON 类型缺 cron 必须仍然被拒", cronMissing.isSuccess());
+        assertTrue(cronMissing.getMsg(), cronMissing.getMsg().contains("Cron表达式不能为空"));
+    }
+
+    @Test
+    public void 新增FIX_DELAY任务不该要求cron并且可以启动() throws Exception {
+        JobInfo delay = job("纯 FIX_DELAY 空 cron", "");
+        delay.setTriggerType("FIX_DELAY");
+        delay.setFixInterval(3_000L);
+        ReturnT<String> added = service.add(delay);
+        assertTrue("FIX_DELAY 不读 cron: " + added.getMsg(), added.isSuccess());
+        int id = Integer.parseInt(added.getContent());
+        assertEquals("FIX_DELAY", row(id).get("trigger_type"));
+
+        ReturnT<String> started = service.start(id);
+        assertTrue("没有 cron 的 FIX_DELAY 该能启动: " + started.getMsg(), started.isSuccess());
+    }
+
+    @Test
+    public void FIX任务给了非空但非法的cron仍然要拒() throws Exception {
+        JobInfo fix = job("FIX 带脏 cron", "not a cron at all");
+        fix.setTriggerType("FIX_RATE");
+        fix.setFixInterval(5_000L);
+        ReturnT<String> added = service.add(fix);
+        assertFalse("类型不读 cron 不等于可以写进一个坏值", added.isSuccess());
+        assertTrue(added.getMsg(), added.getMsg().contains("Cron表达式格式错误"));
+    }
+
+    @Test
+    public void FIX任务可以清掉遗留的cron() throws Exception {
+        int id = insertRaw("带遗留 cron 的 FIX_RATE", GOOD_CRON, "FIX_RATE", 5_000L);
+
+        JobInfo patch = new JobInfo();
+        patch.setId(id);
+        patch.setJobCron("");
+        ReturnT<String> updated = service.update(patch);
+        assertTrue("FIX_RATE 清掉不读的 cron 是合法收尾: " + updated.getMsg(), updated.isSuccess());
+        Object storedCron = row(id).get("job_cron");
+        assertTrue("清空没落库: " + storedCron,
+                storedCron == null || String.valueOf(storedCron).trim().isEmpty());
+
+        // 猎物：同一条空串若落在 CRON 类型上，闸门必须还在
+        int cronId = addJob("要清空 cron 的 CRON 任务", GOOD_CRON);
+        JobInfo clearCron = new JobInfo();
+        clearCron.setId(cronId);
+        clearCron.setJobCron("");
+        assertFalse("CRON 类型清空 cron 必须仍然被拒", service.update(clearCron).isSuccess());
+        assertEquals(GOOD_CRON, row(cronId).get("job_cron"));
     }
 
     @Test
@@ -454,6 +611,19 @@ public class JobInfoServiceImplH2Test {
             ps.setInt(1, status);
             ps.setInt(2, id);
             assertEquals(1, ps.executeUpdate());
+        }
+    }
+
+    /** 绕开服务把超时/重试摆成非零值：这两列的默认值恰好就是缺陷会写进去的那个 0。 */
+    private void setNumbers(int id, int executorTimeout, int retryCount) throws Exception {
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "UPDATE z_schedule_job_info SET executor_timeout = ?, executor_fail_retry_count = ? "
+                             + "WHERE id = ?")) {
+            ps.setInt(1, executorTimeout);
+            ps.setInt(2, retryCount);
+            ps.setInt(3, id);
+            assertEquals("夹具没找到那一行", 1, ps.executeUpdate());
         }
     }
 
