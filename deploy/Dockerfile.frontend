@@ -1,13 +1,14 @@
 # Z-Schedule 前端 nginx 镜像（Mode 2 分体 / Mode 3 集群用）
-# 输入：_frontend/z-schedule-frontend/dist/（vite build 产物）
-# 输出：nginx 静态服务 + /api 反代到 backend
+# 输入：_frontend/z-schedule-frontend/ 的**源码**（package.json + src/；dist/ 在镜像里产出，不从宿主拷）
+# 输出：nginx 静态服务 + /api 反代到 backend（BACKEND_SERVICE 由 compose/清单注入）
 #
-# 构建前置：
-#   (cd ../_frontend/z-schedule-frontend && npm ci && npm run build)
+# 构建前置：无——npm ci 与 vite build 都在下面的 builder 阶段里跑。
+#   （从前这里写的是"先在宿主跑 npm ci && npm run build"，那是假的：本文件一个字都没 COPY dist/，
+#     照那句做完构建仍会成功，白跑一遍而已。）
 #
-# 构建命令：
-#   docker build -f deploy/Dockerfile.frontend \
-#     -t ghcr.io/yuku123/z-schedule-frontend:1.0.1 ..
+# 构建命令（版本别抄死在这里，走 bin/build-images.sh 或 compose 的 build，
+#   两处都用 ${OCI_REGISTRY}/z-schedule-frontend:${IMAGE_VERSION}，与清单里的 image: 名字逐字一致）：
+#   docker build -f deploy/Dockerfile.frontend -t "$OCI_REGISTRY/z-schedule-frontend:$IMAGE_VERSION" ..
 
 # ---- 构建阶段：基于 node 跑 vite build ----
 FROM node:18-alpine AS builder

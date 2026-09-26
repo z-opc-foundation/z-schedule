@@ -53,7 +53,10 @@ services:
       dockerfile: deploy/Dockerfile.frontend
     restart: unless-stopped
     ports:
-      - "80:80"
+      # 宿主端口可配：钉死 80 的话，80 被占的机器（250 上 :80 由宿主进程占着、没有任何容器 claim 它）
+      # 照 README 起 Mode 2 必失败在 "port is already allocated"，而文档没给任何改法。
+      # 默认仍是 80 ⇒ 干净机器上的文档路径不变；冲突时在 env/.env 写 HTTP_PORT=18080 即可。
+      - "${HTTP_PORT:-80}:80"
     environment:
       # nginx.conf.template 里的 ${BACKEND_SERVICE} 通过这里注入
       BACKEND_SERVICE: z-schedule-backend

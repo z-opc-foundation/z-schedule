@@ -16,11 +16,12 @@
 #      "验证反代：curl http://localhost/api/actuator/health" 必 404。
 #   5) compose 三种模式与 Makefile 都写 ${DB_HOST:-mysql} / DB_HOST ?= mysql，而**没有任何一种模式
 #      自带叫 mysql 的服务**（Mode 1 只有一个容器）；同时 compose 只自动读 deploy/.env，本仓模板在
-#      deploy/env/ 下 ⇒ 照 README 走的人 DB_* 根本读不到。现在 DB_HOST 没有默认值，缺了当场拒（B13）。
+#      deploy/env/ 下 ⇒ 照 README 走的人 DB_* 根本读不到。现在五个 DB_* 键都没有默认值，缺了当场拒（B13；
+#      守卫补成整套是在 #31 那一格，形状与逐变量双向覆盖见 p25.sh 的 P2d/P18）。
 #
 # 臂 A 不碰 docker，只问"清单自己前后一致吗"；臂 B 在 250 上用 docker 跑真容器，并带一条
 # **负对照**：把改前那套 env（只喂 Spring 池 + 幻影 profile）原样喂进去，引擎池必须当场坏给用户看（B12）；B13 再拿 compose
-# 的插值守卫做双向（缺 DB_HOST 必须非 0，给了必须两个池同源）。
+# 的插值守卫做双向（五个键全不给必须非 0 且报 required variable DB_*，给齐必须两个池同源）。
 #
 # ⚠ 本档不是在真集群里 apply：250 的 k3s 建不出任何 pod 沙箱（pause 镜像拉不到，见 README §11），
 #   所以臂 B 是"把清单渲染出来的 env 与探针路径原样交给 docker run"，集群侧的 kubelet 行为未验。
@@ -504,16 +505,21 @@ if [ -z "$COMPOSE" ]; then
   echo "  [SKIP] B13 这台机器两个 compose CLI 都没有 ⇒ 这一臂未测（不算通过）"
 else
   : > "$WORK/empty.env"
-  # env -u 是必需的：A3 里 export 过 DB_HOST=127.0.0.1，不剥掉守卫永远不会响，正向侧也就测不出东西
-  NOUT=$(env -u DB_HOST -u DB_PORT -u DB_NAME "$COMPOSE" --env-file "$WORK/empty.env" \
-           -f "$DEPLOY/docker-compose.yml" config 2>&1)
+  # env -u 是必需的：A3 里 export 过 DB_HOST=127.0.0.1，不剥掉守卫永远不会响，正向侧也就测不出东西。
+  # 五个键一起剥：#31 那一格把守卫补成套（PORT/NAME/USER 也带 :?、PASSWORD 带 ?），只剥 DB_HOST 的
+  # 这一臂就从"证明守卫会响"变成了"跟着 compose 的 map 顺序赌运气"。
+  NOUT=$(env -u DB_HOST -u DB_PORT -u DB_NAME -u DB_USER -u DB_PASSWORD "$COMPOSE" \
+           --env-file "$WORK/empty.env" -f "$DEPLOY/docker-compose.yml" config 2>&1)
   NRC=$?
-  if [ "$NRC" != "0" ] && echo "$NOUT" | grep -q "DB_HOST"; then
-    ok "B13 守卫会响：缺 DB_HOST 时 compose rc=$NRC，消息点名 DB_HOST"
+  NHIT=$(echo "$NOUT" | grep -oE 'required variable DB_[A-Z_]+ is missing' | head -1)
+  if [ "$NRC" != "0" ] && [ -n "$NHIT" ]; then
+    ok "B13 守卫会响：五个 DB_* 全不给时 compose rc=$NRC，消息 '$NHIT'（先撞哪个键由 compose 的 map 顺序定，逐变量覆盖见 p25.sh 的 P18）"
   else
     bad "B13 守卫没响：rc=$NRC 输出=$(echo "$NOUT" | head -2 | tr '\n' ' ')"
   fi
-  POUT=$(env -u DB_PASSWORD DB_HOST=127.0.0.1 DB_PORT=33060 DB_NAME=zschedule_p24 DB_USER=root \
+  # 正向侧要给满五个键：DB_PASSWORD 现在带 ${DB_PASSWORD?}（整行没写就是漏配），
+  # 从前那一版用 env -u DB_PASSWORD 恰好踩在这条上——那是量具没跟着修复走，不是仓库坏了。
+  POUT=$(DB_HOST=127.0.0.1 DB_PORT=33060 DB_NAME=zschedule_p24 DB_USER=root DB_PASSWORD=p24-render-only-not-a-secret \
            "$COMPOSE" --env-file "$WORK/empty.env" -f "$DEPLOY/docker-compose.yml" config 2>/dev/null)
   PRC=$?
   ENG=$(echo "$POUT" | grep -c "Z_BASE_DB_SCHEDULE_HOST: 127.0.0.1" || true)

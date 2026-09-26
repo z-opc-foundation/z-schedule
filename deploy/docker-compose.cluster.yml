@@ -51,7 +51,8 @@ services:
       dockerfile: deploy/Dockerfile.frontend
     restart: unless-stopped
     ports:
-      - "80:80"
+      # 宿主端口可配（同 docker-compose.split.yml 的注释：250 上 :80 被宿主进程占着，钉死就起不来）
+      - "${HTTP_PORT:-80}:80"
     environment:
       # nginx 反代到 backend service（docker compose 自动 DNS）
       BACKEND_SERVICE: z-schedule-backend

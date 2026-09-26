@@ -36,8 +36,11 @@ deploy/
 | 模式 | 启动命令 | 容器数 | 访问地址 | 适用场景 |
 |---|---|---|---|---|
 | Mode 1 合体 | `make dev` | 1 | http://localhost:18086/meta | 试用 / PoC / 个人开发 |
-| Mode 2 分体 | `make split` | 2 | http://localhost | 前端频繁迭代 / CDN |
-| Mode 3 集群 | `make cluster N=3` | 1+N | http://localhost | 生产 / 多副本高可用 |
+| Mode 2 分体 | `make split` | 2 | http://localhost（前端端口 = `HTTP_PORT`，默认 80） | 前端频繁迭代 / CDN |
+| Mode 3 集群 | `make cluster N=3` | 1+N | http://localhost（同上） | 生产 / 多副本高可用 |
+
+Mode 2/3 的前端把宿主 **80** 映射到容器内 80；宿主 80 已被占的机器（演练机 250 实测：`:80` 由宿主进程占着，
+没有任何容器 claim 它）在 `env/.env` 里写一行 `HTTP_PORT=18080` 就能起，容器内仍是 80。
 
 三种模式**都需要一个可达的 MySQL**，且必须先把 `DB_*` 五个键给全（见"数据库"一节）。
 `make dev` 不会自带数据库：Mode 1 只有一个容器，库得在外面。
