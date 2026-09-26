@@ -83,6 +83,7 @@ public class LoginSessionStore {
                 user.getId() == null ? 0 : user.getId(),
                 user.getUsername(),
                 user.getRole(),
+                user.getPermission(),
                 now + ttlMillis);
         synchronized (sessions) {
             sessions.put(token, session);
