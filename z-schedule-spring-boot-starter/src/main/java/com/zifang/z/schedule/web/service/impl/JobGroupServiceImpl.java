@@ -60,6 +60,15 @@ public class JobGroupServiceImpl implements JobGroupService {
     @Resource
     private JobRegistryMapper jobRegistryMapper;
 
+    /**
+     * 按策略从分组的执行器地址里选一个。
+     * <p>
+     * <b>本版本没有任何生产调用方</b>：派发全部发生在 {@code JobTriggerServiceImpl} 里，
+     * 它只从当前 JVM 的 {@code ApplicationContext} 取 bean，从不按地址出站调用
+     * （全仓无 HTTP 客户端），所以任务上的 {@code executorRouteStrategy} 不影响"谁执行"。
+     * 地址列表的入库链路是通的（{@code /executor/beat} → {@link #register} → {@code addressList}），
+     * 缺的是出站那一半。改动这里之前先读 {@code _doc/003_script/e2e/README.md} 的"路由策略"一节。
+     */
     public static String route(String strategy, List<String> addresses, int jobId) {
         if (addresses == null || addresses.isEmpty()) {
             return null;

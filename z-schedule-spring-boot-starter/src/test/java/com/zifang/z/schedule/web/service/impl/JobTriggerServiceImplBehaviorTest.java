@@ -1,6 +1,7 @@
 package com.zifang.z.schedule.web.service.impl;
 
 import com.zifang.z.schedule.core.config.ScheduleProperties;
+import com.zifang.z.schedule.core.enums.ExecutorRouteStrategyEnum;
 import com.zifang.z.schedule.core.enums.TriggerCodeEnum;
 import com.zifang.z.schedule.core.enums.TriggerTypeEnum;
 import com.zifang.z.schedule.core.model.JobInfo;
@@ -156,6 +157,24 @@ public class JobTriggerServiceImplBehaviorTest {
         assertNotEquals("两个合法形状都没有 ⇒ 不能算成功", ReturnT.SUCCESS_CODE, log.getHandleCode());
         assertTrue("要说清两个合法形状，而不是抛 NoSuchMethodException 原文: " + log.getHandleMsg(),
                 log.getHandleMsg().contains("execute(String)") && log.getHandleMsg().contains("TriggerParam"));
+    }
+
+    // ---- 路由策略：本版本不参与派发（"装饰"这件事钉成规格，理由见 e2e README 的"路由策略"一节）----
+
+    @Test
+    public void 分片广播也只在本机执行一次且分片信息为唯一一片() {
+        InterfaceHandler.calls.set(0);
+        JobInfo job = job(30, "interfaceHandler", "p-30");
+        job.setExecutorRouteStrategy(ExecutorRouteStrategyEnum.SHARDING_BROADCAST.getCode());
+
+        service.triggerJob(job);
+
+        assertEquals("UI 上的“分片广播”不得变成同一 JVM 内跑 N 遍", 1, InterfaceHandler.calls.get());
+        assertEquals(ReturnT.SUCCESS_CODE, logService.saved.get(0).getHandleCode());
+        TriggerParam seen = InterfaceHandler.lastParam;
+        assertEquals("本机派发 ⇒ 这次执行就是唯一那一片；留 0 会让按分片写的 handler 一行都不做",
+                1, seen.getBroadcastTotal());
+        assertEquals(0, seen.getBroadcastIndex());
     }
 
     // ---- 失败与重试 ----

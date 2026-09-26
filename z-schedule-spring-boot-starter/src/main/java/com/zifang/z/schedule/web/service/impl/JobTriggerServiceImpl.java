@@ -370,6 +370,10 @@ public class JobTriggerServiceImpl implements JobTriggerService {
         param.setExecutorFailRetryCount(orZero(jobInfo.getExecutorFailRetryCount()));
         param.setLogId(logId);
         param.setLogDateTime(jobInfo.getTriggerLastTime());
+        // 派发只在本 JVM 内发生 ⇒ 这次执行就是"唯一那一片"。留 0/0 会让按分片写的
+        // handler 一行都不做（它的循环通常是 for (i = index; i < total; i += total)）。
+        param.setBroadcastIndex(0);
+        param.setBroadcastTotal(1);
         return param;
     }
 

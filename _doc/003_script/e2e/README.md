@@ -77,6 +77,31 @@ javap -v /tmp/x.class | grep -c 'PUBLIC_PATHS'      # 例：#12 的鉴权面收�
 javap -c  /tmp/x.class | grep -c 'stepDown'         # 例：#18 的关停释放租约
 ```
 
+### 1″. 常驻实例：挂在 250 上的那个进程
+
+口径是"服务常驻 250"。常驻意味着**别人会拿它当"能用"的证据**，所以它的身份要写死在这里：
+
+| 项 | 值（09-26 19:58 实测） | 怎么复现这个读数 |
+|---|---|---|
+| jar | `~/z-schedule-e2e/z-schedule-admin-svc-0b9ac0f-exec.jar`，md5 `13884374c607a01b769647e1954b5be4` | `md5sum z-schedule-admin-svc-*.jar`（**文件名不算证据**，见上一节） |
+| 端口 | `18098`（**故意不用 18086**：那是 `p16/p20` 的性能台架端口，撞上就会量到一个"我没控制、不知道配置"的实例——坑 14） | `ss -ltnp \| grep 18098` |
+| 存活判据 | `GET /` → 200；`GET /jobinfo/list` → 200 | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18098/jobinfo/list` |
+| 真跑一次 | `./svc_smoke.sh`（播种 → 数 `handle_code=200` → 停用） | 见第 3 节 |
+
+```bash
+# 起（口令只走环境变量，不进 argv；setsid 让它脱离 ssh 会话，否则 TaskStop/断连会带走它）
+ssh 250 'cd ~/z-schedule-e2e && setsid env JAR=z-schedule-admin-svc-<sha>-exec.jar PORT=18098 \
+         nohup ./run.sh >logs/service_18098.out 2>&1 < /dev/null &'
+```
+
+**为什么"端口 200"不够**：常驻实例平时 ring 里 0 个任务，日志每 15 s 只打一条
+`Engine loaded 0 jobs into ring`——那是 reconcile 在跑，不是"能执行任务"。
+`svc_smoke.sh` 就是把"活着"定义成**一次真实执行把结论写回库**，并且走 `0b9ac0f` 修好的那条
+`IJobHandler.execute(TriggerParam)` 派发支（此前引擎只找 `execute(String)`，接口版 handler 永远走不到，
+而演示应用里连一个 handler bean 都没有 ⇒ 整条"派发 → 执行 → 结论"链在真机上从没被观察过）。
+它默认跑完把演示任务**停用**而不是删掉：1 Hz 常驻写负载 ≈ 每天 52 万行日志，证明过一次就够，
+但留行还能回答"上次冒烟是什么时候"。
+
 ## 2. 凭据纪律
 
 * 真值只在 `$E2E_HOME/mysql.env`（**600，仓库外，永不提交**）。`bootstrap_mysql.sh` 缺文件时用
@@ -111,6 +136,7 @@ javap -c  /tmp/x.class | grep -c 'stepDown'         # 例：#18 的关停释放�
 | `p19.sh` | **同一时刻有几条连接在忙**（忙=`COMMAND='Query'`）＋ STATE 直方图；自带 `preytest`：埋 6 条并发 `SELECT SLEEP(4)`，尺数不到 6 就 FATAL | 把"连接数"这个量从猜测变成读数 |
 | `p20.sh` | **固定需求只改池上限**（`max-active` 20/40/80），同时量吞吐与忙连接 ⇒ 池是不是那堵墙 | 天花板归属（见第 4 节，答案是"是"） |
 | `p21.sh` | **一次执行的 2 条语句里钱花在哪**：同一批 id 上 narrow(4 列) / wide(12 列) 两臂判"形状"，pair2(2 次提交) / pair1(1 次提交) 两臂判"次数" | ③ 的前提：收窄 SET 到底值不值（答案：不值，见 §4.4） |
+| `svc_smoke.sh` | **常驻实例现在还活着吗**：播种 3 个 2 s 任务 → 数 `handle_code=200` → 用 handler 自己那行日志做阳性对照 → 停用 | 0b9ac0f 的 `IJobHandler` 派发支要在真机上被观察到 |
 
 ## 4. 天花板到底压在哪一层
 
@@ -274,4 +300,67 @@ docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" z-schedule-e2e-mysql mysql -h127
     而不是编一个数出来。
 16. **`mvn -q test` 把 surefire 的 "Tests run" 汇总一起静音了**：日志 9,671 行里 0 条汇总，退出码 0
     只说明没挂，不说明跑了多少例。数测试一律从 `*/surefire-reports/*.txt` 聚合（本次提交树
-    `8b21da3`：22 份报告 / **250 例 / 0 失败 / 0 错 / 0 跳过**）。
+    `8b21da3`：22 份报告 / **250 例 / 0 失败 / 0 错 / 0 跳过**。这条数字会过期，以第 8 节为准）。
+17. **库里的时间戳比墙钟慢 8 小时**：`run.sh` 的 JDBC URL 带 `serverTimezone=UTC`，于是
+    `trigger_time` 落的是 UTC 而 250 的 `date` 是 CST。19:51 那次冒烟在库里读成 `11:51:31`。
+    ⇒ 对时一律换算或只比**差值**；拿"库里最近一行"直接回答"上次跑是什么时候"会错 8 小时。
+18. **独立 admin 的端点在根路径、是 `/jobinfo/*` 这种风格，不是 `/api/schedule/*`**：
+    照 z-opc 的模块前缀约定猜路径会拿到 404，而 404 很容易被读成"服务没起"。
+    实测（18098）：`/`=200、`/jobinfo/list`=200、`/api/schedule/job/list`=404、`/schedule/`=404。
+    宿主应用里才带前缀（`z-opc` 用 `--server.servlet.context-path=/meta`）。
+    ⇒ 判存活要拿 200 且**形状对**的响应（坑见 `feedback-service-probe-status-code`）。
+
+## 7. 路由策略：广告与兑现的差（④ 的收口）
+
+界面上"路由策略"给了 6 个选项（轮询 / 随机 / 一致性哈希 / LRU / 故障转移 / 分片广播），
+后端 `z-schedule-core` 确实有 10 个 `ExecutorRouter` 实现。问题是**派发路径一次都没问过它们**。
+
+取证（在本仓根目录跑，两条都是 0 命中才算成立）：
+
+```bash
+# (a) 全仓有没有人调用选节点的那个静态入口（含测试）
+grep -rn "JobGroupServiceImpl\.route" . --include=\*.java | grep -c .        # 实测 0
+# (b) 有没有任何"出站"能力（admin → 注册上来的执行器地址）
+grep -rn "RestTemplate\|HttpClient\|openConnection\|HttpURLConnection" \
+     z-schedule-core/src/main/java z-schedule-spring-boot-starter/src/main/java \
+     z-schedule-admin/src/main/java | grep -c .                              # 实测 0
+```
+
+两条都得 0 才算成立（`| grep -c .` 而不是 `| head`：后者会把退出码换成 `head` 的 0，看不出有没有命中）。
+实测读数（09-26 提交树）：`JobGroupServiceImpl.route(...)` 在全仓（含 `src/test`）**没有任何调用方**
+——连按名字引用它的测试都没有；10 个 router 的 `route(List,int)` 只被 `JobGroupServiceImpl:71`
+那一行转发和 `RouterTest` 调过。
+⇒ **任务上的 `executor_route_strategy` 只是被存下来、被界面显示出来，不参与"谁执行"**：
+`JobTriggerServiceImpl` 只从当前 JVM 的 `ApplicationContext` 取 bean。
+
+已经通的那一半是**入站**：外部应用 POST `/executor/beat` → `register()` 写
+`z_schedule_job_registry` 并把 `addressList` 聚回分组（`/jobgroup/registryList` 能看到节点）。
+缺的是出站那一半——按地址把 `TriggerParam` POST 给被选中的节点。这条链一补，
+`/executor/run`（记一行"已下发"并回 `logId`）+ `/executor/callback`（回写 `handle_*` 三列）
+这两个现成的端点就是它的协议，所以缺口不是"不知道怎么做"，而是**没做**：
+需要一个额外的决定（谁来鉴权、注册上来的地址能不能被内网任意 POST），因此不在性能这条线上顺手补。
+
+本次收口做了三件事，让"广告"与"兑现"不再互相圆场：
+
+1. **兑现侧钉住语义**：`JobTriggerServiceImplBehaviorTest.分片广播也只在本机执行一次且分片信息为唯一一片`
+   —— 配 `SHARDING_BROADCAST` 的任务只执行 1 次，且 `TriggerParam.broadcastTotal=1/broadcastIndex=0`。
+   `broadcastTotal` 此前是默认值 **0**，任何按分片写的 handler（`for (i=index; i<total; i+=total)`）
+   会**一行都不做**；现在是"你是唯一那一片"这个真话。
+   注入实测：删掉 `param.setBroadcastTotal(1)` ⇒ 该例红（`expected:<1> but was:<0>`），还原后 md5 逐字节一致。
+2. **代码侧说清"没人调"**：`JobGroupServiceImpl.route()` 上加了说明（零生产调用方、缺出站那一半、
+   改之前先读本节）。10 个 router 是已发布 API（1.0.4 在 Central），**不删**。
+3. **界面侧不再暗示**：`z-opc` 的 `schedule/pages/JobList` 里该表单项加了 `extra`
+   —— "当前版本任务固定在本 JVM 内执行，此选项不改变执行节点（多执行器远程派发尚未实现）"。
+   真要实现远程派发，需要点头的是这三处一起改（出站调用 + `broadcastTotal` 按节点数算 + 界面去掉那句话）。
+
+## 8. 测试基线（每次改完重跑，别引用历史值）
+
+```bash
+cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
+# 计数只吃报告文件，不吃 mvn 的 stdout（坑 16）；输入为空必须 FATAL
+```
+
+09-26 提交树（`0b9ac0f` + 本轮 ②③④ 改动）实测：**23 份报告 / 259 例 / 0 失败 / 0 错 / 0 跳过**，
+`BUILD SUCCESS`。其中 `JobTriggerServiceImplBehaviorTest` 15 例（含钉住分片广播语义的那 1 例）、
+`ZSchedulePoolDefaultTest` 4 例（② 的池默认）。
+先 `rm -rf surefire-reports` 再数：不清会把你**本轮没跑到的**类的旧报告一起加进来（历史上报出过 +1 类）。
