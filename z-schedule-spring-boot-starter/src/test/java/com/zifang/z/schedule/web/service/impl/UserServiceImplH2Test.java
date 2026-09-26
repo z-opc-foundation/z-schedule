@@ -224,6 +224,30 @@ public class UserServiceImplH2Test {
     }
 
     @Test
+    public void 改分组会把该用户的旧会话踢下线() throws Exception {
+        int id = Integer.parseInt(service.add(user("nina", "123456")).getContent());
+        String token = service.login("nina", "123456").getContent();
+        assertNotNull(token);
+
+        User scoped = new User();
+        scoped.setId(id);
+        scoped.setPermission("3");
+        ReturnT<String> updated = service.update(scoped);
+        assertTrue(updated.getMsg(), updated.isSuccess());
+        assertNull("收口一个账号不能等他 30 min 自己过期：permission 现在和 role 一样是会话里带着的身份",
+                sessionStore.resolve(token));
+
+        // 阳性对照：把同一列改成它**已经有**的值不算变更，不该把人踢下线
+        String fresh = service.login("nina", "123456").getContent();
+        User same = new User();
+        same.setId(id);
+        same.setPermission("3");
+        assertTrue(service.update(same).isSuccess());
+        assertNotNull("没有变更却作废会话，等于每次点保存都把人踢一次", sessionStore.resolve(fresh));
+        assertEquals("3", sessionStore.resolve(fresh).getPermission());
+    }
+
+    @Test
     public void 删账号会把他的会话一并撤销() throws Exception {
         int id = Integer.parseInt(service.add(user("liam", "123456")).getContent());
         String token = service.login("liam", "123456").getContent();

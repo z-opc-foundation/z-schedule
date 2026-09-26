@@ -123,6 +123,10 @@ public class UserServiceImpl implements UserService {
             exist.setUsername(user.getUsername());
         }
         boolean roleChanged = user.getRole() != null && !user.getRole().equals(exist.getRole());
+        // permission 现在也参与判定（/jobinfo/* 按组收口），所以它和 role 一样是"会话里带着的身份"：
+        // 只作废 role 变更的话，收口一个普通账号要等他 30 min 自己过期，那段时间他仍能碰原来那些组
+        boolean permissionChanged = user.getPermission() != null
+                && !user.getPermission().equals(exist.getPermission());
         if (user.getRole() != null) exist.setRole(user.getRole());
         if (user.getPermission() != null) exist.setPermission(user.getPermission());
         // 如果传入了密码，做 MD5 哈希后更新
@@ -132,8 +136,8 @@ public class UserServiceImpl implements UserService {
         exist.setUpdateTime(new Date());
 
         userMapper.updateById(exist);
-        if (roleChanged) {
-            // 已经在跑的会话还带着旧角色。改完权限不撤销会话，等于"降权要等它自己过期"。
+        if (roleChanged || permissionChanged) {
+            // 已经在跑的会话还带着旧角色/旧分组。改完权限不撤销会话，等于"降权要等它自己过期"。
             sessionStore.invalidateUser(user.getId());
         }
         logger.info("User updated, userId={}", user.getId());
