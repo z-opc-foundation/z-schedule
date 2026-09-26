@@ -1,7 +1,7 @@
 # Z-Schedule 前端 nginx 配置模板（docker-entrypoint 启动时由 envsubst 渲染）
 #
 # 关键反代：
-#   /api/* → http://${BACKEND_SERVICE}:18086/meta/api/*
+#   /api/* → http://${BACKEND_SERVICE}:18086/meta/*   （剥掉 /api，落到后端 context-path 根）
 #
 # 使用 nginx 官方 Alpine 镜像 + envsubst-on-templates.sh 标准模式。
 # BACKEND_SERVICE 通过 docker compose / k8s env 注入。
@@ -23,9 +23,11 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    # 后端 API 反代（去掉 /api 前缀，后端实际挂在 /meta 下，所以再加 /meta/api）
+    # 后端 API 反代：剥掉 /api 前缀转到后端 context-path（/meta）根下。
+    # 后端控制器没有一个挂在 /api/** 上（/jobinfo /joblog /user /jobgroup /executor /glue），
+    # 曾经这里转成 /meta/api/，任何调用都会 404。
     location /api/ {
-        proxy_pass         http://${BACKEND_SERVICE}:18086/meta/api/;
+        proxy_pass         http://${BACKEND_SERVICE}:18086/meta/;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;

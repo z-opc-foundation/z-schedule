@@ -8,22 +8,33 @@
 services:
   z-schedule-admin:
     container_name: z-schedule-admin
-    image: ghcr.io/yuku123/z-schedule-admin:1.0.1
+    image: "${OCI_REGISTRY:-ghcr.io/yuku123}/z-schedule-admin:${IMAGE_VERSION:-1.0.4}"
     build:
       context: ..
       dockerfile: deploy/Dockerfile.backend
       args:
-        JAR_FILE: z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar
+        JAR_FILE: "${JAR_FILE:-z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar}"
     restart: unless-stopped
     ports:
       - "18086:18086"
     environment:
-      # 数据库凭证（明文敏感，仅本地试用用。生产用 docker secret / k8s Secret）
-      SPRING_DATASOURCE_URL: jdbc:h2:mem:zschedule;DB_CLOSE_DELAY=-1
-      SPRING_DATASOURCE_USERNAME: sa
-      SPRING_DATASOURCE_PASSWORD: ""
-      # JVM
-      JAVA_OPTS: "-Xms512m -Xmx1g"
+      # 两个池都要喂。调度引擎跑在 starter 的 dataSourceSchedule 上，键在 z.base.db.schedule.*；
+      # 只给 spring.datasource.* 的话引擎池会退回内置默认（localhost:3306 / root / 空密码 / 空库名）。
+      # 库坐标从 .env 的 DB_* 来（见 env/.env.example）。
+      # DB_HOST 故意没有默认值：填不出来就当场报错，
+      # 别起一个"端口不 bind、日志无限刷、又不退出"的容器（机理见 p24.sh 的 B12）。
+      Z_BASE_DB_SCHEDULE_HOST: "${DB_HOST:?缺 DB_HOST：三种模式的容器都不自带数据库，见 env/.env.example}"
+      Z_BASE_DB_SCHEDULE_PORT: "${DB_PORT:-3306}"
+      Z_BASE_DB_SCHEDULE_DATABASE: "${DB_NAME:-zschedule}"
+      Z_BASE_DB_SCHEDULE_USERNAME: "${DB_USER:-root}"
+      Z_BASE_DB_SCHEDULE_PASSWORD: "${DB_PASSWORD:-}"
+      Z_SCHEDULE_DB_MAX_ACTIVE: "${DB_POOL_MAX_ACTIVE:-40}"
+      SPRING_DATASOURCE_URL: "jdbc:mysql://${DB_HOST:?缺 DB_HOST：三种模式的容器都不自带数据库，见 env/.env.example}:${DB_PORT:-3306}/${DB_NAME:-zschedule}?serverTimezone=UTC&useUnicode=true&characterEncoding=utf-8"
+      SPRING_DATASOURCE_USERNAME: "${DB_USER:-root}"
+      SPRING_DATASOURCE_PASSWORD: "${DB_PASSWORD:-}"
+      # 下面的 healthcheck 写死了 /meta 前缀，context-path 就在这钉住（application.yml 不设，默认是 /）
+      SERVER_SERVLET_CONTEXT_PATH: "/meta"
+      JAVA_OPTS: "${JAVA_OPTS:--Xms512m -Xmx1g}"
     volumes: []   # 可选挂载（如 H2 数据持久化），需要时启用
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:18086/meta/actuator/health"]

@@ -837,3 +837,106 @@ health 会把数据源信息吐给匿名访问者"。前半是错的（那段配
 4. 常驻那台是演示模式（没配 `accessToken`），它的 `/actuator/health` 因此对匿名可探——这是 k8s 探测的
    既成约束（探测不带 token），也正是 `show-details` 必须留在 `when-authorized` 的原因。
    要连状态码都不给匿名，得为探针口单独定策略，本轮没动它。
+
+## 11. 部署面彩排：`deploy/` 那套清单到底起不起得来（#30，`p24.sh`）
+
+§10.6 的第 1、2 条当时记的是"下一格"。这一格把它做完了，结论是**那一半也不能算"知道"**：
+`deploy/` 下的入口脚本、清单、compose、nginx 模板、README 一起数下来有**五条能让部署直接失败**的缺陷，
+全部在提交树里躺了两周到一个月，而且**每一条都能被一条不起集群的机械判据抓到**——之前没人写而已。
+尺在 `_doc/003_script/e2e/p24.sh`（臂 A 静态 16 项 + 臂 B 真容器 23 项，跑法见档头）。
+250 上 09-27 02:05:42 的收口读数（时刻取自日志 mtime，`stat -c %y`，不是推的）：
+**`总判：PASS=39 FAIL=0`**，臂 A 那 16 项在这遍里于 250 同跑也全绿；此前臂 A 在 macOS 单跑也是 16/0，
+静态那半不挑机器。
+
+### 11.1 五条提交树里的缺陷（都不在"跑着的那个进程"的路径上，所以从没现形）
+
+| # | 缺陷 | 后果 | 怎么被抓到的 |
+|---|---|---|---|
+| 1 | `deploy/bin/*.sh` 五个入口脚本里的变量全写成 `"$ VAR"`（`$` 与名字之间多一个空格） | `bash -n` 不报错（rc=0），但展开成字面量 `$ VAR`：`k8s-apply.sh` 拿不到渲染目录、`build-images.sh` 的 `ROOT` 指错一级、`start-mode*.sh` 的 `cd` 落到父目录 ⇒ 三个"一键"入口**从未跑通过**。最早的那次提交是 `c8e3a8f`（09-17） | A1：扫 `deploy/bin/*.sh`，且**同一条尺先在人造猎物上命中**才许它报绿 |
+| 2 | 后端清单只喂 `SPRING_DATASOURCE_PASSWORD` + `SPRING_PROFILES_ACTIVE: "k8s"`（而仓库里没有 `application-k8s.yml`） | 引擎池（starter 的 `dataSourceSchedule`，键在 `z.base.db.schedule.*`）退回内置默认 `jdbc:mysql://localhost:3306/`、**库名为空**；照这份清单起的 pod 连的是一个不存在的库 | A7/A8 判清单，B12 用**改前那份 env** 真起一个容器，让它当场坏 |
+| 3 | 清单 `image:` 多写一段命名空间（`ghcr.io/yuku123/yuku123/z-schedule-admin`） | pod 拉的是**从没构建过的名字**，`ImagePullBackOff` | A6：拿 `build-images.sh` 自己那串 `-t` 与清单里的 image **逐字比名字** |
+| 4 | `nginx.conf.template` 把 `/api/` 反代到 `/meta/api/` | 后端没有任何 `/api/**` 控制器 ⇒ runbook 里"验证反代：`curl http://localhost/api/actuator/health`"必 404，而这条是**验收步骤** | A10 判 proxy_pass 的落点，A10b 反向对照：控制器确实挂在 `@RequestMapping("/jobinfo")` 上，没有 `/api` 前缀可转 |
+| 5 | 三种模式的 compose 与 `Makefile` 都写 `${DB_HOST:-mysql}` / `DB_HOST ?= mysql`，而**没有任何一种模式自带叫 `mysql` 的服务**；同时 compose 只自动读 `deploy/.env`，本仓模板在 `deploy/env/` 下 | 照 README 敲 `make dev` 的人：`DB_*` 一条都读不到，`DB_HOST` 静默落到一个不存在的主机名 ⇒ 起得来容器、连不上库，坏相正好是 B12 取证到的那一种（端口不 bind、不退出、日志无限刷） | B13 双向：缺 `DB_HOST` 时 compose `config` 必须 rc≠0 且消息点名它；给了则 rc=0 且**两个池**从同一份 `DB_*` 渲染出来（A6b 另外钉住默认值在四处手抄必须逐字相等） |
+
+A6b 另外钉住一件事：`IMAGE_VERSION` / `OCI_REGISTRY` 的默认值在**四处**手抄
+（`build-images.sh`、`k8s-apply.sh`、`Makefile`、`env/.env.example`），抬版本时最容易漏的就是后两处，
+所以四处必须逐字相等。`deploy/README.md` 里原先写的 `1.0.1` 与"`{{XXX}}` 占位符（envsubst 风格）"
+都是假话——清单用的是 `${XXX}`，而照那段手抄命令渲染出来的文件必然带着没替换的 `${DB_NAME}`，
+已按 `k8s-apply.sh` 的真实变量名单改写。
+
+### 11.2 彩排为什么不是 `kubectl apply`
+
+250 上有 k3s，但**建不出任何 pod 沙箱**：pause 镜像（`mirrored-pause:3.6`）拉不到，本地 registry 里也没有，
+任何 Deployment 都停在 `ContainerCreating`。所以臂 B 是"**把清单渲染出来的 env 与探针路径原样交给
+`docker run`**"：ConfigMap 由 B5 机械转成 `--env-file`（不是手抄），探针路径由 B6 从渲染后的
+`livenessProbe` / `readinessProbe` 里取。**集群侧 kubelet 的行为（探针失败N次重启、Secret 挂载、Ingress）这一格没验**，
+别把 B 臂的绿读成"这套清单能上集群"。
+
+### 11.3 臂 B 读到的东西（250，MySQL 8 在 `127.0.0.1:33060`，构件 `7ea14eb`）
+
+一条链走完：**建镜像 → 字节对账 → 建独立库 → 照清单起 → 探针 → 走产品自己的 HTTP 建任务并启用 → 数一次真实执行**。
+
+- B2 镜像内 `/app/app.jar` 的 sha256 与宿主机构件相同（不看文件名）；B3 从**发布件里**取
+  `BOOT-INF/classes/application.yml` 数 `probes`，1 命中 ⇒ §10 那块键位修复确实在镜像里。
+- B4 建 `zschedule_p24` 独立库，**必须先证明 DDL 不含 DROP**（只数非注释行——那份脚本自己写着
+  "不含任何 DROP"，`grep -c DROP` 会命中它自己的注释）；用独立库的原因是
+  `z_schedule_job_leader` 的租约是**按库**的，共用 `zschedule_e2e` 时容器永远抢不到 Leader，
+  也就永远不派发——彩排会变成"两个进程互相以为对方在干活"。
+- B6/B7/B8：清单声明的两条探针路径都答 200，`/actuator/metrics` 仍 404（暴露面白名单有牙）。
+- B9：`/meta/jobgroup/list` 回显 B4 插进去的分组行 ⇒ 引擎池连的确实是 `zschedule_p24`，不是"看着像连上了"。
+- B10 → B11 这一段是这一格最值钱的部分，它把"部署出来的东西**能不能真执行一次任务**"变成读数：
+  HTTP 建出 FIX_RATE 任务（#16 修好的那条：不带 cron 也建得出来）→ **库里 `trigger_status=0`**
+  （B10b，产品语义 `add()` 硬置 0）→ HTTP `start` → **库里 `trigger_status=1`**（B10d）→
+  容器日志 `[Leader] jobId=1 已挂入时间轮`（B11b）→ 库里出现 `handle_code=200`（B11）→
+  下一轮 reconcile 的 `Engine loaded 1 jobs` 与 `trigger_status=1` 的行数**相等**（B11d，防的就是 #10 那一族
+  "reconcile 把已排期任务冲掉"→ 容器日志里 `demoHandler 执行 jobId`（B11c，handler 侧证；这一行是"200 到底是不是这个进程产的"唯一直接证据，少了它，库里那行 `handle_code=200` 可以是被谁写进去的）。
+  B11c 的判据是"基线行之后 ≥1 行"，**不是**等于某个定值——两跑实测 7 行与 8 行（窗口固定在启用之后，
+  多的那一行落在 break 之前还是之后随时序漂），所以别把任何一个具体行数当证据抄。
+  `z_schedule_job_registry` 是 0 行——那是**远程 executor 的心跳表**，进程内派发不读它，0 是预期（第一次读的时候我差点把它当成因）。
+
+### 11.4 B12：改前那份 env 坏成什么样（取证 240 s，判据只写读到的形状）
+
+| 读数 | 值 | 为什么不是"我猜的" |
+|---|---|---|
+| `…/actuator/health/readiness` | **000**（不是 503） | Druid 在 **init 阶段**就卡在引擎池上，Tomcat 从没起 ⇒ 端口根本没 bind。我先按 503 写判据，第一次跑就是红的 |
+| 容器状态 | 一直 `running`，240 s 内既不 Ready 也不退出 | 集群里 `restartPolicy` 永远不会被触发，pod 就那样挂着 |
+| 日志量 | 取证那遍 **20 760 行 / 240 s ≈ 86 行/s** | 全是 `Communications link failure` + `Connection refused` 栈。**断言那遍读到的少得多**（443 / 上一遍 572 行）——因为它在"形状一出现"就收工，采样点只有几秒；两个数说的是同一个刷屏速率，差别只在采样时长。读数一栏里 `$NLINES` 只是被打印出来的旁证，不参与判定 |
+| 引擎池 URL | `jdbc:mysql://localhost:3306/?serverTimezone=UTC…` | 斜杠后**直接跟问号**＝库名为空，只有"没读到 `Z_BASE_DB_SCHEDULE_DATABASE`"产得出这一串 ⇒ 判据钉它而不是钉 HTTP 码。B12c 再拿改后那份清单的日志当反向对照（0 命中），证明这把尺两边可区分 |
+
+这条形状本身是**产品行为**，不是彩排的错：连不上库时既不 fail-fast 也不退出，而是无声刷日志。
+要不要改成"引擎池初始化失败即退出（让集群去重启）"是独立的一格，本轮只把它记成读数——
+没有判据支撑的启动策略改动，比不改更糟。
+
+### 11.5 compose 侧：把"静默起一个连不上库的容器"改成当场拒绝
+
+三种模式的 compose 文件原先都写 `${DB_HOST:-mysql}`，而**没有任何一种模式自带叫 `mysql` 的服务**
+（Mode 1 只有一个容器），`Makefile` 里也是 `DB_HOST ?= mysql` ⇒ `make k8s-apply` 会把一个不可达的宿主名渲染进
+ConfigMap，绕过 `k8s-apply.sh` 自己的 `${DB_HOST:?}` 守卫。现在：DB_HOST **没有默认值**，compose 文件里换成
+带消息的 `${DB_HOST:?…}`，模板 `env/.env.example` 的 `DB_HOST=` 留空，入口脚本显式 `--env-file env/.env`
+（compose 只自动读 `deploy/.env`，本仓的模板在 `deploy/env/` 下——不指过去的话 `DB_*` 永远读不到）。
+B13 两边都测：不给 `DB_HOST` ⇒ compose `config` 非 0 且消息点名它；给了 ⇒ rc=0 且**两个池**从同一份坐标渲染出来
+（`Z_BASE_DB_SCHEDULE_HOST` 与 `SPRING_DATASOURCE_URL` 的串都在输出里）。
+这套 `:?` 语义在 250 的 `docker-compose` 上实测过双向，不是照文档抄的。
+
+### 11.6 三条自伤：全是量具的错，而且都是"照猜的形状写判据"
+
+1. **B11 第一遍红**（`Engine loaded 0 jobs into ring` 刷 90 s）：不是产品缺陷，是彩排漏了 `start`——
+   `add()` 强制 `trigger_status=0`，而 `listRunning()` 只认 `=1`。修法不是把判据调松，而是把这条语义**也**钉成判据（B10b/B10d）。
+2. **B11b 第一遍红**（"库里有结论行却没有装载行"）：装载有**两条不同的日志串**——
+   `start()` 走 `registerJob()` 打 `[Leader] jobId=N 已挂入时间轮`，`"Engine loaded N jobs"` 是 15 s 一次的
+   reconcile 才打的，而我的轮询在第一个结论行落下时就 break 了。现在两形都收，且必须至少等到 reconcile 那一形一次。
+3. **B12 第一遍红**：预期 503，真实是 000（见 11.4）。负对照的"应该坏成什么样"不能靠推理，
+   先取证（240 s 时间线）再写判据，这次是照这条顺序做对的。
+
+### 11.7 这一格没做的
+
+1. **`make dev` 仍然需要一个外部 MySQL**：镜像里没有 H2 那条路可走——仓库里没有 `schema.sql` / `data.sql`，
+   建表脚本只面向 MySQL；`DevDataSourceConfig` 是 `dev` profile 下给 IDE 里跑 admin 用的，不覆盖容器入口。
+   `deploy/README.md` 那句"本地试用：默认用 H2 内存模式"已删，但**"零依赖试用"这个能力本身还是没有的**：
+   要兑现，得决定是"容器里带一个初始化 Job"还是"文档明确说必须先有库"。
+2. **Mode 2/3 的前端是装饰**：`_frontend` 那个桩里一次 API 调用都没有（§前端另有一格），
+   所以"nginx 反代到后端"在 Mode 2/3 只能验到 `/api/actuator/health` 这类直接路径，验不到页面真的能用。
+3. **真集群 apply 仍未做**（11.2）。另外这台机器只有 `docker-compose` 二进制、没有 `docker compose` 插件
+   （Docker 20.10.21），而入口脚本写的是后者 ⇒ 在老一点的管理机上 `make dev` 会死在命令行本身。本轮只在 250
+   上取证，没有为它加兼容分支。
+4. 线上 `oc` 库的 `permission` 列还没逐列对过账（§9 那条链在演示库上验的）。

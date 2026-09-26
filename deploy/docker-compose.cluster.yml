@@ -8,21 +8,30 @@
 
 services:
   z-schedule-backend:
-    image: ghcr.io/yuku123/z-schedule-admin:1.0.1
+    image: "${OCI_REGISTRY:-ghcr.io/yuku123}/z-schedule-admin:${IMAGE_VERSION:-1.0.4}"
     build:
       context: ..
       dockerfile: deploy/Dockerfile.backend
       args:
-        JAR_FILE: z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar
+        JAR_FILE: "${JAR_FILE:-z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar}"
     restart: unless-stopped
     # 不固定 replicas，命令行 --scale 决定（默认 1）
     expose:
       - "18086"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:h2:mem:zschedule;DB_CLOSE_DELAY=-1
-      SPRING_DATASOURCE_USERNAME: sa
-      SPRING_DATASOURCE_PASSWORD: ""
-      JAVA_OPTS: "-Xms512m -Xmx1g"
+      # 两个池都要喂（同 docker-compose.yml 的注释）：多副本共用同一个库，
+      # 谁拿到 z_schedule_lock 谁当 Leader
+      Z_BASE_DB_SCHEDULE_HOST: "${DB_HOST:?缺 DB_HOST：三种模式的容器都不自带数据库，见 env/.env.example}"
+      Z_BASE_DB_SCHEDULE_PORT: "${DB_PORT:-3306}"
+      Z_BASE_DB_SCHEDULE_DATABASE: "${DB_NAME:-zschedule}"
+      Z_BASE_DB_SCHEDULE_USERNAME: "${DB_USER:-root}"
+      Z_BASE_DB_SCHEDULE_PASSWORD: "${DB_PASSWORD:-}"
+      Z_SCHEDULE_DB_MAX_ACTIVE: "${DB_POOL_MAX_ACTIVE:-40}"
+      SPRING_DATASOURCE_URL: "jdbc:mysql://${DB_HOST:?缺 DB_HOST：三种模式的容器都不自带数据库，见 env/.env.example}:${DB_PORT:-3306}/${DB_NAME:-zschedule}?serverTimezone=UTC&useUnicode=true&characterEncoding=utf-8"
+      SPRING_DATASOURCE_USERNAME: "${DB_USER:-root}"
+      SPRING_DATASOURCE_PASSWORD: "${DB_PASSWORD:-}"
+      SERVER_SERVLET_CONTEXT_PATH: "/meta"
+      JAVA_OPTS: "${JAVA_OPTS:--Xms512m -Xmx1g}"
     networks:
       - z-schedule-net
     healthcheck:
@@ -33,7 +42,7 @@ services:
       start_period: 30s
 
   z-schedule-frontend:
-    image: ghcr.io/yuku123/z-schedule-frontend:1.0.1
+    image: "${OCI_REGISTRY:-ghcr.io/yuku123}/z-schedule-frontend:${IMAGE_VERSION:-1.0.4}"
     build:
       context: ..
       dockerfile: deploy/Dockerfile.frontend

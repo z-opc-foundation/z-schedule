@@ -10,10 +10,17 @@
 #   make clean     # 停掉 + 删容器 + 删镜像
 
 # ---- 配置 ----
-IMAGE_VERSION ?= 1.0.1
+IMAGE_VERSION ?= 1.0.4
 OCI_REGISTRY ?= ghcr.io/yuku123
 NAMESPACE ?= z-schedule
 INGRESS_DOMAIN ?= schedule.example.com
+# 库坐标：引擎池与 Spring 池共用（k8s-apply 会把这五个渲染进 ConfigMap）
+# DB_HOST 不给默认值：三种模式都不自带数据库，默认值只会把一个连不上库的 pod 放出去。
+# 缺它时 bin/k8s-apply.sh 的 ${DB_HOST:?…} 与 compose 文件里的同名守卫会当场拒。
+DB_PORT ?= 3306
+DB_NAME ?= zschedule
+DB_USER ?= root
+DB_POOL_MAX_ACTIVE ?= 40
 
 COMPOSE_BASE = docker compose
 COMPOSE_SPLIT = docker compose -f docker-compose.split.yml
@@ -43,8 +50,9 @@ build: ## 构建后端 + 前端镜像（本地，不 push）
 push: ## 构建并 push 到 ghcr.io
 	bash bin/build-images.sh --push
 
-k8s-apply: ## K8s 一键部署（需设置 INGRESS_DOMAIN）
+k8s-apply: ## K8s 一键部署（需设置 INGRESS_DOMAIN 与 DB_HOST/DB_NAME）
 	INGRESS_DOMAIN=$(INGRESS_DOMAIN) NAMESPACE=$(NAMESPACE) IMAGE_VERSION=$(IMAGE_VERSION) OCI_REGISTRY=$(OCI_REGISTRY) \
+	DB_HOST=$(DB_HOST) DB_PORT=$(DB_PORT) DB_NAME=$(DB_NAME) DB_USER=$(DB_USER) DB_POOL_MAX_ACTIVE=$(DB_POOL_MAX_ACTIVE) \
 		bash bin/k8s-apply.sh
 
 ps: ## 查看运行中的容器
