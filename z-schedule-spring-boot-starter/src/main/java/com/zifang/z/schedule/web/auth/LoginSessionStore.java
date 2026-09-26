@@ -58,7 +58,14 @@ public class LoginSessionStore {
         this(DEFAULT_MAX_SESSIONS, DEFAULT_TTL_MILLIS);
     }
 
-    LoginSessionStore(int maxSessions, long ttlMillis) {
+    /**
+     * 自带容量与有效期的构造。
+     * <p>
+     * 本版本<b>不</b>从 {@code z.schedule.*} 读这两个值——想改就别改这里：注册一个同类型 bean
+     * （{@code ZScheduleAutoConfiguration} 那个 {@code @ConditionalOnMissingBean} 会自动退让）。
+     * 一个没人能从配置改到的公开旋钮，只会变成第二个装饰。
+     */
+    public LoginSessionStore(int maxSessions, long ttlMillis) {
         this.maxSessions = maxSessions;
         this.ttlMillis = ttlMillis;
     }

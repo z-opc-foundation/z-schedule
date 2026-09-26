@@ -3,9 +3,13 @@ package com.zifang.z.schedule.web.service.impl;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.MybatisSqlSessionFactoryBuilder;
 import com.baomidou.mybatisplus.core.toolkit.GlobalConfigUtils;
+import com.zifang.z.schedule.core.config.ScheduleProperties;
 import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.core.model.User;
+import com.zifang.z.schedule.web.auth.LoginSession;
+import com.zifang.z.schedule.web.auth.LoginSessionStore;
 import com.zifang.z.schedule.web.domain.mapper.UserMapper;
+import com.zifang.z.schedule.web.filter.TokenAuthFilter;
 import com.zifang.z.schedule.web.service.UserService;
 import org.apache.ibatis.mapping.Environment;
 import org.apache.ibatis.session.SqlSession;
@@ -15,7 +19,10 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import java.lang.reflect.Field;
+import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -55,6 +62,7 @@ public class UserServiceImplH2Test {
     private JdbcDataSource ds;
     private SqlSession session;
     private UserService service;
+    private LoginSessionStore sessionStore;
 
     @Before
     public void setUp() throws Exception {
@@ -83,7 +91,10 @@ public class UserServiceImplH2Test {
         UserMapper mapper = session.getMapper(UserMapper.class);
 
         UserServiceImpl impl = new UserServiceImpl();
+        // 同一个 store 既是签发方也是校验方：这里若各建一张表，链路测试就会假红
+        sessionStore = new LoginSessionStore();
         inject(impl, "userMapper", mapper);
+        inject(impl, "sessionStore", sessionStore);
         service = impl;
     }
 
@@ -152,10 +163,109 @@ public class UserServiceImplH2Test {
 
         ReturnT<String> ok = service.login("henry", "123456");
         assertTrue(ok.getMsg(), ok.isSuccess());
-        assertEquals("登录成功返回的凭证就是用户名", "henry", ok.getContent());
+        // content 曾经过= 用户名，而用户名在 /user/list 里公开可读 ⇒ 拿它当凭证等于人人已登录
+        assertFalse("凭证绝不能是可公开读到的用户名", "henry".equals(ok.getContent()));
+
+        LoginSession issued = sessionStore.resolve(ok.getContent());
+        assertNotNull("登录必须换出一个服务端认识的会话", issued);
+        assertEquals("henry", issued.getUsername());
+        assertEquals("身份要绑到库里那一行", 1, issued.getUserId());
 
         assertFalse("密码错误要失败", service.login("henry", "wrong-pass").isSuccess());
         assertFalse("不存在的用户要失败", service.login("nobody", "123456").isSuccess());
+    }
+
+    @Test
+    public void 登录失败一条会话都不签发() throws Exception {
+        service.add(user("isis", "123456"));
+
+        int before = sessionStore.size();
+        service.login("isis", "wrong-pass");
+        service.login("ghost", "123456");
+        service.login(null, "123456");
+
+        assertEquals("验不过的凭据不能换来身份", before, sessionStore.size());
+    }
+
+    @Test
+    public void 令牌能过过滤器而登出后过不了() throws Exception {
+        // 走真实进程边界：签发方（服务）与校验方（过滤器）之间只隔这个 store。
+        // 两侧各自一张表的话，这里就是"登录成功但每个请求 403"。
+        service.add(user("jane", "123456"));
+        String token = service.login("jane", "123456").getContent();
+
+        ScheduleProperties props = new ScheduleProperties();
+        props.setAccessToken("shared-secret");
+        TokenAuthFilter filter = new TokenAuthFilter(props, sessionStore);
+
+        assertTrue("登录换来的令牌就是凭证", passes(filter, token, "/jobinfo/list"));
+        assertTrue("注销幂等成功", service.logout(token).isSuccess());
+        assertFalse("注销后同一把令牌不能再进门", passes(filter, token, "/jobinfo/list"));
+        // 阳性对照：重新登录换来的令牌仍能进门，说明上面那条红不是"过滤器从此全拦"
+        String again = service.login("jane", "123456").getContent();
+        assertTrue("重新登录必须能换到新会话", passes(filter, again, "/jobinfo/list"));
+    }
+
+    @Test
+    public void 改角色会把该用户的旧会话踢下线() throws Exception {
+        int id = Integer.parseInt(service.add(user("kate", "123456")).getContent());
+        String token = service.login("kate", "123456").getContent();
+        assertFalse(sessionStore.resolve(token).isAdmin());
+
+        User promote = new User();
+        promote.setId(id);
+        promote.setRole("ADMIN");
+        ReturnT<String> updated = service.update(promote);
+        assertTrue(updated.getMsg(), updated.isSuccess());
+
+        assertNull("带着旧角色的会话必须失效，提权也要重新登录", sessionStore.resolve(token));
+    }
+
+    @Test
+    public void 删账号会把他的会话一并撤销() throws Exception {
+        int id = Integer.parseInt(service.add(user("liam", "123456")).getContent());
+        String token = service.login("liam", "123456").getContent();
+        service.add(user("mia", "123456"));
+        String someoneElse = service.login("mia", "123456").getContent();
+
+        ReturnT<String> deleted = service.delete(id);
+        assertTrue(deleted.getMsg(), deleted.isSuccess());
+
+        assertNull("账号都没了，会话还活着就是隐身入口", sessionStore.resolve(token));
+        assertNotNull("不能顺手把别人也踢掉", sessionStore.resolve(someoneElse));
+    }
+
+    /**
+     * 把一次真实请求打在过滤器上，看它放不放行。
+     * <p>
+     * 只给 {@code getHeader}/{@code getServletPath}/{@code getMethod} 之外的一律回默认值：
+     * 这条链上 TokenAuthFilter 只读这几个。
+     */
+    private static boolean passes(final TokenAuthFilter filter, final String token, final String path)
+            throws Exception {
+        final boolean[] reached = {false};
+        HttpServletRequest request = (HttpServletRequest) Proxy.newProxyInstance(
+                UserServiceImplH2Test.class.getClassLoader(),
+                new Class<?>[]{HttpServletRequest.class},
+                (proxy, method, args) -> {
+                    switch (method.getName()) {
+                        case "getServletPath":
+                            return path;
+                        case "getHeader":
+                            return "X-Access-Token".equals(args[0]) ? token : null;
+                        case "getMethod":
+                            return "POST";
+                        default:
+                            return null;
+                    }
+                });
+        HttpServletResponse response = (HttpServletResponse) Proxy.newProxyInstance(
+                UserServiceImplH2Test.class.getClassLoader(),
+                new Class<?>[]{HttpServletResponse.class},
+                (proxy, method, args) -> method.getReturnType() == boolean.class ? Boolean.FALSE
+                        : method.getReturnType() == int.class ? Integer.valueOf(0) : null);
+        filter.doFilter(request, response, (req, res) -> reached[0] = true);
+        return reached[0];
     }
 
     /**
