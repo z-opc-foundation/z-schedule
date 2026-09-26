@@ -81,14 +81,19 @@ javap -c  /tmp/x.class | grep -c 'stepDown'         # 例：#18 的关停释放�
 
 口径是"服务常驻 250"。常驻意味着**别人会拿它当"能用"的证据**，所以它的身份要写死在这里：
 
-| 项 | 值（09-26 22:08 实测，随每次换构件会变） | 怎么复现这个读数 |
+| 项 | 值（09-26 23:15 实测，随每次换构件会变） | 怎么复现这个读数 |
 |---|---|---|
-| jar | `~/z-schedule-e2e/z-schedule-admin-svc-44acc07-exec.jar`，md5 `ad33b6e56526616c5f53cf5d69440da2`（含 #19 的登录态 + #28 的铸权闸 + 按 jobGroup 收口；`baa4458`/`0f1248b`/`7c9de99` 等旧版仍在同目录，别拿文件名当版本）。**编号取"最后一次改动 starter 源码的提交"**，之后的提交只动 `_doc/`，所以名字不等于 HEAD——判据永远是 md5 ＋ `javap` | `md5sum z-schedule-admin-svc-*.jar`（**文件名不算证据**，见上一节） |
+| jar | `~/z-schedule-e2e/z-schedule-admin-svc-a16473a-exec.jar`，md5 `100082780a5f4ea35bc5922c5a01010a`（含 #19 的登录态 + #28 的铸权闸 + `/jobinfo/*`、`/joblog/*` 两套按组收口 + 逐组合并；`44acc07`/`baa4458`/`0f1248b`/`7c9de99` 等旧版仍在同目录，别拿文件名当版本）。**编号取"最后一次改动 starter 源码的提交"**（`git log -1 --format=%h -- z-schedule-spring-boot-starter/src/main/java`），之后的提交只动测试与 `_doc/`，所以名字不等于 HEAD——判据永远是 md5 ＋ `javap` | `md5sum z-schedule-admin-svc-*.jar`（**文件名不算证据**，见上一节） |
 | 端口 | `18098`（**故意不用 18086**：那是 `p16/p20` 的性能台架端口，撞上就会量到一个"我没控制、不知道配置"的实例——坑 14） | `ss -ltnp \| grep 18098` |
-| 存活判据 | `GET /` → 200；`GET /jobinfo/list` → 200 | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18098/jobinfo/list` |
+| 存活判据 | `GET /` → 200；`GET /jobinfo/list` → 200；`GET /joblog/list` → 200（23:26 换构件后实测三条都是 200） | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18098/joblog/list` |
 | 真跑一次 | `./svc_smoke.sh`（播种 → 数 `handle_code=200` → 停用） | 见第 3 节 |
 
-换构件重跑的完整动作（`0b9ac0f` → `7c9de99` 就是这么走的，全程 25 s 内完成）：
+换构件重跑的完整动作（`0b9ac0f` → `7c9de99`、`44acc07` → `a16473a` 都是这么走的，全程 25 s 内完成）：
+
+本轮两条实测：旧进程 `kill -TERM` 后 **1 s** 端口空出来、`logs/service_18098.out` 里 `Stepped down`
+共 3 行（#18 那格的兑现面每次换构件都会被重打一遍）；新进程从 `setsid` 到
+`Started ZScheduleAdminApplication` 约 20 s。**日志本轮改成一构件一文件**（`service_18098_a16473a.out`）：
+沿用同一个文件时，"等因果那行"的 `grep -q` 会先命中上一版的启动行，把一次没起来的实例读成起来了。
 
 ```bash
 # 1) 本机出构件并一对一拷过去（多源 scp 到同一目录会造出同名影子文件）
@@ -443,11 +448,14 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 # 计数只吃报告文件，不吃 mvn 的 stdout（坑 16）；输入为空必须 FATAL
 ```
 
-09-26 提交树 `44acc07`（#19 的登录态 + #28 的铸权闸 + `permission` 第一次成为判据之后）`mvn test` 实测：
-**26 份报告 / 297 例 / 0 失败 / 0 错 / 0 跳过**（core 5 份 45 例 + starter 21 份 252 例）。
-上一格是 25 份 / 285 例，多出来的一报告是 `JobInfoControllerGroupAccessTest`（10 例，按 jobGroup 收口），
-另外 `LoginSessionStoreTest` 从 9 涨到 10（`permission列进了身份就参与判定`）、
-`UserServiceImplH2Test` 从 22 涨到 23（`改分组会把该用户的旧会话踢下线`）。
+09-26 提交树 `04326ac`（`/joblog/*` 四口按组收口 + 逐组合并落地之后）`mvn test` 实测：
+**27 份报告 / 314 例 / 0 失败 / 0 错 / 0 跳过**（core 5 份 45 例 + starter 22 份 269 例）。
+上一格是 `44acc07` 的 26 份 / 297 例（再往前 25 份 / 285 例），多出来的 17 例分三处、两处各量一遍对得上：
+`JobLogControllerGroupAccessTest` 13 例（新报告，`H1`–`H14` 的承载体）、
+`LoginSessionStoreTest` 10→12（`展开的组集合与点名的判据是同一份`、`带前导零的组号两边给同一个答案`）、
+`ExecutorCallbackControllerH2Test` 16→18（派发行的组号那两例）。
+**核对方法**：`git ls-tree` 两棵树各自 `grep -c @Test` 求和 = 297 → 314，与 surefire 报告的总数逐位相同；
+只认其中一把尺的话，报告目录没清干净就会 +1 类（下面那条）。
 其中 `JobTriggerServiceImplBehaviorTest` 15 例（含钉住分片广播语义的那 1 例）、
 `ZSchedulePoolDefaultTest` 4 例（② 的池默认）。
 先 `rm -rf surefire-reports` 再数：不清会把你**本轮没跑到的**类的旧报告一起加进来（历史上报出过 +1 类）。
@@ -468,6 +476,9 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 | **`permission` 这一列第一次有了读者**：签发时一起带进身份，`/jobinfo/*` 按 jobGroup 判它 | `LoginSession.permits`（6 参构造的第 5 参 ← `LoginSessionStore.issue(user)`） | `permission列进了身份就参与判定`（`G5` 摘掉签发那一参即红）、`这一列是人手填的所以解析只容错不抛` |
 | `/jobinfo/*` 八支端点按组收口：普通会话只见/只动 `permission` 里列出的组。**留空 = 不限**（不把既有账号一夜锁死）；ADMIN / 共享密钥 / 匿名结构上不受约束（`restrictable` 提前返回 `null`，它们连"为判组多打一次库"都不发生）。`update` 判**两道**：库里那一行的组 + 请求体里的组 | `GroupAccess.restrictable/narrow/denialReason` ← `JobInfoController` 的 `list/getById/add/update/remove/stop/start/trigger` | `JobInfoControllerGroupAccessTest` 10 例（`G1`–`G4`、`G6`、`G7`、`G9` 逐支红在具名判据上；`G8` 只能红在身份层，见下面那段）、真机 `p22` 的 `D` 段 |
 | 改 `permission` ⇒ 同样作废会话（**新值要重新登录才生效**：旧令牌带着旧的一组组号就是隐身入口） | `UserServiceImpl.update` 的 `permissionChanged`（在合并进库里那行**之前**算） | `改分组会把该用户的旧会话踢下线`（`G10` 摘掉即红、`G11` 放宽成"填了就算变"也即红）、真机 `D.14`/`D.15`/`D.16` |
+| **日志侧判的是日志行自己那一列**（`job_log.job_group`），与任务那一行不是一张表：`/joblog/*` 四口都收口。`list` 四分支：点名别组 = 拒绝（不是空表）、点名 `jobId` = 先问任务现在那行、什么都没点名 = 见下一行、`clear` 的 `type=0` 对分权会话直接拒绝 | `GroupAccess.restrictable/denialReason` ← `JobLogController` 的 `list/getById/executionLog/clear` | `JobLogControllerGroupAccessTest` 13 例里的 `H4`/`H5`/`H6`/`H7`/`H8`/`H9`、真机 `p22` 的 `E.7`/`E.9`/`E.10`/`E.12` |
+| 不限组的列表是**逐组各查一页再合并重排**，截断按 `JobLogService.effectiveLimit(limit)`（不是原始 `limit`）——"先全局查一页再裁"在别的组更忙时会把手里那页整个挤空 | `JobLogController.newestAcross` + `NEWEST_FIRST`（空 `trigger_time` 视最旧、同刻按 id 倒序，与 `query` 的 `ORDER BY` 同规则） | `H1`（改成全局查一页再裁）、`H2`（合并后按原始 `limit` 截）、`H3`（合并后不排序）；真机 `E.5`（合并等于 SQL 现算的期望序）与 `E.6`（空时间末位 + 同刻 id 倒序，逐位对拍） |
+| **写侧那一列不能是死值**：派发落库时组号从库里那一行取，库里没有的任务不落行 | `ExecutorCallbackController.run`（`job.getJobGroup()` + `job == null` 先拒） | `E1`–`E3` 三支注入（写死 0 / 摘空值守卫 / 取错字段）、真机 `E.2`（`job_group` 回读 = 任务的组）与 `E.3`（全表行数不变） |
 | `/user/logout` 幂等：不回答"这把令牌先前在不在用" | `UserController.logout` | `令牌能过过滤器而登出后过不了` |
 | 过滤器与签发方共用**同一个** store 实例 | `ZScheduleAutoConfiguration.tokenAuthFilterRegistration` | `过滤器必须注册在整个应用入口上`（M8，就是坑 20 那条红） |
 
@@ -487,7 +498,29 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 （`LoginSessionStoreTest` 的"ADMIN 带着 `permission=1` 仍然要 permits(2)"）才红得下来。
 **⇒ 预期红集要按"谁读这个值"来派生，不能按主题挂。**
 
-### 9′. 真机读数：`p22.sh`（250，MySQL 8，构件 `44acc07` / md5 `ad33b6e5…`）
+日志那一层再打十四支（量具 `~/.cache/zsched_joblog_mut.py`，台账 `~/.cache/zsched_joblog_ledger.txt`，
+每支还原都只从**本次运行**的 `.h-base` 副本 `cp` 回来并 `os.utime` 到现在，逐支 md5 对账）。
+名字照台账原文：读侧五支 —— `H1` 全局查一页再裁剪（分权会话会少给行）、`H2` 合并后按原始 limit 截、
+`H3` 逐组合并结果不排序、`H8` 点名组那道闸摘掉、`H9` 按 jobId 过滤解析不出组也给看；
+单条与清理四支 —— `H4` 单条读取那道闸摘掉（`getById` 与 `executionLog` 共用）、`H5` 清空全部对分权会话开放、
+`H6` 按 jobId 清理时任务不存在就放行（fail-open）、`H7` 按 jobId 清理不判组；
+身份层五支 —— `H10` 留空的账号也被当成需要收口、`H11` 需要收口的身份不短路（每个请求多打一次库）、
+`H12` `permits` 退回字符串比对（与前导零的展开分家）、`H13` 展开不去重、`H14` 错字 token 当成第 0 组。
+**十四支在台账里都有一条 `KILLED-exact`**，但这不是一遍跑出来的：首跑是 9 精确红 + 3 合法多红
+（`H1`/`H2`/`H8` 各多红一条，原因是那几条断言也读同一个符号，把预期集补全后复跑归入精确）
++ 2 支 `SURVIVED`，而那两支才是这一族的收获：
+
+- **`H3` 的 `SURVIVED` 是测试的洞，不是产品的洞**：那例的替身 `FakeJobLogService` 自己按同一规则
+  排过序，空时间的样本行又恰好落在"后查的那个组"，于是"逐组拼起来的原始顺序"本来就等于合并后的正确
+  顺序——摘掉 controller 的排序，断言照样绿。**替身替你做了的事，你的断言就没在测它**；把两行空时间
+  挪进**先查的那个组**（拼起来就是错的序）之后 `H3` 精确红。
+- **`H11` 的"预期红"是我写宽的**：摘掉 `restrictable` 的短路，只有 3 例真会反应（其余各例走的是匿名/
+  密钥/留空那几支，短路前后行为一致）。判据按"谁读这个值"派生这条在 `G8` 已经记过一遍，
+  这次是同一个错第二次长在我自己身上。
+- 顺带一个量具自己的 bug：子集过滤写成 `name.startswith('H1')` ⇒ 选 `H1` 会把 `H10`–`H14` 一起捞进来，
+  改成按 token 精确匹配（复跑那一遍报的"9/9"就是这么来的：5 个号 + 前缀捞到的 4 个兄弟）。
+
+### 9′. 真机读数：`p22.sh`（250，MySQL 8，构件 `a16473a` / md5 `100082780a5f4ea35bc5922c5a01010a`）
 
 上表那张"谁来红"是 H2 + 手写替身级别的证据；`p22.sh` 把同一批主张拿到真进程上重打一遍，
 **同时用两台**：常驻的 18098 没配 `accessToken`（演示模式），临时那台配了（把门关起来）。
@@ -503,10 +536,19 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 于是脚本顺序 = S（起关门实例 → 用共享密钥种账号）→ A（打常驻演示实例）→ B（回到关门实例验撤销）→ C（收尾）。
 这个顺序变化本身就是 #28 的兑现面：它把"第一个管理员从哪来"从一句口头答案变成了一条**每天真跑的路径**（S.6）。
 
-09-26 22:14、22:15、22:30 连跑三次，同读数：**76 条 PASS / 0 FAIL / 4 条观察**（全文落 `logs/p22.txt`；
-22:30 那次跑的就是本节提交时的 `p22.sh`，两端 md5 逐字节相同：`9c6a8d0dab20f9881c17b02277bfa2f3`）。
-上一格是 55 条 PASS / 0 FAIL / 3 条观察，多出来的 21 条 = `D` 段的 19 条 PASS（`D.13` 是观察不是判红）
-+ 两支构件形状判据 `0.4b`/`0.4c`；4 条观察里新增的是 `D.13`。
+09-26 22:14、22:15、22:30 连跑三次（构件 `44acc07`）：**76 条 PASS / 0 FAIL / 4 条观察**（全文落 `logs/p22.txt`；
+那次跑的是两端 md5 逐字节相同的 `9c6a8d0dab20f9881c17b02277bfa2f3`）。上一格是 55 条 / 0 / 3，
+多出来的 21 条 = `D` 段的 19 条 PASS（`D.13` 是观察不是判红）+ 两支构件形状判据 `0.4b`/`0.4c`。
+
+09-26 23:24、23:26、23:27 又连跑三次（构件 `a16473a`，脚本两端 md5 `8a03ba96065ed374e655e78e92f2fb70`）：
+**92 条 PASS / 0 FAIL / 4 条观察**，分段数 `0`=8、`S`=11、`A`=19、`B`=16、`D`=19、`E`=14、`C`=5。
+76 → 92 那 16 条 = `E` 段 14 条 + 新加的两支构件形状判据 `0.4d`/`0.4e`；4 条观察一字未变
+（`S.9b` 无盐 MD5、`A.20`/`A.20b` 演示模式看不见撤销、`D.13` `/jobgroup/list` 仍不裁）。
+
+**首跑那次是 90 PASS / 2 FAIL，而两条 FAIL 全长在量具上**：`ids_of` 拿 `tr '\n' ' '` 收尾留了个尾空格，
+`e_expect` 那条 SQL 出来的串没有 ⇒ 整串比较永远不等；两条 FAIL 消息里贴的"实得"与"期望"id 序列逐位相同。
+改的是脚本不是产品，复跑即 92/0。**⇒ 整串比较的两侧必须归一到同一条成形规则**；而 FAIL 消息把两边都
+原样贴出来这一步救了场——只贴"不等"的话，这一格就只能靠重跑猜是谁的错。
 挑几条只有真机才给得出的：
 
 | 判据 | 读数 |
@@ -518,6 +560,14 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 | `S.6` / `S.10` 两道闸的红长得不一样 | 关门实例上匿名 = **403 `accessToken 不合法`**（过滤器，压根进不了 controller）；演示实例上匿名 = **200 + `code:500` 铸权理由**（controller）。读消息后缀就能分清是哪一道闸在起作用 |
 | `S.9` 库里那一列到底是什么 | `password = md5(登录口令)` 的 32 位十六进制，与登录侧算出的散列逐字节相等 ⇒ 比对的是散列。**观察 `S.9b`**：这是**无盐** MD5——同口令必同散列，整库可反查彩虹表；换 bcrypt/argon2 是独立的一格，#28 没动它 |
 | `0.4b`/`0.4c` 按组分权也**在跑着的那个文件**里 | 同 `0.3`/`0.4` 那套路子：`javap` 出来的 `GroupAccess` 常量池里有 `z_schedule_user.permission`、`LoginSession` 有 `permits(int)`。没有这两支，`D` 段红了也无法排除"量的是旧字节"（判据见 §1′ 的"只认 argv + md5"） |
+| `0.4d`/`0.4e` `E` 段量的不是旧字节 | `JobLogController` 有 `newestAcross`、`JobLogService` 有 `effectiveLimit`——两个都是 `a16473a` 才有的符号。少了这一眼，`E.5` 会拿着旧字节的"全局一页再裁"读出一个形状，而那条写法正是 `E.5` 要否证的 |
+| `E.2` 读侧收口的依据先由写侧兑现 | `/executor/run` 派发已有任务 ⇒ 库里新那一行 `job_group=13` **等于任务那一行的组**、`trigger_time` 非空。这一列历史上写过死值 `0`：真写成 0 的话读侧三道闸会"很严格地"把所有行滤掉，界面是一片空日志而不报任何错 |
+| `E.3` 库里没有的任务不落行 | 派发给 `jobId=99999999` ⇒ `code:500` 且**全表 151973 行一条没多**。孤儿行的代价在清理口：`clearByJobId` 按 `job_id` 反查组，反查不到的行既删不掉也判不了组 |
+| `E.5` 逐组合并 ≠ 全局一页再裁 | peon 有 `permission='13,14'` 两组，第三组（`15`）刻意灌了 4 行**未来 1 小时**的日志（比 A/B 的都新）。`limit=3` 实得 `725534 725535 725529`，与 SQL 现算的期望序逐位相同、第三组一行不进来。若是"先全局查一页再按组裁"，这份数据形状下返回的是**空**——所以这条的绿不是"裁到 3 行"读出来的 |
+| `E.6` 排序交给两套实现各算一次 | 空 `trigger_time` 那行排末位、同一字面量时刻的两行按 id 倒序，整串 7 位与 MySQL 自己 `ORDER BY trigger_time IS NULL, trigger_time DESC, id DESC` 一致。**Java 的 comparator 与 SQL 同序才判绿**，只信一边等于让被测者自己出题（并列那对用字面量而不是 `NOW()`：列是 `datetime` 只到秒，两次 `NOW()` 跨秒就不并列了，那格会随机绿） |
+| `E.7`/`E.11` 阴性读数的阳性对照 | 点名第三组 = 拒绝且理由带着组号，点名自己那组照给；管理员会话一份列表里三组的行**都在**（含那四行"比 peon 的两组都新"的）⇒ `E.5` 的"没有它的行"是被裁掉，不是那几行查不出来 |
+| `E.12`+`E.13` 清理口的"没删"与"会删"同框 | 分权会话三挡都拦：`type=0` 全表仍 151985 行、越组 `type=1` 那任务仍 5 行、组解析不出的任务也拦；**同一个口换成共享密钥清它 ⇒ 5→0**，而另一个任务的 8 行不受牵连 ⇒ 前面三个"没删"是闸拦的，不是这个口从来不删 |
+| `E.8` `status` 两挡在真库上互斥 | `status=2` 有 `handle_code=500` 那行、没有 `=200` 那行、也没有 `=0`（未执行）那行；`status=1` 反过来。**`0` 不能被算成失败**——否则每一条刚派发还没跑的行都会进"失败日志"列表 |
 | `D.4` 列表被裁到自己那一组 | peon 的 `permission=3`：`/jobinfo/list` 里有 A 组那行、没有 B 组那行。**裁剪发生在返回前，不是替数据库少查**——所以 `D.13` 那份没裁的组列表才是真漏，不是读数误差 |
 | `D.5` 点名要别的组是**拒绝**而不是一张空表 | HTTP 200 + `code:500`，理由里带着组号（controller 那一层，见坑 23）；`D.6` 阳性对照：同一个人点名要自己那组照样给 |
 | `D.8`/`D.9`/`D.10`/`D.11` 闸落在写之前 | 越组的 trigger/stop/start/remove 全被拒，而且**库里那一行没动过**：B 组那行的日志行数 `0 → 0`、`trigger_status` 不变、行还在。两支阳性对照（同请求换 A 组那行：触发真落库=1 行、启停真把 `0→1→0`）证明那些零不是"这个口从来不写" |

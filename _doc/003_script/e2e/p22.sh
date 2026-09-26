@@ -22,11 +22,16 @@
 # 数据库口令仍由 mysql.env 经环境变量注入，本脚本一次都不打印它。
 # S 段用「ps 里 access-token= 出现几条」判断 accessToken 有没有漏进 argv——只数条数，
 # 绝不 grep 它的值（这条脚本的输出会落进日志文件）。
+#
+# D 段与 E 段量的是两张表：D 判 z_schedule_job_info.job_group（任务那一行），E 判
+# z_schedule_job_log.job_group（日志那一行）。日志侧没有别的依据，所以 E 先钉写侧（派发行
+# 带的是任务真正的组、库里没任务就不落行），再钉读侧；读侧的期望序由 MySQL 现算，与 Java
+# 侧的合并排序对拍，而不是把 id 写死在脚本里。
 set -u
 cd "$(dirname "$0")"
 
 RESIDENT_PORT="${RESIDENT_PORT:-18098}"
-JAR_EXPECT="${JAR_EXPECT:-z-schedule-admin-svc-44acc07-exec.jar}"
+JAR_EXPECT="${JAR_EXPECT:-z-schedule-admin-svc-a16473a-exec.jar}"
 PROBE_PW="p22-probe-only"
 LOG_DIR="${LOG_DIR:-logs}"
 OUT="$LOG_DIR/p22.txt"
@@ -121,6 +126,19 @@ if javap -p -classpath "$LOG_DIR/p22-cls" com.zifang.z.schedule.web.auth.LoginSe
   ok "0.4c LoginSession 有 permits(int) ⇒ 身份带着 permission 这一维"
 else
   bad "0.4c LoginSession 没有 permits ⇒ 这一列还没进身份，D 段无从收口"; exit 1
+fi
+# E 段的构件身份闸：newestAcross（逐组合并）与 effectiveLimit（合并方必须按同一个数裁）都是
+# a16473a 才有的符号。少了这一眼，E.5 会拿着旧字节的"全局一页再裁"读出一个形状，而那条写法
+# 正是 E.5 要否证的。
+if javap -p -classpath "$LOG_DIR/p22-cls" com.zifang.z.schedule.web.controller.JobLogController | grep -q newestAcross; then
+  ok "0.4d JobLogController 有 newestAcross ⇒ E 段量的是逐组合并那一版，不是旧的全局一页"
+else
+  bad "0.4d 构件里没有 newestAcross ⇒ E 段会红在旧语义上，读数无意义"; exit 1
+fi
+if javap -p -classpath "$LOG_DIR/p22-cls" com.zifang.z.schedule.web.service.JobLogService | grep -q effectiveLimit; then
+  ok "0.4e JobLogService 有 effectiveLimit ⇒ 上限收口只剩一处，合并方与查询方用的是同一个数"
+else
+  bad "0.4e JobLogService 没有 effectiveLimit ⇒ 上限还是两处各写各的，E 段的 limit 断言无意义"; exit 1
 fi
 rm -rf "$LOG_DIR/p22-starter.jar" "$LOG_DIR/p22-cls"
 # 干净起点：上一轮崩在中间留下的行会让 S.9/A.3 的行数断言毫无意义
@@ -467,6 +485,192 @@ else
     *) bad "D.16 改 peon 的分组把管理员会话也踢了" ;;
   esac
 fi
+
+echo "--- E) /joblog/* 的按组收口：判据换成日志行那一列（真 MySQL 8）---" | tee -a "$OUT"
+# D 段判的是任务那一行（z_schedule_job_info.job_group），这一段判的是日志行自己那一列。
+# 不是同一个东西：/joblog/* 三道口只认 log.job_group，所以写侧一旦把这一列写成死值 0，读侧会
+# "很严格地"把所有行都滤掉——空表在界面上看不出异常，在替身里甚至还是绿的。
+# 所以格子的顺序是固定的：先量写侧（E.2/E.3），再量读侧；读侧的期望值一律由 SQL 现算（D.9 之类
+# 真实触发写过什么行、写了几个，取决于前面几段跑到哪，把 id 写死在脚本里就是猜）。
+GC=""; JC=""; T_PE=""
+# e_seed <组> <任务> <trigger_time 表达式> <handle_code> ⇒ 新行 id（handler 打标记，收尾按它清）
+e_seed() {
+  q -e "INSERT INTO z_schedule_job_log (job_group, job_id, executor_handler, trigger_time, trigger_code, handle_code, handle_msg) VALUES ($1, $2, 'p22_e', $3, 200, $4, 'p22 e2e 播种行')" >/dev/null
+  q -e "SELECT MAX(id) FROM z_schedule_job_log WHERE executor_handler='p22_e'" | tr -d '[:space:]'
+}
+# e_expect <limit> <组列表> ⇒ 期望的 id 序：让 MySQL 按"空时间最后、时间倒序、同刻 id 倒序"排一次，
+# 与 controller 里那段 Java 合并对拍。两套实现同序才算数——只信一边就是让被测者自己出题。
+e_expect() {
+  q -e "SELECT GROUP_CONCAT(id ORDER BY tt_null, tt DESC, id DESC) FROM (SELECT id, trigger_time IS NULL AS tt_null, trigger_time AS tt FROM z_schedule_job_log WHERE job_group IN ($2) ORDER BY tt_null, tt DESC, id DESC LIMIT $1) x" \
+    | tr -d '[:space:]' | tr ',' ' '
+}
+# ids_of <响应体> ⇒ 按响应里的出现顺序取 id，空格分隔且**不带尾空格**
+# （"jobId" 里有大写 I，不会被这条正则吃掉。带上尾空格的话整串比较会永远不等：
+#  e_expect 那条 SQL 出来的串没有尾空格 —— 第一版就是这么把两条真绿读成 FAIL 的）
+ids_of() { printf '%s' "$1" | grep -oE '"id":[0-9]+' | cut -d: -f2 | paste -sd' ' -; }
+has_id() { printf '%s' "$1" | grep -Eq "(^| )$2( |$)"; }
+
+if [ -z "$GA" ] || [ -z "$GB" ] || [ -z "$JA" ] || [ -z "$ID_P" ]; then
+  obs "E.1 起跳过：D 段的探针组/任务/账号没齐（A=$GA B=$GB 任务=$JA peon=$ID_P）⇒ 读侧的格子没有承载体"
+else
+  GRC=$(req POST "$BB/jobgroup/add?accessToken=$SECRET" '{"appName":"p22_grp_c","title":"p22 组C","addressType":0,"addressList":""}')
+  GC=$(gid p22_grp_c)
+  JCR=$(new_job "$GC" "p22_任务C"); JC=$(jid p22_任务C)
+  if [ -z "$GC" ] || [ -z "$JC" ]; then
+    bad "E.1 第三个组或它的任务没建出来：$(msg_of "$GRC") / $(msg_of "$JCR")"
+  else
+    ok "E.1 第三个组 p22_grp_c=$GC 及其任务 $JC 落库 ⇒ 读侧终于有一个'不是我的组'当猎物"
+
+    # 写侧第一格：派发行带的是任务真正的组。这一列是读侧三道闸唯一的依据，它错了后面全白量。
+    E0=$(logrows "$JA")
+    RUN_R=$(req POST "$BB/executor/run?accessToken=$SECRET" "{\"jobId\":$JA,\"executorHandler\":\"demoHandler\",\"executorParams\":\"\",\"executorFailRetryCount\":0}")
+    case "$RUN_R" in
+      *'"code":200'*)
+        NEWG=$(q -e "SELECT job_group FROM z_schedule_job_log WHERE job_id=$JA ORDER BY id DESC LIMIT 1" | tr -d '[:space:]')
+        NEWT=$(q -e "SELECT IFNULL(trigger_time,'NULL') FROM z_schedule_job_log WHERE job_id=$JA ORDER BY id DESC LIMIT 1" | tr -d '[:space:]')
+        if [ "$(logrows "$JA")" -gt "$E0" ] && [ "$NEWG" = "$GA" ] && [ "$NEWT" != "NULL" ]; then
+          ok "E.2 派发落库 job_group=$NEWG（=任务那一行的组 $GA）、trigger_time=$NEWT ⇒ 读侧有据可判；且组号是从库里取的，不是拿请求体里的数凑的"
+        else
+          bad "E.2 派发行的组号是 '$NEWG'（期望 $GA）、时间 '$NEWT'、日志行数 $E0→$(logrows "$JA") ⇒ 收口依据本身是坏的，E.4 之后的读数无意义"
+        fi
+        ;;
+      *) bad "E.2 /executor/run 没成功：$(printf '%s' "$RUN_R" | cut -f1) $(msg_of "$RUN_R")" ;;
+    esac
+    # 写侧第二格：库里没有的任务不再顺手落一行。孤儿行按 job_id 反查删不掉，是清理口的死角。
+    TOT0=$(q -e "SELECT COUNT(*) FROM z_schedule_job_log" | tr -d '[:space:]')
+    ORPH=$(raw POST "$BB/executor/run?accessToken=$SECRET" '{"jobId":99999999,"executorHandler":"demoHandler"}')
+    TOT1=$(q -e "SELECT COUNT(*) FROM z_schedule_job_log" | tr -d '[:space:]')
+    if printf '%s' "$ORPH" | grep -q '"code":500'; then
+      [ "$TOT0" = "$TOT1" ] && ok "E.3 不存在的任务：拒绝且全表行数仍 $TOT0 ⇒ 派发口不产孤儿行（否则 join 式清理留一堆无人可判组的行）" \
+        || bad "E.3 说了拒绝还是落了一行：$TOT0 → $TOT1"
+    else
+      bad "E.3 不存在的任务竟然算派发成功：$(printf '%s' "$ORPH" | cut -c1-160)"
+    fi
+
+    # permission 换成逗号列表：读侧要的是"我有两组"这个形状，先看任务列表认不认（不认则 E.5 的空表
+    # 会被读成"收口生效"，而真相是逗号根本没拆开）。
+    req POST "$BB/user/update?accessToken=$SECRET" "{\"id\":$ID_P,\"permission\":\"$GA,$GB\"}" >/dev/null
+    T_PE=$(login "$PORT" p22_peon)
+    RL=$(raw GET "$BB/jobinfo/list?accessToken=$T_PE")
+    if [ -n "$T_PE" ] && has_row "$(printf '%s' "$RL" | cut -f2-)" "$JA" && has_row "$(printf '%s' "$RL" | cut -f2-)" "$JB"; then
+      ok "E.4 permission='$GA,$GB' 拆成了两组：任务列表里 $JA、$JB 都看得见 ⇒ 下面按'我的两组'量合并"
+    else
+      bad "E.4 逗号列表没展开成两组（令牌 ${#T_PE} 字符）：$(printf '%s' "$RL" | cut -c1-200)"
+    fi
+    EP="accessToken=$T_PE"
+
+    # 播种。C 组（不是 peon 的组）刻意造得又新又多："全局查一页再按组裁"的写法会先被它挤空；
+    # 时间用 +3600/+60/+30 秒这种分得开的值，而并列那一对待会儿用字面量（datetime 只到秒，
+    # 两条 NOW() 跨秒就不并列了——测"同刻按 id 倒序"必须钉同一个值）。
+    for off in 3600 3601 3602 3603; do e_seed "$GC" "$JC" "DATE_ADD(NOW(), INTERVAL $off SECOND)" 0 >/dev/null; done
+    EA=$(e_seed "$GA" "$JA" "DATE_ADD(NOW(), INTERVAL 60 SECOND)" 0)
+    EB=$(e_seed "$GB" "$JB" "DATE_ADD(NOW(), INTERVAL 30 SECOND)" 0)
+    TIE_LITERAL="'2026-09-26 12:00:00'"
+    ET1=$(e_seed "$GA" "$JA" "$TIE_LITERAL" 0)
+    ET2=$(e_seed "$GA" "$JA" "$TIE_LITERAL" 0)
+    ENULL=$(e_seed "$GA" "$JA" "NULL" 0)
+    EC1=$(q -e "SELECT id FROM z_schedule_job_log WHERE job_group=$GC ORDER BY id DESC LIMIT 1" | tr -d '[:space:]')
+
+    R3=$(raw GET "$BB/joblog/list?limit=3&$EP")
+    GOT3=$(ids_of "$(printf '%s' "$R3" | cut -f2-)")
+    EXP3=$(e_expect 3 "$GA,$GB")
+    if printf '%s' "$R3" | grep -q '"code":200' && [ -n "$GOT3" ] \
+       && ! has_id "$GOT3" "$EC1" && [ "$GOT3" = "$EXP3" ]; then
+      ok "E.5 不限组时是自己那几组各取一页再合并：limit=3 拿到 $GOT3（SQL 侧同规则期望 $EXP3），C 组那四行更新的行一条没进来"
+    else
+      bad "E.5 合并形状不对：http=$(printf '%s' "$R3" | cut -f1) 实得 [$GOT3] 期望 [$EXP3] C组最新行=$EC1"
+    fi
+
+    R9=$(raw GET "$BB/joblog/list?limit=9&$EP")
+    GOT9=$(ids_of "$(printf '%s' "$R9" | cut -f2-)")
+    EXP9=$(e_expect 9 "$GA,$GB")
+    if [ "$GOT9" = "$EXP9" ] && has_id "$GOT9" "$ET2" && has_id "$GOT9" "$ENULL"; then
+      ok "E.6 合并后重排序在真库上成立：空 trigger_time 的 $ENULL 排最后、同刻的 $ET2/$ET1 按 id 倒序，整串与 MySQL 自己排的 $EXP9 逐位相同"
+    else
+      bad "E.6 顺序不一致：实得 [$GOT9] 期望 [$EXP9]（空时间行 $ENULL 应在末位，同刻对 $ET2>$ET1）"
+    fi
+
+    RS=$(raw GET "$BB/joblog/list?jobGroup=$GC&$EP")
+    RSA=$(raw GET "$BB/joblog/list?jobGroup=$GA&limit=9&$EP")
+    if printf '%s' "$RS" | grep -q '"code":500' && printf '%s' "$RS" | grep -q "jobGroup=$GC" \
+       && printf '%s' "$RSA" | grep -q '"code":200' && has_id "$(ids_of "$(printf '%s' "$RSA" | cut -f2-)")" "$EA"; then
+      ok "E.7 点名 C 组是拒绝（理由里带着 $GC），点名 A 组照给且 $EA 在里面 ⇒ E.5 的'没有 C 组行'是裁掉的，不是查不出来"
+    else
+      bad "E.7 点名单组这格读不开：C=$(printf '%s' "$RS" | cut -c1-140) / A=$(printf '%s' "$RSA" | cut -c1-140)"
+    fi
+
+    EF500=$(e_seed "$GA" "$JA" "DATE_ADD(NOW(), INTERVAL 90 SECOND)" 500)
+    EF200=$(e_seed "$GA" "$JA" "DATE_ADD(NOW(), INTERVAL 91 SECOND)" 200)
+    RH0b=$(raw GET "$BB/joblog/list?jobGroup=$GA&status=2&limit=99&$EP")
+    RH1b=$(raw GET "$BB/joblog/list?jobGroup=$GA&status=1&limit=99&$EP")
+    I0=$(ids_of "$(printf '%s' "$RH0b" | cut -f2-)"); I1=$(ids_of "$(printf '%s' "$RH1b" | cut -f2-)")
+    if has_id "$I0" "$EF500" && ! has_id "$I0" "$EF200" && ! has_id "$I0" "$EA" && has_id "$I1" "$EF200" && ! has_id "$I1" "$EF500"; then
+      ok "E.8 status 的两个挡位在真库上互斥：status=2 有 $EF500 没 $EF200 也没 handle_code=0 的 $EA，status=1 反过来 ⇒ 0（未执行）没被算成失败"
+    else
+      bad "E.8 状态挡位不对：status=2 [$I0] / status=1 [$I1]（播种 $EF500/$EF200，未执行样本 $EA）"
+    fi
+
+    RG1=$(raw GET "$BB/joblog/get?id=$EC1&$EP"); RG2=$(raw GET "$BB/joblog/executionLog?logId=$EC1&$EP")
+    RG3=$(raw GET "$BB/joblog/get?id=$EA&$EP");  RG4=$(raw GET "$BB/joblog/executionLog?logId=$EA&$EP")
+    if printf '%s' "$RG1" | grep -q '"code":500' && printf '%s' "$RG2" | grep -q '"code":500' \
+       && printf '%s' "$RG3" | grep -q '"code":200' && printf '%s' "$RG4" | grep -q '"code":200' \
+       && printf '%s' "$RG4" | grep -q 'p22 e2e 播种行'; then
+      ok "E.9 单行两口认行上那一组：C 组的 $EC1 详情与执行日志都被拒，A 组的 $EA 给详情且执行日志里真是那一行的 handleMsg"
+    else
+      bad "E.9 单行口形状不对：get越组=$(printf '%s' "$RG1" | cut -c1-120) | 执行日志越组=$(printf '%s' "$RG2" | cut -c1-120) | get本组=$(printf '%s' "$RG3" | cut -c1-120) | 执行日志本组=$(printf '%s' "$RG4" | cut -c1-160)"
+    fi
+
+    RJ1=$(raw GET "$BB/joblog/list?jobId=$JC&$EP")
+    RJ2=$(raw GET "$BB/joblog/list?jobId=$JA&limit=99&$EP")
+    RJ3=$(raw GET "$BB/joblog/list?jobId=99999999&$EP")
+    IJ2=$(ids_of "$(printf '%s' "$RJ2" | cut -f2-)")
+    if printf '%s' "$RJ1" | grep -q '"code":500' && printf '%s' "$RJ3" | grep -q '"code":500' \
+       && printf '%s' "$RJ3" | grep -q '不存在' && printf '%s' "$RJ2" | grep -q '"code":200' \
+       && has_id "$IJ2" "$EA" && ! has_id "$IJ2" "$EB"; then
+      ok "E.10 按 jobId 过滤：别人的任务（$JC）拒、库里没有的任务（99999999）也拒而不是一张空表、自己的任务只回自己那些行（$EA 在、$EB 不在）"
+    else
+      bad "E.10 jobId 三形状不对：JC=$(printf '%s' "$RJ1" | cut -c1-120) 不存在=$(printf '%s' "$RJ3" | cut -c1-120) JA=[$IJ2]"
+    fi
+
+    RA=$(raw GET "$BB/joblog/list?limit=999&accessToken=$TB_A")
+    IAS=$(ids_of "$(printf '%s' "$RA" | cut -f2-)")
+    if printf '%s' "$RA" | grep -q '"code":200' && has_id "$IAS" "$EA" && has_id "$IAS" "$EB" && has_id "$IAS" "$EC1"; then
+      ok "E.11 管理员会话一份列表里 A/B/C 三组的行都在（'不受约束'那一支在真库上也没顺手裁自己）"
+    else
+      bad "E.11 管理员会话被裁了：[$IAS]（期望含 $EA $EB $EC1）"
+    fi
+
+    # 清理口三挡 + 一支猎物。"没删掉"必须与"这个口会删"同框，否则零改动可以是任何一件事。
+    CJA=$(logrows "$JA")
+    q -e "INSERT INTO z_schedule_job_log (job_group, job_id, executor_handler, trigger_code, handle_code) VALUES ($GC, $JC, 'p22_e', 200, 0)" >/dev/null
+    CEC=$(logrows "$JC")
+    K0=$(q -e "SELECT COUNT(*) FROM z_schedule_job_log" | tr -d '[:space:]')
+    CK1=$(raw POST "$BB/joblog/clear?$EP" '{"type":0}')
+    K1=$(q -e "SELECT COUNT(*) FROM z_schedule_job_log" | tr -d '[:space:]')
+    CK2=$(raw POST "$BB/joblog/clear?$EP" "{\"type\":1,\"jobId\":$JC}")
+    CK3=$(raw POST "$BB/joblog/clear?$EP" '{"type":1,"jobId":99999999}')
+    if printf '%s' "$CK1" | grep -q '"code":500' && [ "$K0" = "$K1" ] \
+       && printf '%s' "$CK2" | grep -q '"code":500' && [ "$(logrows "$JC")" = "$CEC" ] \
+       && printf '%s' "$CK3" | grep -q '"code":500'; then
+      ok "E.12 清理口对分权会话三挡都拦：清空全部（全表仍 $K1 行）、越组按任务清（$JC 仍 $CEC 行）、组都解析不出的任务也拦"
+    else
+      bad "E.12 清理口没全拦：type0=$(printf '%s' "$CK1" | cut -c1-120) 全表 $K0→$K1 / type1越组=$(printf '%s' "$CK2" | cut -c1-120) $JC 行数 $CEC→$(logrows "$JC") / 无组=$(printf '%s' "$CK3" | cut -c1-120)"
+    fi
+    CK4=$(raw POST "$BB/joblog/clear?accessToken=$SECRET" "{\"type\":1,\"jobId\":$JC}")
+    AFTER=$(logrows "$JC")
+    if printf '%s' "$CK4" | grep -q '"code":200' && [ "$AFTER" = "0" ] && [ "$(logrows "$JA")" = "$CJA" ]; then
+      ok "E.13 猎物：同一个口换成共享密钥清 $JC 真的删了（$CEC→0），而 $JA 的行数没被牵连（$CJA）⇒ E.12 的'没删'是闸拦的，不是这个口从来不删"
+    else
+      bad "E.13 该删的没删干净：$(printf '%s' "$CK4" | cut -c1-140) $JC 行数 $CEC→$AFTER，$JA=$CJA→$(logrows "$JA")"
+    fi
+
+    q -e "DELETE FROM z_schedule_job_log WHERE executor_handler='p22_e'" >/dev/null
+    LEFT_E=$(q -e "SELECT COUNT(*) FROM z_schedule_job_log WHERE executor_handler='p22_e'" | tr -d '[:space:]')
+    [ "$LEFT_E" = "0" ] && ok "E.14 播种行（handler='p22_e'）已清完 ⇒ 下一轮 E.5 的行数断言不被上一轮污染" \
+      || bad "E.14 还剩 $LEFT_E 行播种数据"
+  fi
+fi
+
 # 探针数据自己收走：任务、日志、分组都按 p22_ 前缀删，账号留给 C 段
 q -e "DELETE FROM z_schedule_job_log WHERE job_id IN (SELECT id FROM z_schedule_job_info WHERE job_desc LIKE 'p22\_%')" >/dev/null
 q -e "DELETE FROM z_schedule_job_info WHERE job_desc LIKE 'p22\_%'" >/dev/null
