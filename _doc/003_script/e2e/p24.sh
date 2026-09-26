@@ -275,38 +275,73 @@ CTRL=$(grep -rhoE '@RequestMapping\("/jobinfo"' "$DEPLOY/../z-schedule-spring-bo
 #   ① 扫描必须折叠续行：p20/p22 的 `JAR=` 在上一行、行尾带 `\`。第一版用单行 grep 判"谁裸调"，
 #      把这两条读成裸调用，报出"6 个裸调用方"，真值 4 个。
 #   ② 不能拿 `glob p*.sh` 当分母：本尺自己的源码里就写着 './run.sh' 这个串（判定条件 + 那条 ok 消息），
-#      自指被数成调用、分母从 11 涨到 13。⇒ 分母钉成显式清单 A11_FILES，另加一条**覆盖守卫**：
-#      清单之外任何 p*.sh 出现 './run.sh' 就报红，这样"新加了调用方却没进清单"会响，不会静默漏量。
-A11_FILES="p10.sh p11.sh p13.sh p14.sh p15.sh p16.sh p17.sh p18.sh p20.sh p22.sh p23.sh"
-runsh_scan() {  # $1=目录 $2=空格分隔的文件名 ⇒ "<调用条数>|<裸调用条数>|<点名>"
+#      自指被数成调用、分母从 11 涨到 13。⇒ 分母 = 本目录除尺以外的全部 *.sh + README 的代码块，
+#      排除项只有两个且各有理由：p24.sh 是尺（它写着那个串）、run.sh 是被调方（不是调用方）。
+#   ③ 上一版的"覆盖守卫"glob 也是 `p*.sh` ⇒ 目录里两个非 p* 的调用方**根本不在它的视野里**：
+#      run_p20_and_restore.sh:50 的真调用、bootstrap_mysql.sh:97 广告给人抄的那句 echo。
+#      那句"清单外命中 0 处"是**在它看不见的范围里**数为 0 的 ⇒ 守卫换成"分母自己就是全目录"，
+#      再补一条**阳性对照**：下面 A11_REQ 这些文件必须各自至少贡献一条命中，少一个即分母塌了
+#      （改名、漏拷、glob 坏掉都会红；这一条本身就是被 ③ 逼出来的——只有"该看见的确实看见了"
+#      才顶得住"glob 悄悄少了一批文件"）。
+# 为什么 README 只数 ```bash 围栏内的行：`./run.sh` 也出现在讲坑的正文里（"以前裸调"），那是被讨论
+#   的对象不是可敲的命令；围栏正好把"教人敲的"与"讲道理的"分开，不靠猜。quick-start 那条的 `JAR=`
+#   在上一行、行尾带 `\`（README:30→31）⇒ 文档臂必须走同一个续行折叠，否则它会被读成裸调，
+#   第 ① 条那一枪在文档里会再响一次。
+A11_FILES="$(ls *.sh | grep -vE '^(run|p24)\.sh$' | tr '\n' ' ') README.md"
+A11_REQ="p10.sh p11.sh p13.sh p14.sh p15.sh p16.sh p17.sh p18.sh p20.sh p22.sh p23.sh run_p20_and_restore.sh bootstrap_mysql.sh README.md"
+runsh_scan() {  # $1=目录 $2=空格分隔的文件名 ⇒ "<调用条数>|<裸调用条数>|<点名>|<贡献命中的文件>"
   python3 - "$1" "$2" <<'PY'
 import re, os, sys
 d, names = sys.argv[1], sys.argv[2].split()
-tot, bare = 0, []
+tot, bare, hits = 0, [], []
+def logical(path):
+    """产出 (原始行号, 折叠续行之后的逻辑行)。.md 只数 ``` 围栏内的行。
+    ⚠ 行号必须是**原始**的：折叠之后再 enumerate 会整片前移（bootstrap_mysql.sh 那句 echo
+      原本在 97 行，折叠版报成 84），报出来的点名指不到文件里那一行——尺给的锚点得能回读。"""
+    raw = open(path, encoding='utf-8').read().split('\n')
+    if path.endswith('.md'):
+        keep, fence = [], False
+        for i, ln in enumerate(raw):
+            if ln.lstrip().startswith('```'):
+                fence = not fence; keep.append('')
+            else:
+                keep.append(ln if fence else '')
+        raw = keep
+    out, buf, start = [], '', None
+    for i, ln in enumerate(raw, 1):
+        if start is None:
+            start = i
+        if ln.endswith('\\'):
+            buf += ln[:-1] + ' '
+            continue
+        out.append((start, buf + ln)); buf, start = '', None
+    if start is not None:
+        out.append((start, buf))          # 文件以续行收尾（畸形，但别漏数）
+    return out
 for nm in names:
     f = os.path.join(d, nm)
     if not os.path.isfile(f):
         bare.append('%s:文件不在' % nm); continue
-    txt = open(f, encoding='utf-8').read()
-    for n, ln in enumerate(re.sub(r'\\\n[ \t]*', ' ', txt).split('\n'), 1):
+    got = 0
+    for n, ln in logical(f):
         s = ln.strip()
         if s.startswith('#') or './run.sh' not in s:
             continue
-        tot += 1
+        tot += 1; got += 1
         if 'JAR=' not in s and '${JAR' not in s:
             bare.append('%s:%d' % (nm, n))
-print('%d|%d|%s' % (tot, len(bare), ' '.join(bare) or '-'))
+    if got:
+        hits.append('%s(%d)' % (nm, got))
+print('%d|%d|%s|%s' % (tot, len(bare), ' '.join(bare) or '-', ' '.join(hits) or '-'))
 PY
 }
-# 覆盖守卫：清单外还有谁写着 ./run.sh（p24 自己是尺，排除）
-A11_OUTSIDE=""
-for f in p*.sh; do
-  [ "$f" = "p24.sh" ] && continue
-  case " $A11_FILES " in *" $f "*) continue;; esac
-  grep -vE '^[[:space:]]*#' "$f" | grep -q '\./run\.sh' && A11_OUTSIDE="$A11_OUTSIDE $f"
-done
 A11=$(runsh_scan "$(pwd)" "$A11_FILES")
-A11_TOT=${A11%%|*}; A11_REST=${A11#*|}; A11_BARE=${A11_REST%%|*}; A11_NAMES=${A11_REST#*|}
+A11_TOT=${A11%%|*}; A11_REST=${A11#*|}; A11_BARE=${A11_REST%%|*}; A11_REST2=${A11_REST#*|}
+A11_NAMES=${A11_REST2%%|*}; A11_HITS=${A11_REST2#*|}
+A11_MISS=""
+for req in $A11_REQ; do
+  printf '%s' " $A11_HITS " | grep -qF " $req(" || A11_MISS="$A11_MISS $req"
+done
 # 猎物：拿一份**当下合规**的显式调用（p20 那条带 JAR="$JAR"），只把 JAR 那一截摘掉 ⇒ 必须被点名
 mkdir -p "$WORK/prey_a11"
 python3 - "$(pwd)/p20.sh" "$WORK/prey_a11/p20.sh" <<'PY'
@@ -317,13 +352,66 @@ assert p != t, '猎物注入没改动任何字节（说明 p20 里那串 JAR= �
 open(sys.argv[2], 'w', encoding='utf-8').write(p)
 PY
 A11P=$(runsh_scan "$WORK/prey_a11" "p20.sh")
-if [ -n "$A11_OUTSIDE" ]; then
-  bad "A11 分母不闭合：清单外的脚本里出现了 ./run.sh 却没被量到 [$A11_OUTSIDE] ⇒ 先把调用方加进 A11_FILES（分母不能靠 glob，本尺自己就被 glob 数进去过一次）"
+A11_NF=$(printf '%s' "$A11_FILES" | wc -w | tr -d ' ')
+if [ -n "$A11_MISS" ]; then
+  bad "A11 分母塌了：这些文件里本该有 ./run.sh 的调用，这一遍一条都没数到 [$A11_MISS]（分母 $A11_NF 个文件，命中集 [$A11_HITS]）⇒ 文件或尺变了，别把'没看见'读成'没有'"
 elif [ "$A11_TOT" != "0" ] && [ "$A11_BARE" = "0" ] \
    && [ "${A11P%%|*}" = "1" ] && [ "$(printf '%s' "$A11P" | awk -F'|' '{print $2}')" != "0" ]; then
-  ok "A11 清单里 $A11_TOT 条 ./run.sh 调用（${A11_FILES// /、}）全部显式点名构件、裸调用 0 条；同一把尺在摘掉 p20 那截 JAR= 的猎物上把裸调用数到 $(printf '%s' "$A11P" | awk -F'|' '{print $2}') 条并点名 $(printf '%s' "$A11P" | awk -F'|' '{print $3}') ⇒ 不是恒零；覆盖守卫数到清单外命中 0 处"
+  ok "A11 分母 $A11_NF 个文件数到 $A11_TOT 条 ./run.sh 调用，全部显式点名构件、裸调用 0 条（命中集 $A11_HITS）；同一把尺在摘掉 p20 那截 JAR= 的猎物上把裸调用数到 $(printf '%s' "$A11P" | awk -F'|' '{print $2}') 条并点名 $(printf '%s' "$A11P" | awk -F'|' '{print $3}') ⇒ 不是恒零；阳性对照 $A11_REQ 全部在场"
 else
   bad "A11 尺或面不对：真值 调用=$A11_TOT 裸=$A11_BARE [$A11_NAMES]，猎物[$A11P]（期望 真值裸=0 且调用>0 且猎物被点名）⇒ 要么还有裸调用，要么这把尺看不见它"
+fi
+
+# A12（#39 下半）run.sh 的默认构件规则本身的行为：盘面恰好一份 *-exec.jar 才用它，
+#   0 份 / ≥2 份都得当场 FATAL。上一臂（A11）管的是"仓里没人裸调"，这一臂管的是"裸调真发生了
+#   会怎样"——两半合起来才是这一格：A11 绿 + A12 缺 ⇒ 下一个人裸调仍会静默起来一份旧字节。
+# 量法：每个臂造一个临时盘相（jar 文件名是真的、内容是假的），把 PATH 上的 `java` 换成替身，
+#   量的是"递给 java 的 -jar 参数是哪个文件"，不真起 JVM（真起来要库要端口，那是臂 B 在 250 的事）。
+# 牙（teeth_*）：把 0 份那一臂的处置原地换回**改前形状**（盘面没 jar 就用写死的名字）⇒ 必须
+#   看到"不失败 + 把那个不存在的名字递给 java"。少了这一臂，上面那四句 FATAL 有可能只是我抄的字符串。
+# ⚠ 顺带被这一臂撞出来的第二条（真缺陷，已修）：run.sh 原来以 `"${EXTRA_ARGS[@]}"` 收尾，而本机
+#   bash 3.2 在 `set -u` 下把**空数组**判为未绑定变量（`a=(); echo "${a[@]}"` → `a[@]: unbound
+#   variable`，rc=1），于是不设 ACCESS_TOKEN / APP_ARGS 时脚本在 exec java **之前**就死了。
+#   250 是 bash 5 才一直躲过这一枪 ⇒ 改成 ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}，非空时逐字同形。
+A12_DIR="$WORK/a12"
+mkdir -p "$A12_DIR/bin"
+printf '#!/bin/sh\necho "SHIM-JAVA-ARGV: $*"\n' > "$A12_DIR/bin/java"
+chmod +x "$A12_DIR/bin/java"
+a12_case() {  # $1=臂名 $2=要造的 jar(空格分隔,可空) $3=VAR=val 前缀 $4=用哪份 run.sh ⇒ "rc|首行"
+  local d="$A12_DIR/$1" jar rc line
+  mkdir -p "$d"; cp "${4:-$(pwd)/run.sh}" "$d/run.sh"; chmod +x "$d/run.sh"
+  # A12 不碰真库：mysql.env 只为过掉 run.sh 里那两个 ${MYSQL_DATABASE:?} / ${MYSQL_USER:?}，
+  # 值随脚本一起生在 $WORK 里、跑完即弃，所以这里出现的不是任何环境的口令。
+  printf 'MYSQL_DATABASE=a12db\nMYSQL_USER=a12user\nMYSQL_PASSWORD=a12pw\n' > "$d/mysql.env"
+  ( cd "$d" && for jar in ${2:-}; do printf 'not-a-jar' > "$jar"; done )
+  # ${3:-} 是必需的：本脚本 set -u，而"零个前缀 / 零个 jar"正是第一个臂要量的形状
+  # （第一遍就死在这里的 `$3: unbound variable` 上，五臂里三臂根本没跑成，读出的 [1|] 是尺的错不是面的）。
+  ( cd "$d" && PATH="$A12_DIR/bin:$PATH" PORT=18999 env ${3:-} ./run.sh > out.log 2>&1 ); rc=$?
+  line=$(grep -m1 -E 'FATAL|SHIM-JAVA-ARGV' "$d/out.log" || true)
+  printf '%s|%s' "$rc" "$line"
+}
+# 改前形状的猎物：只动 0 份那一支的处置，别的字一个字不变
+python3 - "$(pwd)/run.sh" "$A12_DIR/pre_fix_run.sh" <<'PY'
+import sys
+t = open(sys.argv[1], encoding='utf-8').read()
+old = '    0) echo "FATAL: $PWD 下没有 *-exec.jar，也没有 JAR= 点名 ⇒ 先把构件拷进来（不给默认名：那名字对应过 4 份字节）" >&2; exit 1 ;;'
+new = '    0) JAR="z-schedule-admin-1.0.0-exec.jar" ;;'
+assert old in t, '猎物注入找不到那一行（run.sh 的形状和我以为的不一样 ⇒ 先重读再改尺）'
+open(sys.argv[2], 'w', encoding='utf-8').write(t.replace(old, new, 1))
+PY
+A12_ZERO=$(a12_case zero "")
+A12_ONE=$(a12_case one "z-schedule-admin-svc-abc1234-exec.jar")
+A12_TWO=$(a12_case two "a-exec.jar b-exec.jar")
+A12_NAMED=$(a12_case named "a-exec.jar b-exec.jar" "JAR=b-exec.jar")
+A12_TEETH=$(a12_case teeth_zero "" "" "$A12_DIR/pre_fix_run.sh")
+if [ "${A12_ZERO%%|*}" = "1" ] && printf '%s' "$A12_ZERO" | grep -qF '下没有 *-exec.jar' \
+   && [ "${A12_ONE%%|*}" = "0" ] && printf '%s' "$A12_ONE" | grep -qF 'SHIM-JAVA-ARGV: -Xms256m -Xmx768m -jar ./z-schedule-admin-svc-abc1234-exec.jar' \
+   && [ "${A12_TWO%%|*}" = "1" ] && printf '%s' "$A12_TWO" | grep -qF '二义不猜' \
+   && [ "${A12_NAMED%%|*}" = "0" ] && printf '%s' "$A12_NAMED" | grep -qF ' -jar b-exec.jar' \
+   && [ "${A12_TEETH%%|*}" = "0" ] && printf '%s' "$A12_TEETH" | grep -qF ' -jar z-schedule-admin-1.0.0-exec.jar'; then
+  ok "A12 run.sh 的默认构件规则五臂齐：0 份 ⇒ rc=1 且报'没有 *-exec.jar'；1 份 ⇒ rc=0 且 java 拿到 ./z-schedule-admin-svc-abc1234-exec.jar；2 份 ⇒ rc=1 且报'二义不猜'；2 份+JAR= 点名 ⇒ rc=0 且 java 拿到被点名的 b-exec.jar（显式覆盖赢过二义）；猎物（0 份那支换回改前处置）⇒ rc=0 且 java 拿到从没存在过的 z-schedule-admin-1.0.0-exec.jar ⇒ 这四条判据分得开改前改后，不是恒真"
+else
+  bad "A12 形状不对：zero[$A12_ZERO] one[$A12_ONE] two[$A12_TWO] named[$A12_NAMED] teeth[$A12_TEETH]"
 fi
 
 echo ""

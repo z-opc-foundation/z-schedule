@@ -94,5 +94,6 @@ docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" "$CONTAINER" \
 
 echo
 echo "完成。下一步："
-echo "  把 run.sh 与本次的构件 jar 放进 $E2E_HOME，然后 ./run.sh（凭据全部来自 mysql.env，不进 argv）"
+echo "  把 run.sh 与本次的构件 jar 放进 $E2E_HOME，然后 JAR=<那份 jar> ./run.sh（凭据全部来自 mysql.env，不进 argv）"
+echo "  盘面恰好只有一份 *-exec.jar 时也可以省掉 JAR=，run.sh 会用它；0 份或 ≥2 份都会当场拒，不给默认名"
 echo "  真值一律用 ./q.sh 从 MySQL 裸读，不要用被测服务自己的 mapper 回读"
