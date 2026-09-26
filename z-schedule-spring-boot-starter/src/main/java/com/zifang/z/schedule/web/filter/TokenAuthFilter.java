@@ -1,6 +1,8 @@
 package com.zifang.z.schedule.web.filter;
 
 import com.zifang.z.schedule.core.config.ScheduleProperties;
+import com.zifang.z.schedule.web.auth.LoginSession;
+import com.zifang.z.schedule.web.auth.LoginSessionStore;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 

@@ -62,7 +62,16 @@ public interface UserService {
      *
      * @param username 用户名
      * @param password 密码
-     * @return 操作结果（成功返回 token=用户名）
+     * @return 操作结果（成功时 content 是服务端签发的会话令牌，不是用户名）
      */
     ReturnT<String> login(String username, String password);
+
+    /**
+     * 注销一个会话令牌。
+     *
+     * @param token {@link #login} 换来的令牌
+     * @return 操作结果。令牌未知/已过期也回成功：注销是幂等的，
+     * 而"这个令牌先前在不在用"是一个不该对外暴露的探针
+     */
+    ReturnT<String> logout(String token);
 }

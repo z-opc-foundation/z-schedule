@@ -3,6 +3,8 @@ package com.zifang.z.schedule.web.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.core.model.User;
+import com.zifang.z.schedule.web.auth.LoginSession;
+import com.zifang.z.schedule.web.auth.LoginSessionStore;
 import com.zifang.z.schedule.web.domain.entity.UserDO;
 import com.zifang.z.schedule.web.domain.mapper.UserMapper;
 import com.zifang.z.schedule.web.service.UserService;
@@ -28,6 +30,14 @@ public class UserServiceImpl implements UserService {
 
     @Resource
     private UserMapper userMapper;
+
+    /**
+     * 登录态载体。由 {@code @ComponentScan("...schedule.web")} 提供的单例，
+     * 与 {@code TokenAuthFilter} 拿到的是同一个实例——签发方与校验方各自一张表的话，
+     * 登录换来的令牌会永远验不过。
+     */
+    @Resource
+    private LoginSessionStore sessionStore;
 
     @PostConstruct
     public void init() {
@@ -111,6 +121,7 @@ public class UserServiceImpl implements UserService {
             }
             exist.setUsername(user.getUsername());
         }
+        boolean roleChanged = user.getRole() != null && !user.getRole().equals(exist.getRole());
         if (user.getRole() != null) exist.setRole(user.getRole());
         if (user.getPermission() != null) exist.setPermission(user.getPermission());
         // 如果传入了密码，做 MD5 哈希后更新
@@ -120,6 +131,10 @@ public class UserServiceImpl implements UserService {
         exist.setUpdateTime(new Date());
 
         userMapper.updateById(exist);
+        if (roleChanged) {
+            // 已经在跑的会话还带着旧角色。改完权限不撤销会话，等于"降权要等它自己过期"。
+            sessionStore.invalidateUser(user.getId());
+        }
         logger.info("User updated, userId={}", user.getId());
         return ReturnT.success();
     }
@@ -131,6 +146,8 @@ public class UserServiceImpl implements UserService {
             return ReturnT.fail("用户不存在");
         }
         userMapper.deleteById(id);
+        // 删账号只删了行：会话在内存里，不撤销的话这个"已经不存在的用户"还能带着旧身份调管理面
+        sessionStore.invalidateUser(id);
         logger.info("User deleted, userId={}", id);
         return ReturnT.success();
     }
@@ -155,8 +172,20 @@ public class UserServiceImpl implements UserService {
             return ReturnT.fail("密码错误");
         }
 
-        logger.info("User login success, username={}", username);
-        return ReturnT.success("登录成功", username);
+        // content 必须是服务端签发的不透明令牌，不能是用户名：用户名在 /user/list 里公开可读，
+        // 拿它当凭证等于"任何知道账号的人都已经登录了"。身份（userId/role/permission）绑在令牌上，
+        // 由 TokenAuthFilter 解析回请求。
+        LoginSession session = sessionStore.issue(userDO);
+        logger.info("User login success, username={}, userId={}, role={}",
+                username, session.getUserId(), session.getRole());
+        return ReturnT.success("登录成功", session.getToken());
+    }
+
+    @Override
+    public ReturnT<String> logout(String token) {
+        // 不回"令牌不存在"：那是一个"哪些令牌正在用"的探针。幂等成功即可。
+        sessionStore.invalidate(token);
+        return ReturnT.success("已退出", null);
     }
 
     // ==================== MD5 工具 ====================
