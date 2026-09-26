@@ -81,9 +81,9 @@ javap -c  /tmp/x.class | grep -c 'stepDown'         # 例：#18 的关停释放�
 
 口径是"服务常驻 250"。常驻意味着**别人会拿它当"能用"的证据**，所以它的身份要写死在这里：
 
-| 项 | 值（09-26 20:1x 实测，随每次换构件会变） | 怎么复现这个读数 |
+| 项 | 值（09-26 21:3x 实测，随每次换构件会变） | 怎么复现这个读数 |
 |---|---|---|
-| jar | `~/z-schedule-e2e/z-schedule-admin-svc-baa4458-exec.jar`，md5 `1350144a0c7fcf03237348a450862e19`（含 #19 的登录态；上一版 `7c9de99`/`f000e2f6…` 仍在同目录，别拿文件名当版本） | `md5sum z-schedule-admin-svc-*.jar`（**文件名不算证据**，见上一节） |
+| jar | `~/z-schedule-e2e/z-schedule-admin-svc-0f1248b-exec.jar`，md5 `a0ba15d658ececd513b397729fd1f0c6`（含 #19 的登录态 + #28 的铸权闸；`7c9de99`/`baa4458` 等旧版仍在同目录，别拿文件名当版本）。**编号取"最后一次改动 starter 源码的提交"**，之后的提交只动 `_doc/`，所以名字不等于 HEAD——判据永远是 md5 ＋ `javap` | `md5sum z-schedule-admin-svc-*.jar`（**文件名不算证据**，见上一节） |
 | 端口 | `18098`（**故意不用 18086**：那是 `p16/p20` 的性能台架端口，撞上就会量到一个"我没控制、不知道配置"的实例——坑 14） | `ss -ltnp \| grep 18098` |
 | 存活判据 | `GET /` → 200；`GET /jobinfo/list` → 200 | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18098/jobinfo/list` |
 | 真跑一次 | `./svc_smoke.sh`（播种 → 数 `handle_code=200` → 停用） | 见第 3 节 |
@@ -119,6 +119,22 @@ setsid env Z_SCHEDULE_ACCESSTOKEN="$SECRET" JAR="$JAR" PORT="$PORT" ./run.sh >lo
 比较属性名时去掉 `-` 并统一大小写（`access-token` 与 `accesstoken` 的 uniform 形式相同）。
 **别用 `run.sh` 的 `ACCESS_TOKEN=`**：它把值拼成 `--z.schedule.access-token=<值>`，
 于是同机任何人 `ps` 一下就拿到口令（实测条数：`pgrep -af '[j]ava' | grep -c 'access-token='`）。
+
+**"第一个管理员从哪来"（#28 之后改了答案，部署前必须先读这条）**：`/user/add` 的 `role` 是请求体自填的，
+#28 给"把账号变成 ADMIN"这一步加了一道闸——只有 **ADMIN 会话**或**共享密钥放行的请求**铸得出来。
+后果是演示模式（没配 `accessToken`）下**任何人都铸不出第一个管理员**，两条路可选：
+
+```bash
+# 路 1（p22.sh 的 S 段实测走的这条）：配了 accessToken 的实例上，用密钥铸
+curl -s -X POST "http://127.0.0.1:$PORT/user/add?accessToken=$SECRET" \
+  -H 'Content-Type: application/json' -d '{"username":"root","password":"***","role":"ADMIN"}'
+# 路 2：直接写库。password 列存的是**无盐 MD5 的 32 位十六进制**（见 §9′ 的 S.9 读数），
+#       照抄这个形状才能登录：echo -n "$PW" | md5sum
+```
+
+09-26 21:35 换构件的实测时间线（一次真实走通，不是推算）：`kill -TERM` → 旧进程 `Stepped down from
+LEADER` 并退出 **1 s**；`setsid … run.sh` → `Started ZScheduleAdminApplication in 6.61 s`；
+启动后 **46 ms** 就抢到 LEADER（旧进程已经把租约释放了，不用等 30 s）。全程 ≈13 s。
 
 **为什么"端口 200"不够**：常驻实例平时 ring 里 0 个任务，日志每 15 s 只打一条
 `Engine loaded 0 jobs into ring`——那是 reconcile 在跑，不是"能执行任务"。
@@ -162,7 +178,7 @@ setsid env Z_SCHEDULE_ACCESSTOKEN="$SECRET" JAR="$JAR" PORT="$PORT" ./run.sh >lo
 | `p19.sh` | **同一时刻有几条连接在忙**（忙=`COMMAND='Query'`）＋ STATE 直方图；自带 `preytest`：埋 6 条并发 `SELECT SLEEP(4)`，尺数不到 6 就 FATAL | 把"连接数"这个量从猜测变成读数 |
 | `p20.sh` | **固定需求只改池上限**（`max-active` 20/40/80），同时量吞吐与忙连接 ⇒ 池是不是那堵墙 | 天花板归属（见第 4 节，答案是"是"） |
 | `p21.sh` | **一次执行的 2 条语句里钱花在哪**：同一批 id 上 narrow(4 列) / wide(12 列) 两臂判"形状"，pair2(2 次提交) / pair1(1 次提交) 两臂判"次数" | ③ 的前提：收窄 SET 到底值不值（答案：不值，见 §4.4） |
-| `p22.sh` | **登录态在真机上兑现到哪一步**：A 段打常驻那台（演示模式），B 段自己起一台配了 `accessToken` 的（`Z_SCHEDULE_ACCESSTOKEN` 走环境变量、argv 0 命中），逐条验签发形状 / 角色闸 / 三种撤销，收尾数库、验租约 | #19（见 §9′；两台是必需的——撤销在演示模式下观察不到） |
+| `p22.sh` | **登录态 + 铸权闸在真机上兑现到哪一步**：S 段先起一台配了 `accessToken` 的关门实例（`Z_SCHEDULE_ACCESSTOKEN` 走环境变量、argv 0 命中）并用共享密钥种下第一个 ADMIN，A 段打常驻那台（演示模式：签发形状 / 角色闸 / **匿名铸 ADMIN 被拒**＋NORMAL 阳性对照），B 段回到关门实例逐条验三种撤销，收尾数库、验租约 | #19、#28（见 §9′；两台是必需的——撤销在演示模式下观察不到，而种子账号在演示模式下已经铸不出来） |
 | `svc_smoke.sh` | **常驻实例现在还活着吗**：播种 3 个 2 s 任务 → 数 `handle_code=200` → 用 handler 自己那行日志做阳性对照 → 停用。两处基线（`job_log` 的 `MAX(id)` 与日志文件行数）把**上一次运行**的行排除在外——不加基线时实测过 `成功=72`，其中 42 行是历史 | 0b9ac0f 的 `IJobHandler` 派发支要在真机上被观察到；陈旧正对照/陈旧计数 |
 
 ## 4. 天花板到底压在哪一层
