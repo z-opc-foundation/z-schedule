@@ -120,7 +120,7 @@ public class JobInfoController {
         if (who != null) {
             JobInfo exist = jobInfoService.getById(jobInfo.getId());
             if (exist != null) {
-                if (false && !who.permits(exist.getJobGroup())) {
+                if (!who.permits(exist.getJobGroup())) {
                     return ReturnT.fail(GroupAccess.denialReason(exist.getJobGroup()));
                 }
                 if (jobInfo.getJobGroup() != exist.getJobGroup() && !who.permits(jobInfo.getJobGroup())) {
