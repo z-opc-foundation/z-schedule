@@ -109,6 +109,17 @@
             <version>4.13.2</version>
             <scope>test</scope>
         </dependency>
+
+        <!--
+            仅测试用: JobLogMapperH2Test 要在真实数据库上跑聚合 SQL
+            (DATE()/列标签大小写折叠/COALESCE 这些只有驱动能给答案).
+            版本由 spring-boot-dependencies BOM 管理, 与 admin dev profile 同源.
+        -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
 </project>
