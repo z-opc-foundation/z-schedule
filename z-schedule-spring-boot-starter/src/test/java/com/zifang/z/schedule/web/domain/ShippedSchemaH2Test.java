@@ -3,6 +3,8 @@ package com.zifang.z.schedule.web.domain;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.MybatisSqlSessionFactoryBuilder;
 import com.baomidou.mybatisplus.core.toolkit.GlobalConfigUtils;
+import com.zifang.z.schedule.core.enums.MisfireStrategyEnum;
+import com.zifang.z.schedule.core.enums.TriggerTypeEnum;
 import com.zifang.z.schedule.web.domain.entity.JobGroupDO;
 import com.zifang.z.schedule.web.domain.entity.JobInfoDO;
 import com.zifang.z.schedule.web.domain.entity.JobLeaderDO;
@@ -26,11 +28,8 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -66,24 +65,21 @@ import static org.junit.Assert.fail;
 public class ShippedSchemaH2Test {
 
     private static final String URL = "jdbc:h2:mem:zschedule_shipped_schema;MODE=MySQL;DB_CLOSE_DELAY=-1";
-    private static final String SCRIPT = "_doc" + File.separator + "004_sql" + File.separator + "z-schedule.sql";
 
     private static final List<Class<?>> DO_TYPES = Arrays.<Class<?>>asList(
             JobInfoDO.class, JobLogDO.class, JobGroupDO.class,
             JobRegistryDO.class, JobLeaderDO.class, UserDO.class);
 
-    private File script;
     private JdbcDataSource ds;
     private SqlSession session;
 
     @Before
     public void setUp() throws Exception {
-        script = locateScript();
         ds = new JdbcDataSource();
         ds.setURL(URL);
         ds.setUser("sa");
         try (Connection c = ds.getConnection()) {
-            runScript(c, readStatements(script));
+            ShippedSqlScript.applyTo(c);
         }
 
         MybatisConfiguration cfg = new MybatisConfiguration();
@@ -269,6 +265,36 @@ public class ShippedSchemaH2Test {
         assertEquals(1L, day.getSuccess());
     }
 
+    /**
+     * 枚举值必须存得进列：{@code trigger_type} 写成 varchar(8) 时 {@code FIX_DELAY}(9 字节)存不下，
+     * 而列名对齐检查完全看不出来——列是在的，只是太短。严格模式报错、非严格模式截断成
+     * {@code FIX_DELA}，之后枚举匹配不上，任务被当成 cron 处理，FIX_DELAY 就再也没生效过。
+     */
+    @Test
+    public void 枚举值必须原样存得进脚本建出的列() throws Exception {
+        List<String> codes = new ArrayList<String>();
+        for (TriggerTypeEnum type : TriggerTypeEnum.values()) {
+            codes.add(type.getCode());
+        }
+        List<String> strategies = new ArrayList<String>();
+        for (MisfireStrategyEnum strategy : MisfireStrategyEnum.values()) {
+            strategies.add(strategy.getCode());
+        }
+
+        try (Connection c = ds.getConnection()) {
+            for (String code : codes) {
+                for (String strategy : strategies) {
+                    insertRawJob(c, "枚举列宽探针 " + code + "/" + strategy, code, strategy);
+                    Map<String, Object> read = readBack(c, "枚举列宽探针 " + code + "/" + strategy);
+                    assertEquals("trigger_type 被改动: " + code, code, read.get("trigger_type"));
+                    assertEquals("misfire_strategy 被改动: " + strategy, strategy,
+                            read.get("misfire_strategy"));
+                }
+            }
+        }
+        assertTrue("两个枚举都不能是空的, 否则这条检查是空跑", codes.size() >= 2 && strategies.size() >= 2);
+    }
+
     // ==================== 3. 门禁自己要能判红 ====================
 
     /**
@@ -277,7 +303,7 @@ public class ShippedSchemaH2Test {
      */
     @Test
     public void 脚本少一列时对齐检查必须点名那一列() throws Exception {
-        List<String> statements = readStatements(script);
+        List<String> statements = ShippedSqlScript.statements();
         int jobInfoIdx = indexOfJobInfo(statements);
         String jobInfoDdl = statements.get(jobInfoIdx);
 
@@ -301,7 +327,7 @@ public class ShippedSchemaH2Test {
         other.setUser("sa");
         Connection c = other.getConnection();
         try {
-            runScript(c, mutilated);
+            ShippedSqlScript.apply(c, mutilated);
             Set<String> columns = columnsOf(c, "z_schedule_job_info");
             assertTrue("前提: 其余列都在", columns.contains("TRIGGER_TYPE"));
             assertFalse("抹掉的列竟然还在", columns.contains("FIX_INTERVAL"));
@@ -320,7 +346,7 @@ public class ShippedSchemaH2Test {
     /** 脚本必须真含六张表——否则上面所有断言都在空集上自说自话。 */
     @Test
     public void 脚本本身不是空文件() throws Exception {
-        List<String> statements = readStatements(script);
+        List<String> statements = ShippedSqlScript.statements();
         assertEquals("建表脚本应当是 6 个 CREATE + 1 个种子行, 实际: " + statements, 7, statements.size());
         int creates = 0;
         for (String stmt : statements) {
@@ -333,40 +359,33 @@ public class ShippedSchemaH2Test {
 
     // ==================== 工具 ====================
 
-    private File locateScript() {
-        // surefire 的工作目录是模块 basedir, 脚本在仓库根的 _doc 下
-        File fromModule = new File("..", SCRIPT);
-        if (fromModule.isFile()) {
-            return fromModule;
+    /** 走裸 SQL 而不是 mapper：列宽出问题时，要让驱动的错误直接现形，不经 MP 转手。 */
+    private static void insertRawJob(Connection c, String jobDesc, String triggerType,
+                                     String misfireStrategy) throws SQLException {
+        try (java.sql.PreparedStatement ps = c.prepareStatement(
+                "INSERT INTO z_schedule_job_info (job_group, job_desc, job_cron, trigger_type,"
+                        + " misfire_strategy, trigger_status, executor_timeout, executor_fail_retry_count)"
+                        + " VALUES (1, ?, '0 * * * * ?', ?, ?, 0, 0, 0)")) {
+            ps.setString(1, jobDesc);
+            ps.setString(2, triggerType);
+            ps.setString(3, misfireStrategy);
+            assertEquals(1, ps.executeUpdate());
         }
-        File fromRoot = new File(SCRIPT);
-        if (fromRoot.isFile()) {
-            return fromRoot;
-        }
-        throw new IllegalStateException("找不到建表脚本 " + fromModule.getAbsolutePath()
-                + " 或 " + fromRoot.getAbsolutePath() + "; 门禁不能因为脚本失踪就静默通过");
     }
 
-    private static List<String> readStatements(File file) throws Exception {
-        String raw = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
-        StringBuilder body = new StringBuilder();
-        for (String line : raw.split("\n")) {
-            if (line.trim().startsWith("--")) {
-                continue;
-            }
-            body.append(line).append('\n');
-        }
-        List<String> out = new ArrayList<String>();
-        for (String stmt : body.toString().split(";")) {
-            String trimmed = stmt.trim();
-            if (!trimmed.isEmpty()) {
-                out.add(trimmed);
+    private static Map<String, Object> readBack(Connection c, String jobDesc) throws SQLException {
+        try (java.sql.PreparedStatement ps = c.prepareStatement(
+                "SELECT trigger_type, misfire_strategy FROM z_schedule_job_info WHERE job_desc = ?")) {
+            ps.setString(1, jobDesc);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue("按描述读不回刚插入的行", rs.next());
+                Map<String, Object> row = new java.util.LinkedHashMap<String, Object>();
+                row.put("trigger_type", rs.getString(1));
+                row.put("misfire_strategy", rs.getString(2));
+                assertFalse("同一描述读回了多行", rs.next());
+                return row;
             }
         }
-        if (out.isEmpty()) {
-            throw new IllegalStateException("建表脚本解析出 0 条语句: " + file.getAbsolutePath());
-        }
-        return out;
     }
 
     private static int indexOfJobInfo(List<String> statements) {
@@ -376,15 +395,6 @@ public class ShippedSchemaH2Test {
             }
         }
         throw new IllegalStateException("脚本里没有 z_schedule_job_info");
-    }
-
-    private static void runScript(Connection c, List<String> statements) throws SQLException {
-        try (Statement s = c.createStatement()) {
-            s.execute("DROP ALL OBJECTS");
-            for (String stmt : statements) {
-                s.execute(stmt);
-            }
-        }
     }
 
     private Set<String> tables() throws SQLException {

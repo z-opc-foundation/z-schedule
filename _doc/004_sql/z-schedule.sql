@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS `z_schedule_job_info`
     `trigger_status`           tinyint       NOT NULL DEFAULT 0 COMMENT '0-停止 1-运行',
     `trigger_last_time`        bigint        NOT NULL DEFAULT 0 COMMENT '上次触发时间(ms)',
     `trigger_next_time`        bigint        NOT NULL DEFAULT 0 COMMENT '下次触发时间(ms)',
-    `trigger_type`             varchar(8)    NOT NULL DEFAULT 'CRON' COMMENT '触发类型: CRON / FIX_RATE / FIX_DELAY',
+    `trigger_type`             varchar(16)   NOT NULL DEFAULT 'CRON' COMMENT '触发类型: CRON / FIX_RATE / FIX_DELAY / MANUAL / API / RETRY / PARENT',
     `fix_interval`             bigint        NOT NULL DEFAULT 0 COMMENT 'FIX_RATE/FIX_DELAY 间隔(毫秒), 0=未配置',
     `misfire_strategy`         varchar(32)   NOT NULL DEFAULT 'DO_NOTHING' COMMENT '调度过期策略: DO_NOTHING / FIRE_ONCE_NOW',
     `child_job_id`             varchar(256)  NOT NULL DEFAULT '' COMMENT '子任务ID(逗号分隔)',
@@ -135,6 +135,13 @@ CREATE TABLE IF NOT EXISTS `z_schedule_user`
 --   z_schedule_user 整张表缺失（只在 006 迁移脚本里，且它插入的 admin 口令是明文，
 --       而登录按 MD5 比对列值 ⇒ 那个种子账号登不进去，需要把列值改成散列才能用）
 -- 其余 4 张表列集一致。
+--
+-- trigger_type 用 varchar(16) 而不是历史脚本里的 varchar(8)：最长的枚举值是 FIX_DELAY(9 字节)，
+-- 8 的列宽放不下——严格模式报 "Data too long"，非严格模式静默截断成 FIX_DELA，
+-- 之后 TriggerTypeEnum 匹配不上，任务按 cron 分支处理，等于 FIX_DELAY 模式从来没生效过。
+-- 已经按 z-opc/_doc/006_troubleshooting 建过列的库需要自己执行:
+--   ALTER TABLE `z_schedule_job_info` MODIFY `trigger_type` varchar(16) NOT NULL DEFAULT 'CRON' ...;
+-- （本文件只建表，不碰已有列；线上库的变更需要 DBA 授权后执行。）
 --
 -- 本文件把六个 DO 需要的列补齐，之后新增列请同时改 DO 与本文件——
 -- ShippedSchemaH2Test 会对不一致的改动直接判红。

@@ -2,6 +2,8 @@ package com.zifang.z.schedule.web.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.zifang.z.schedule.core.enums.MisfireStrategyEnum;
+import com.zifang.z.schedule.core.enums.TriggerTypeEnum;
 import com.zifang.z.schedule.core.model.JobInfo;
 import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.core.util.CronExpression;
@@ -82,11 +84,22 @@ public class JobInfoServiceImpl implements JobInfoService {
         jobInfo.setTriggerLastTime(0);
         jobInfo.setTriggerNextTime(0);
         if (jobInfo.getTriggerType() == null || jobInfo.getTriggerType().isEmpty()) {
-            jobInfo.setTriggerType("CRON");
+            jobInfo.setTriggerType(TriggerTypeEnum.CRON.getCode());
+        } else if (TriggerTypeEnum.match(jobInfo.getTriggerType()) == null) {
+            return ReturnT.fail("触发类型不合法: " + jobInfo.getTriggerType()
+                    + ", 可选 " + codesOf(TriggerTypeEnum.values()));
         }
         if (jobInfo.getMisfireStrategy() == null || jobInfo.getMisfireStrategy().isEmpty()) {
-            jobInfo.setMisfireStrategy("DO_NOTHING");
+            jobInfo.setMisfireStrategy(MisfireStrategyEnum.DO_NOTHING.getCode());
+        } else if (MisfireStrategyEnum.match(jobInfo.getMisfireStrategy()) == null) {
+            return ReturnT.fail("调度过期策略不合法: " + jobInfo.getMisfireStrategy()
+                    + ", 可选 " + codesOf(MisfireStrategyEnum.values()));
         }
+        ReturnT<String> intervalCheck = checkFixedInterval(jobInfo.getTriggerType(), jobInfo.getFixInterval());
+        if (intervalCheck != null) {
+            return intervalCheck;
+        }
+
         Date now = new Date();
         jobInfo.setAddTime(now);
         jobInfo.setUpdateTime(now);
@@ -108,17 +121,32 @@ public class JobInfoServiceImpl implements JobInfoService {
         if (exist == null) {
             return ReturnT.fail("任务不存在");
         }
+        // 先判空再判"要不要改运行中的 cron"：空串是格式问题，跟任务在不在跑无关
+        if (jobInfo.getJobCron() != null && jobInfo.getJobCron().trim().isEmpty()) {
+            return ReturnT.fail("Cron表达式不能为空");
+        }
         if (exist.getTriggerStatus() != null && exist.getTriggerStatus() == 1) {
             if (jobInfo.getJobCron() != null && !jobInfo.getJobCron().equals(exist.getJobCron())) {
                 return ReturnT.fail("请先停止任务再修改Cron表达式");
             }
         }
-        if (jobInfo.getJobCron() != null && !jobInfo.getJobCron().isEmpty()) {
+        if (jobInfo.getJobCron() != null) {
             try {
                 new CronExpression(jobInfo.getJobCron());
             } catch (ParseException e) {
                 return ReturnT.fail("Cron表达式格式错误: " + e.getMessage());
             }
+        }
+        if (jobInfo.getTriggerType() != null && !jobInfo.getTriggerType().isEmpty()
+                && TriggerTypeEnum.match(jobInfo.getTriggerType()) == null) {
+            // 引擎按 code 精确匹配 FIX_RATE/FIX_DELAY，大小写写错会静默退化成 cron 任务
+            return ReturnT.fail("触发类型不合法: " + jobInfo.getTriggerType()
+                    + ", 可选 " + codesOf(TriggerTypeEnum.values()));
+        }
+        if (jobInfo.getMisfireStrategy() != null && !jobInfo.getMisfireStrategy().isEmpty()
+                && MisfireStrategyEnum.match(jobInfo.getMisfireStrategy()) == null) {
+            return ReturnT.fail("调度过期策略不合法: " + jobInfo.getMisfireStrategy()
+                    + ", 可选 " + codesOf(MisfireStrategyEnum.values()));
         }
 
         // 增量更新非空字段
@@ -138,12 +166,22 @@ public class JobInfoServiceImpl implements JobInfoService {
             exist.setExecutorFailRetryCount(jobInfo.getExecutorFailRetryCount());
         if (jobInfo.getTriggerType() != null && !jobInfo.getTriggerType().isEmpty())
             exist.setTriggerType(jobInfo.getTriggerType());
-        if (jobInfo.getFixInterval() >= 0)
-            exist.setFixInterval(jobInfo.getFixInterval());
+        // DTO 的 fixInterval 是 primitive long：不带这个字段时反序列化成 0，而 0 对 FIX_* 任务是非法值，
+        // 所以只认正数为"调用方真的给了间隔"，其余保持列值不变。
+        if (jobInfo.getFixInterval() > 0) exist.setFixInterval(jobInfo.getFixInterval());
         if (jobInfo.getMisfireStrategy() != null && !jobInfo.getMisfireStrategy().isEmpty())
             exist.setMisfireStrategy(jobInfo.getMisfireStrategy());
         if (jobInfo.getChildJobId() != null)
             exist.setChildJobId(jobInfo.getChildJobId());
+
+        // 合并后的行必须自己成立：把 CRON 任务改成 FIX_* 却不带间隔，等于交出一个永不触发的任务
+        long mergedInterval = exist.getFixInterval() == null ? 0L : exist.getFixInterval();
+        ReturnT<String> intervalCheck = checkFixedInterval(effectiveTriggerType(exist.getTriggerType()),
+                mergedInterval);
+        if (intervalCheck != null) {
+            return intervalCheck;
+        }
+
         exist.setUpdateTime(new Date());
 
         int rows = jobInfoMapper.updateById(exist);
@@ -171,10 +209,24 @@ public class JobInfoServiceImpl implements JobInfoService {
         if (exist == null) {
             return ReturnT.fail("任务不存在");
         }
-        try {
-            new CronExpression(exist.getJobCron());
-        } catch (ParseException e) {
-            return ReturnT.fail("Cron表达式格式错误: " + e.getMessage());
+        // 按引擎真正会走的分支校验：FIX_* 读 fix_interval，其它类型读 cron。
+        // 校验不过就改状态，只会得到"启动成功但永远不触发"的假象。
+        String triggerType = effectiveTriggerType(exist.getTriggerType());
+        if (isFixedIntervalType(triggerType)) {
+            ReturnT<String> intervalCheck = checkFixedInterval(triggerType,
+                    exist.getFixInterval() == null ? 0L : exist.getFixInterval());
+            if (intervalCheck != null) {
+                return intervalCheck;
+            }
+        } else {
+            if (exist.getJobCron() == null || exist.getJobCron().trim().isEmpty()) {
+                return ReturnT.fail("Cron表达式不能为空");
+            }
+            try {
+                new CronExpression(exist.getJobCron());
+            } catch (ParseException e) {
+                return ReturnT.fail("Cron表达式格式错误: " + e.getMessage());
+            }
         }
         exist.setTriggerStatus(1);
         exist.setUpdateTime(new Date());
@@ -247,6 +299,41 @@ public class JobInfoServiceImpl implements JobInfoService {
     public List<JobInfo> listRunning() {
         return DoMapper.toDTOList(jobInfoMapper.selectList(
                 new LambdaQueryWrapper<JobInfoDO>().eq(JobInfoDO::getTriggerStatus, 1)));
+    }
+
+    /** 把可选值拼进报错消息。两个枚举的常量名与 code 一致，取 name() 即可。 */
+    private static String codesOf(Enum<?>... values) {
+        StringBuilder sb = new StringBuilder();
+        for (Enum<?> value : values) {
+            if (sb.length() > 0) {
+                sb.append(" / ");
+            }
+            sb.append(value.name());
+        }
+        return sb.toString();
+    }
+
+    /**
+     * FIX_RATE / FIX_DELAY 任务的间隔必须有正数意义，否则引擎 {@code toScheduledJob} 直接返回 null：
+     * 任务不落时间轮，但 {@code trigger_status} 仍是 1——调用方看到"启动成功"，任务却永远不跑。
+     *
+     * @return 需要拒绝时返回失败结果，合法时返回 null
+     */
+    private static ReturnT<String> checkFixedInterval(String triggerType, long fixInterval) {
+        if (isFixedIntervalType(triggerType) && fixInterval <= 0) {
+            return ReturnT.fail(triggerType + " 任务必须配置正数间隔(fix_interval, 毫秒)");
+        }
+        return null;
+    }
+
+    private static boolean isFixedIntervalType(String triggerType) {
+        return TriggerTypeEnum.FIX_RATE.getCode().equals(triggerType)
+                || TriggerTypeEnum.FIX_DELAY.getCode().equals(triggerType);
+    }
+
+    /** 与 {@code JobScheduleEngine.triggerTypeOf} 同规则：空值按 CRON 处理。 */
+    private static String effectiveTriggerType(String triggerType) {
+        return triggerType == null || triggerType.isEmpty() ? TriggerTypeEnum.CRON.getCode() : triggerType;
     }
 
     /**
