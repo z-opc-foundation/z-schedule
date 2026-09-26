@@ -9,6 +9,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
 import javax.annotation.Resource;
 import java.net.InetAddress;
 import java.util.Date;
@@ -160,8 +161,13 @@ public class LeaderElector {
     }
 
     /**
-     * 主动放弃 Leader（应用关闭时）
+     * 主动放弃 Leader（应用关闭时由容器回调）.
+     * <p>
+     * 没有这个回调时，优雅关停与崩溃关停变得一模一样：接管方必须等满 30s 租约才选得出主。
+     * 250 真机实测重启后 24 秒内 {@code /jobinfo/start} 全部返回 success 而一行日志都不产生
+     * （"skip registerJob ... leader 将在下次 reconcile 装载"，可那时还没有 leader）。
      */
+    @PreDestroy
     public void stepDown() {
         if (isLeader.compareAndSet(true, false)) {
             jobLeaderMapper.update(null,

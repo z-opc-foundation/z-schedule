@@ -10,6 +10,7 @@ import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
 import org.h2.jdbcx.JdbcDataSource;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -258,5 +259,61 @@ public class LeaderElectorH2Test {
 
         assertEquals("旧主不能让新主掉线", taken.getInstanceId(), row().getOwner());
         assertNotNull("旧主更不能把任期清空", row().getExpireTime());
+    }
+
+    /**
+     * 关停要走生命周期回调，不是"有个 stepDown 方法"就行。
+     * <p>
+     * 250 真机实测：换上带修复的 jar 重启后，引擎 13:34:59 就起来了，13:35:03 的两次 {@code /jobinfo/start}
+     * 都返回 success，但日志是 "[Follower] skip registerJob ... leader 将在下次 reconcile 装载"；
+     * 节点直到 13:35:27 才 "Became LEADER"（旧租约 30s 自然到期），这 24 秒里两个任务一行日志都没产生，
+     * trigger_last_time / trigger_next_time 恒为 0。根因是 {@link LeaderElector#stepDown()} 在 src/main
+     * 里没有任何调用方——优雅关停从不释放 Leader 行，每次重启都要付满一个 TTL。
+     * 所以这里用真实容器 close 钉"回调接没接上"，而不是反射查注解。
+     */
+    @Test
+    public void 容器关闭必须释放Leader让重启节点立刻接主() throws Exception {
+        SqlSession session = factory.openSession(true);
+        opened.add(session);
+        AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext();
+        ctx.registerBean(JobLeaderMapper.class, () -> session.getMapper(JobLeaderMapper.class));
+        ctx.register(LeaderElector.class);
+        ctx.refresh();
+
+        LeaderElector node = ctx.getBean(LeaderElector.class);
+        node.elect();
+        assertTrue("前置条件：这个节点得先真的是主，否则测不出释放", node.isLeader());
+
+        ctx.close();
+
+        JobLeaderDO afterClose = row();
+        assertNull("close 必须把 owner 清掉，否则接主方要空等 30s TTL", afterClose.getOwner());
+        assertNull("任期也要清掉，只置 owner 为 null 不够", afterClose.getExpireTime());
+
+        LeaderElector restarted = newNode();
+        restarted.elect();
+        assertTrue("关停后重启的节点应立刻当选，而不是等租约过期", restarted.isLeader());
+    }
+
+    /**
+     * 反向兜住"无条件 UPDATE 清行"的修法：关停一个从没当过主的节点，绝不能把现任主的任期抹掉，
+     * 否则一次 follower 重启就会引发全集群重新选举。
+     */
+    @Test
+    public void 关停follower不得清掉现任主的行() throws Exception {
+        LeaderElector leader = newNode();
+        leader.init();
+        leader.elect();
+        assertTrue(leader.isLeader());
+
+        SqlSession session = factory.openSession(true);
+        opened.add(session);
+        AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext();
+        ctx.registerBean(JobLeaderMapper.class, () -> session.getMapper(JobLeaderMapper.class));
+        ctx.register(LeaderElector.class);
+        ctx.refresh();
+        ctx.close(); // 这个节点从没 elect 过，不是主
+
+        assertEquals("非主节点关停不该动 Leader 行", leader.getInstanceId(), row().getOwner());
     }
 }
