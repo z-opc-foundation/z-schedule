@@ -1,10 +1,12 @@
 package com.zifang.z.schedule.web.controller;
 
+import com.zifang.z.schedule.core.model.JobInfo;
 import com.zifang.z.schedule.core.model.JobLog;
 import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.core.param.KillParam;
 import com.zifang.z.schedule.core.param.TriggerParam;
 import com.zifang.z.schedule.web.service.ExecutorRegistryService;
+import com.zifang.z.schedule.web.service.JobInfoService;
 import com.zifang.z.schedule.web.service.JobLogService;
 import com.zifang.z.schedule.web.service.JobTriggerService;
 import org.apache.logging.log4j.LogManager;
@@ -43,6 +45,9 @@ public class ExecutorCallbackController {
 
     @Autowired
     private JobLogService jobLogService;
+
+    @Autowired
+    private JobInfoService jobInfoService;
 
     @Autowired
     private JobTriggerService jobTriggerService;
@@ -89,9 +94,17 @@ public class ExecutorCallbackController {
         }
         // 此处不直接执行,而是记录一行"已下发"的调度日志(实际执行由执行器侧完成),
         // 真正的执行结果通过 /executor/callback 异步回写到这一行上.
+        //
+        // jobGroup 必须从库里那一行取，不能写死 0：日志上的组是 /joblog/* 按组收口唯一的依据，
+        // 写成 0 会让这一行在所有组的过滤里同时隐形（含统计窗口），而界面上看不出任何异常。
+        // 顺带把"任务不存在也照样落一行"这条路堵掉——孤儿行正是 join 式清理删不掉的那种形状（见 e2e README 坑 4）。
+        JobInfo job = jobInfoService.getById(triggerParam.getJobId());
+        if (job == null) {
+            return ReturnT.fail("jobId=" + triggerParam.getJobId() + " 不存在，未记录派发日志");
+        }
         JobLog log = new JobLog();
         log.setJobId(triggerParam.getJobId());
-        log.setJobGroup(0);
+        log.setJobGroup(job.getJobGroup());
         log.setExecutorHandler(triggerParam.getExecutorHandler());
         log.setExecutorParam(triggerParam.getExecutorParams());
         // 调度时间必须由下发这一刻落库: statsBetween/dailyStats 都以 trigger_time 为窗口列,

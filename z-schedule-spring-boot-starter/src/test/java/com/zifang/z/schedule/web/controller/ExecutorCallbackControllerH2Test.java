@@ -3,6 +3,7 @@ package com.zifang.z.schedule.web.controller;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.MybatisSqlSessionFactoryBuilder;
 import com.baomidou.mybatisplus.core.toolkit.GlobalConfigUtils;
+import com.zifang.z.schedule.core.model.JobInfo;
 import com.zifang.z.schedule.core.model.JobLog;
 import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.core.param.KillParam;
@@ -10,6 +11,7 @@ import com.zifang.z.schedule.core.param.TriggerParam;
 import com.zifang.z.schedule.web.domain.entity.JobLogDO;
 import com.zifang.z.schedule.web.domain.mapper.JobLogMapper;
 import com.zifang.z.schedule.web.service.ExecutorRegistryService;
+import com.zifang.z.schedule.web.service.JobInfoService;
 import com.zifang.z.schedule.web.service.JobLogService;
 import com.zifang.z.schedule.web.service.JobTriggerService;
 import com.zifang.z.schedule.web.service.impl.JobLogServiceImpl;
@@ -64,6 +66,7 @@ public class ExecutorCallbackControllerH2Test {
     private ExecutorCallbackController controller;
     private RecordingRegistry registry;
     private RecordingTrigger trigger;
+    private FakeJobInfoService jobInfo;
 
     @Before
     public void setUp() throws Exception {
@@ -105,9 +108,13 @@ public class ExecutorCallbackControllerH2Test {
 
         registry = new RecordingRegistry();
         trigger = new RecordingTrigger();
+        jobInfo = new FakeJobInfoService();
+        // 派发日志的组要跟着库里那一行走，所以参照集里必须真有一个"带组的任务"
+        jobInfo.groupOf.put(7, 3);
         controller = new ExecutorCallbackController();
         inject(controller, "registryService", registry);
         inject(controller, "jobLogService", jobLogService);
+        inject(controller, "jobInfoService", jobInfo);
         inject(controller, "jobTriggerService", trigger);
     }
 
@@ -246,6 +253,27 @@ public class ExecutorCallbackControllerH2Test {
         assertEquals(400, controller.run(triggerParam(0, 0L)).getCode());
         assertEquals(400, controller.run(triggerParam(-3, 0L)).getCode());
         assertEquals(0L, rowCountQuietly());
+    }
+
+    @Test
+    public void 派发的日志带上任务真正的组() {
+        // job_group 是 /joblog/* 按组收口唯一的依据。写死 0 的那版实现不是"组不对"这么轻：
+        // 这一行在所有组的过滤里同时隐形，而界面上派发、回调、统计看起来全都正常。
+        ReturnT<?> r = controller.run(triggerParam(7, 0L));
+
+        assertEquals(200, r.getCode());
+        Map<String, Object> row = readQuietly(lastLogId());
+        assertEquals("job_group 必须跟着库里那一行, 实际=" + row.get("job_group"), 3L, asLong(row.get("job_group")));
+    }
+
+    @Test
+    public void 任务不存在时不写派发行() {
+        // 库里没有这个 jobId 还照样落一行 = 造孤儿日志，正是 join 式清理删不掉的形状（e2e README 坑 4）
+        ReturnT<?> r = controller.run(triggerParam(99, 0L));
+
+        assertFalse("库里没有的任务不该回成功", r.isSuccess());
+        assertEquals("被拒的派发一个字都不该写进库", 0L, rowCountQuietly());
+        assertTrue("组是从任务那一行取的", jobInfo.calls.contains("getById:99"));
     }
 
     // ---- /executor/callback ----
@@ -478,6 +506,83 @@ public class ExecutorCallbackControllerH2Test {
         p.setJobId(jobId);
         p.setLogId(logId);
         return p;
+    }
+
+    /**
+     * 只提供 /executor/run 需要的那一格事实：jobId 在不在库里、属于哪个组。
+     * 组号刻意用 3 而不是 0——写死 0 的旧实现要用同形的参照集才测不出来。
+     */
+    private static class FakeJobInfoService implements JobInfoService {
+        final List<String> calls = new ArrayList<String>();
+        final Map<Integer, Integer> groupOf = new LinkedHashMap<Integer, Integer>();
+
+        @Override
+        public JobInfo getById(int id) {
+            calls.add("getById:" + id);
+            Integer group = groupOf.get(id);
+            if (group == null) {
+                return null;
+            }
+            JobInfo job = new JobInfo();
+            job.setId(id);
+            job.setJobGroup(group);
+            return job;
+        }
+
+        @Override
+        public List<JobInfo> getAll() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<JobInfo> getByJobGroup(int jobGroup) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ReturnT<String> add(JobInfo jobInfo) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ReturnT<String> update(JobInfo jobInfo) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ReturnT<String> delete(int id) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ReturnT<String> stop(int id) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ReturnT<String> start(int id) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ReturnT<String> trigger(int id) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ReturnT<List<String>> nextTriggerTime(String cron) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<JobInfo> listRunning() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void updateTriggerTimes(int jobId, long lastTime, long nextTime) {
+            throw new UnsupportedOperationException();
+        }
     }
 
     private static class RecordingRegistry implements ExecutorRegistryService {
