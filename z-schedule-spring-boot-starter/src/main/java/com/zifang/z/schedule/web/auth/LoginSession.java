@@ -1,5 +1,8 @@
 package com.zifang.z.schedule.web.auth;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 一次登录换来的身份：把"出示的令牌"绑定回"哪个用户、什么角色、能碰哪些 jobGroup"。
  * <p>

@@ -2,24 +2,20 @@ package com.zifang.z.schedule.web.controller;
 
 import com.zifang.z.schedule.core.model.JobInfo;
 import com.zifang.z.schedule.core.model.ReturnT;
-import com.zifang.z.schedule.web.auth.LoginSession;
-import com.zifang.z.schedule.web.auth.LoginSessionStore;
-import com.zifang.z.schedule.web.domain.entity.UserDO;
-import com.zifang.z.schedule.web.filter.TokenAuthFilter;
 import com.zifang.z.schedule.web.service.JobInfoService;
 import org.junit.Test;
 
 import javax.servlet.http.HttpServletRequest;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
+import static com.zifang.z.schedule.web.auth.TestRequests.anonymous;
+import static com.zifang.z.schedule.web.auth.TestRequests.describe;
+import static com.zifang.z.schedule.web.auth.TestRequests.scoped;
+import static com.zifang.z.schedule.web.auth.TestRequests.session;
+import static com.zifang.z.schedule.web.auth.TestRequests.sharedSecret;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -149,8 +145,8 @@ public class JobInfoControllerGroupAccessTest {
         seedRows();
 
         for (HttpServletRequest request : Arrays.asList(
-                anonymous(), sharedSecret(), session("8", "boss", "ADMIN", "1"),
-                session("9", "peon", "NORMAL", ""))) {
+                anonymous(), sharedSecret(), session(8, "boss", "ADMIN", "1"),
+                session(9, "peon", "NORMAL", ""))) {
             ReturnT<List<JobInfo>> list = controller.list(0, request);
             assertTrue(list.isSuccess());
             assertEquals("这一支不该被裁剪: " + describe(request), Arrays.asList(11, 12, 21), ids(list.getContent()));
@@ -162,10 +158,10 @@ public class JobInfoControllerGroupAccessTest {
         seedRows();
 
         for (HttpServletRequest request : Arrays.asList(
-                anonymous(), sharedSecret(), session("8", "boss", "ADMIN", "1"))) {
+                anonymous(), sharedSecret(), session(8, "boss", "ADMIN", "1"), session(9, "peon", "NORMAL", ""))) {
             service.calls.clear();
             assertTrue(describe(request), controller.remove(21, null, request).isSuccess());
-            assertTrue("管理员/密钥/匿名都不需要读那一行来判组: " + describe(request),
+            assertTrue("管理员/密钥/匿名/留空都不需要读那一行来判组: " + describe(request),
                     !service.calls.contains("getById:21"));
             assertEquals(Arrays.asList("delete:21"), mutations());
         }
