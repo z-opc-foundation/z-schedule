@@ -226,15 +226,7 @@ public class JobInfoControllerGroupAccessTest {
     }
 
     private static String describe(HttpServletRequest request) {
-        Object identity = request.getAttribute(TokenAuthFilter.IDENTITY_ATTRIBUTE);
-        if (Boolean.TRUE.equals(request.getAttribute(TokenAuthFilter.FULL_AUTHORITY_ATTRIBUTE))) {
-            return "sharedSecret";
-        }
-        if (identity == null) {
-            return "anonymous";
-        }
-        LoginSession session = (LoginSession) identity;
-        return session.getUsername() + "/" + session.getRole() + "/" + session.getPermission();
+        return TestRequests.describe(request);
     }
 
     private static JobInfo job(int id, int jobGroup) {

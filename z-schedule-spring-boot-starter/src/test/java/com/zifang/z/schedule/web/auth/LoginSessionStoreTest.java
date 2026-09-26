@@ -3,6 +3,8 @@ package com.zifang.z.schedule.web.auth;
 import com.zifang.z.schedule.web.domain.entity.UserDO;
 import org.junit.Test;
 
+import java.util.Arrays;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -146,6 +148,42 @@ public class LoginSessionStoreTest {
         // 但 permits 是公开的判据，它的成立不能靠"恰好没人那么调"。
         assertTrue("role 优先于 permission 列",
                 store.issue(user(24, "boss", "ADMIN", "1")).permits(2));
+    }
+
+    @Test
+    public void 展开的组集合与点名的判据是同一份() {
+        LoginSessionStore store = new LoginSessionStore();
+
+        LoginSession scoped = store.issue(user(25, "peon", "NORMAL", "2,1,2"));
+        assertEquals("去重并保持填写顺序：逐组查询不该对同一组打两次库",
+                Arrays.asList(2, 1), scoped.declaredGroups());
+        assertFalse(scoped.unrestricted());
+        for (Integer group : scoped.declaredGroups()) {
+            assertTrue("展开出来的每一组，点名也必须认: " + group, scoped.permits(group));
+        }
+        assertFalse("没写进那一列的组，两边都不认", scoped.permits(3));
+
+        LoginSession dirty = store.issue(user(26, "peon", "NORMAL", "abc"));
+        assertTrue("整列错字 ⇒ 展开为空", dirty.declaredGroups().isEmpty());
+        assertFalse("展开为空和 permits 恒假是同一件事的两面，不许一面真一面假", dirty.permits(1));
+        assertFalse("留了值就不算不限", dirty.unrestricted());
+
+        LoginSession blank = store.issue(user(27, "peon", "NORMAL", ""));
+        assertTrue(blank.unrestricted());
+        assertTrue("留空=不限，展开出来的是空列表而不是『所有组』——拿空列表逐组查会把一个"
+                + "本该看见全部的人裁成什么都看不见", blank.declaredGroups().isEmpty());
+        assertTrue(store.issue(user(28, "boss", "ADMIN", "1")).unrestricted());
+    }
+
+    @Test
+    public void 带前导零的组号两边给同一个答案() {
+        LoginSession scoped = new LoginSessionStore().issue(user(29, "peon", "NORMAL", "01"));
+
+        // job_group 在库里是 int：'01' 写的就是第 1 组。按字符串比会把这个人挡在看得见的那组外面，
+        // 按数字展开又会在列表里给他看——两把尺必须同一份解析。
+        assertEquals(Arrays.asList(1), scoped.declaredGroups());
+        assertTrue(scoped.permits(1));
+        assertFalse(scoped.permits(2));
     }
 
     private static UserDO user(int id, String username, String role) {
