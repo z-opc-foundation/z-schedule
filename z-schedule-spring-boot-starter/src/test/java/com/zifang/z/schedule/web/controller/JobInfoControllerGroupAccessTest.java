@@ -225,10 +225,6 @@ public class JobInfoControllerGroupAccessTest {
         return out;
     }
 
-    private static String describe(HttpServletRequest request) {
-        return TestRequests.describe(request);
-    }
-
     private static JobInfo job(int id, int jobGroup) {
         JobInfo jobInfo = new JobInfo();
         jobInfo.setId(id);
@@ -246,57 +242,6 @@ public class JobInfoControllerGroupAccessTest {
             throw new IllegalStateException(e);
         }
         return controller;
-    }
-
-    /** 一个只有组 1 权限的普通会话。 */
-    private static HttpServletRequest scoped(String permission) {
-        return session("7", "peon", "NORMAL", permission);
-    }
-
-    /**
-     * 身份一律经 {@link LoginSessionStore#issue(UserDO)} 签发，不在测试里手搓 {@code LoginSession}：
-     * 这一列从库里到身份里的那一段也得有人钉，否则签发时漏带 permission，下面的红一条都不会亮。
-     */
-    private static HttpServletRequest session(String userId, String username, String role, String permission) {
-        UserDO row = new UserDO();
-        row.setId(Integer.parseInt(userId));
-        row.setUsername(username);
-        row.setRole(role);
-        row.setPermission(permission);
-        Map<String, Object> attributes = new LinkedHashMap<String, Object>();
-        attributes.put(TokenAuthFilter.IDENTITY_ATTRIBUTE, new LoginSessionStore().issue(row));
-        return withAttributes(attributes);
-    }
-
-    /** 演示模式：过滤器放行匿名请求，两个属性都不挂。 */
-    private static HttpServletRequest anonymous() {
-        return withAttributes(new LinkedHashMap<String, Object>());
-    }
-
-    private static HttpServletRequest sharedSecret() {
-        Map<String, Object> attributes = new LinkedHashMap<String, Object>();
-        attributes.put(TokenAuthFilter.FULL_AUTHORITY_ATTRIBUTE, Boolean.TRUE);
-        return withAttributes(attributes);
-    }
-
-    private static HttpServletRequest withAttributes(final Map<String, Object> attributes) {
-        return (HttpServletRequest) Proxy.newProxyInstance(
-                JobInfoControllerGroupAccessTest.class.getClassLoader(),
-                new Class<?>[]{HttpServletRequest.class},
-                new InvocationHandler() {
-                    public Object invoke(Object proxy, Method method, Object[] args) {
-                        if ("getAttribute".equals(method.getName())) {
-                            return attributes.get((String) args[0]);
-                        }
-                        if (method.getReturnType() == boolean.class) {
-                            return Boolean.FALSE;
-                        }
-                        if (method.getReturnType() == int.class) {
-                            return Integer.valueOf(0);
-                        }
-                        return null;
-                    }
-                });
     }
 
     private static class RecordingJobInfoService implements JobInfoService {
