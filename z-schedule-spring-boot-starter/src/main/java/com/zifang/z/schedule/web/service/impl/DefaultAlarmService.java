@@ -8,7 +8,11 @@ import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Service;
 
 /**
- * 默认邮件告警实现
+ * 内置的兜底 {@link AlarmService}：<b>只记账，不发任何东西</b>。
+ *
+ * <p>{@code alarm_email} 留空 ⇒ 原样返回，日志保持"无需告警"(1)。
+ * <p>{@code alarm_email} 配了 ⇒ 置 3（告警失败）并 warn 一行：内置实现没有邮件通道，
+ * 配了邮箱也不会收到信。曾经这里置的是 2（告警成功），属于对运维的谎报。
  */
 @Service
 public class DefaultAlarmService implements AlarmService {
@@ -50,13 +54,14 @@ public class DefaultAlarmService implements AlarmService {
 
         log.info("[z-schedule] Alarm triggered for job={}, emails={}", jobId, emailList);
 
-        try {
-            // TODO: 实际发送邮件逻辑
-            alarmLog.setAlarmStatus(2);
-            log.info("[z-schedule] Alarm sent successfully for job={}, emails={}", jobId, emailList);
-        } catch (Exception e) {
-            alarmLog.setAlarmStatus(3);
-            log.error("[z-schedule] Alarm failed for job={}, emails={}, error={}", jobId, emailList, e.getMessage(), e);
-        }
+        // 本类没有任何邮件通道：历史上这里是一句 TODO 却把 alarm_status 置成 2（DDL 注释里
+        // 2 = 告警成功），于是管理台会把一条从未发出的告警显示成"成功"。改成 3（告警失败）,
+        // 因为站在运维的视角，"配了邮箱却没人发"就是一次失败的告警。
+        // 注意：本类是裸 @Service 由组件扫描装配的，自动装配里没有 @ConditionalOnMissingBean，
+        // 所以宿主自己再注册一个 AlarmService 并不会"覆盖"它——两个同类型候选会让
+        // JobTriggerServiceImpl 的按类型注入直接启动失败。想真接邮件得先补那个扩展点。
+        alarmLog.setAlarmStatus(3);
+        log.warn("[z-schedule] job={} 配置了告警邮箱 {}，但内置实现未接入邮件通道，"
+                + "告警未发出（alarm_status=3 告警失败）", jobId, emailList);
     }
 }

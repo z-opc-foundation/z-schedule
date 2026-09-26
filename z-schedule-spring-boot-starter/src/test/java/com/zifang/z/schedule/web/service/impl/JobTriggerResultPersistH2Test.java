@@ -53,6 +53,7 @@ public class JobTriggerResultPersistH2Test {
 
     private JobTriggerServiceImpl service;
     private FakeAlarmService alarmService;
+    private CountingJobLogService countingLogService;
 
     @Before
     public void setUp() throws Exception {
@@ -86,7 +87,8 @@ public class JobTriggerResultPersistH2Test {
         session = new MybatisSqlSessionFactoryBuilder().build(cfg).openSession(true);
         JobLogMapper mapper = session.getMapper(JobLogMapper.class);
 
-        JobLogServiceImpl logServiceImpl = new JobLogServiceImpl();
+        JobLogServiceImpl logServiceImpl = new CountingJobLogService();
+        countingLogService = (CountingJobLogService) logServiceImpl;
         inject(logServiceImpl, "jobLogMapper", mapper);
 
         service = new JobTriggerServiceImpl();
@@ -168,6 +170,35 @@ public class JobTriggerResultPersistH2Test {
         assertEquals(TriggerCodeEnum.INVALID_PARAM.getCode(), row.handleCode);
         assertNotNull(row.handleMsg);
         assertTrue(row.handleMsg, row.handleMsg.contains("executorHandler"));
+    }
+
+    // ---- 写放大：一次失败到底往库里写几条 ----
+
+    @Test
+    public void 告警没有改写状态时不得再发第二条UPDATE() throws Exception {
+        // 250 真机 MySQL 8 实测：每条失败日志固定产生 2 条 UPDATE，第二条写回的内容
+        // 与第一条逐字节相同——DefaultAlarmService 在没配邮箱时直接 return，
+        // 而 finishFailure 无条件又写了一遍。百任务规模下这占掉 job_log 写入量的 2/3。
+        BoomHandler.calls.set(0);
+        service.triggerJob(job("boomHandler"));
+
+        assertEquals("结论该落的还是得落", TriggerCodeEnum.FAIL.getCode(), onlyRow().handleCode);
+        assertEquals(1, alarmService.calls.get());
+        assertEquals(1, countingLogService.saves.get());
+        assertEquals("alarmStatus 没被 sendAlarm 改动 ⇒ 第二条 UPDATE 是纯写放大",
+                1, countingLogService.updates.get());
+    }
+
+    @Test
+    public void 告警改写了状态就必须把那一条补上() throws Exception {
+        // 上一例的对照：若把两条 UPDATE 一起删掉，上一例照样绿，这一例必红。
+        alarmService.mutatesTo = 2; // 扮演"邮件真的发出去了"的实现
+        BoomHandler.calls.set(0);
+        service.triggerJob(job("boomHandler"));
+
+        assertEquals(2, countingLogService.updates.get());
+        assertEquals("告警后的新状态必须落库，否则告警查询读到的还是失败时的 1",
+                2, onlyRow().alarmStatus);
     }
 
     // ---- 重试路径：每轮一行，且每行都带自己的结论 ----
@@ -279,10 +310,37 @@ public class JobTriggerResultPersistH2Test {
 
     private static class FakeAlarmService implements AlarmService {
         final AtomicInteger calls = new AtomicInteger();
+        /**
+         * 非 null 时扮演"真的把告警发出去了"的 AlarmService —— 它会改写 alarmStatus。
+         * 用于阳性对照：只验"少发一条 UPDATE"而不验"该发时还在发"，
+         * 那么"把两条 UPDATE 全删了"也能让前者通过。
+         */
+        Integer mutatesTo;
 
         @Override
         public void sendAlarm(JobInfo job, JobLog log) {
             calls.incrementAndGet();
+            if (mutatesTo != null) {
+                log.setAlarmStatus(mutatesTo);
+            }
+        }
+    }
+
+    /** 真 service + 真 mapper，只在计数上做手脚：数的是"这次执行往库里写了几条"。 */
+    private static class CountingJobLogService extends JobLogServiceImpl {
+        final AtomicInteger saves = new AtomicInteger();
+        final AtomicInteger updates = new AtomicInteger();
+
+        @Override
+        public long save(JobLog jobLog) {
+            saves.incrementAndGet();
+            return super.save(jobLog);
+        }
+
+        @Override
+        public void update(JobLog jobLog) {
+            updates.incrementAndGet();
+            super.update(jobLog);
         }
     }
 
