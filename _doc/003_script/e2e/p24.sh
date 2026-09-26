@@ -538,7 +538,8 @@ fi
 REPO="$(dirname "$DEPLOY")"
 cat > "$WORK/a14_docface.py" <<'PY'
 #!/usr/bin/env python3
-"""A14/A15 尺的开发副本：先在这份上把当前树量绿，再嵌进 p24.sh。"""
+"""A14/A15：根 README 的广告面（a14）+ 文档里"递给 Maven 的写法"与 javadoc 幽灵链接（a15）。
+p24.sh 内嵌本文件并逐臂调用；两串形状与逐格读数见 _doc/003_script/e2e/README.md §18。"""
 import os
 import re
 import sys
@@ -606,6 +607,8 @@ if mode == 'a14':
 # A15：文档/注释里"给 Maven 传应用参数"的写法 + javadoc 里指向不存在成员的 {@link #x}
 mvn_bad = []
 mvn_n = 0
+argcomma_bad = []
+argcomma_n = 0
 for dirpath, dirnames, filenames in os.walk(root):
     dirnames[:] = [d for d in dirnames if d not in ('target', 'node_modules', '.git', 'dist', 'logs')]
     for fn in filenames:
@@ -643,13 +646,32 @@ for dirpath, dirnames, filenames in os.walk(root):
             if 'mvn ' not in s:
                 continue
             mvn_n += 1
-            # 先摘掉合法的 spring-boot.run.arguments=/jvmArguments= 取值段，剩下的才是真递给 Maven 的
-            s = re.sub(r'-Dspring-boot\.run\.(arguments|jvmArguments)=\S+', '', s)
+            # arguments= 的取值段：多个应用参数只能用**空格**分隔。逗号那串会被整个当成一个 argv
+            # ⇒ 三条一句都不生效，而进程照起、一句错都不报（2026-09-27 抓到子进程 argv 原文，
+            #   见 _doc/003_script/e2e/README.md §18）⇒ 这一格必须单独判，MVNOPT 那一条抓不到它。
+            am = re.search(r'-Dspring-boot\.run\.arguments=("([^"]*)"|\'([^\']*)\'|\S+)', s)
+            if am:
+                argcomma_n += 1
+                # 取值段只有"整串带引号"那一支有捕获组；裸写法（\S+）没有第 4 组，
+                # 上一版直接 group(4) 就在 yml 头注释那条裸写法上 IndexError。
+                val = am.group(2)
+                if val is None:
+                    val = am.group(3)
+                if val is None:
+                    val = am.group(1) or ''
+                if re.search(r',\s*--', val):
+                    argcomma_bad.append('%s:%d' % (os.path.relpath(p, root), ln_no))
+            # 先摘掉合法的 spring-boot.run.arguments=/jvmArguments= 取值段，剩下的才是真递给 Maven 的。
+            # 取值段可以是**带引号且内含空格**（多个应用参数只能用空格分隔 ⇒ 正确写法必然长这样），
+            # 所以这里必须整段摘：只按 \S+ 摘会把引号里的后半截留给下面那条规则，
+            # 于是"照 §18 改对的那条命令"反被判红（实测在 _doc/001_arch/z-schedule-admin.md:82 红过一次）。
+            s = re.sub(r'-Dspring-boot\.run\.(arguments|jvmArguments)=("(?:[^"]*)"|\'[^\']*\'|\S+)', '', s)
             # Maven 自己的长选项名里绝不含点（--also-make / --no-transfer-progress），
             # 含点的那个形状一定是"想给应用传属性却写在 mvn 后面" ⇒ 只按这条判，不误伤
             if re.search(r'\s--(?!\-)[A-Za-z0-9._-]*\.[A-Za-z0-9._-]*=', s):
                 mvn_bad.append('%s:%d' % (os.path.relpath(p, root), ln_no))
 print('MVNOPT|%d|%s' % (mvn_n, ' '.join(mvn_bad) or '-'))
+print('ARGCOMMA|%d|%s' % (argcomma_n, ' '.join(argcomma_bad) or '-'))
 
 link_n = 0
 phantom = []
@@ -668,6 +690,7 @@ for dirpath, dirnames, filenames in os.walk(root):
             if not re.search(r'(?m)^[^\n]*\b%s\b\s*[;=(]' % re.escape(n), code):
                 phantom.append('%s:#%s' % (os.path.relpath(p, root), n))
 print('PHANTOM|%d|%s' % (link_n, ' '.join(phantom) or '-'))
+
 PY
 a14_scan() { python3 "$WORK/a14_docface.py" "$REPO" a14 "${1:-$REPO/README.md}"; }
 A14=$(a14_scan)
@@ -720,25 +743,37 @@ fi
 a15_scan() { python3 "$WORK/a14_docface.py" "$1" a15; }
 A15=$(a15_scan "$REPO")
 A15_MVN=$(printf '%s\n' "$A15" | grep '^MVNOPT' | head -1)
+A15_ARG=$(printf '%s\n' "$A15" | grep '^ARGCOMMA' | head -1)
 A15_LINK=$(printf '%s\n' "$A15" | grep '^PHANTOM' | head -1)
 A15_MVNN=$(printf '%s' "$A15_MVN" | cut -d'|' -f2)
+A15_ARGN=$(printf '%s' "$A15_ARG" | cut -d'|' -f2)
 A15_LINKN=$(printf '%s' "$A15_LINK" | cut -d'|' -f2)
 mkdir -p "$WORK/prey_a15/_doc/004_sql" "$WORK/prey_a15/app/src/main/java/x"
 # 猎物树的写法要点（都是尺自己的反向对照，所以树里【不能】出现能被 shell 展开的形状）：
-#   坏形状只按"围栏内 + 续行"注入；围栏外同一串字面量是描述，必须【不】被点名；
-#   -Dspring-boot.run.arguments= 的取值段里有 --server.port=18999，也必须【不】被点名。
+#   坏形状一：围栏内 + 续行的 `mvn ... --server.port=` ⇒ MVNOPT 必须点名；
+#   坏形状二：围栏外同一串字面量是【描述】，必须【不】被点名（否则文档没法把证据写下来）；
+#   坏形状三：-Dspring-boot.run.arguments= 的取值段 —— 多个应用参数只能用**空格**分隔，
+#     带引号的整串是正确写法（两支尺都不许点）；逗号那串会被整个当成一个 argv，一句都不生效
+#     而进程照起、一句错都不报（README §18 记了子进程 argv 原文），
+#     而 MVNOPT 第一步就把取值段整段摘掉 ⇒ 它结构性看不见这一格，必须 ARGCOMMA 单独判。
 python3 - "$WORK/prey_a15" <<'PY'
 import os, sys
 d = sys.argv[1]
 BS, DD, MM = chr(92), '-D', '--'
 md = "\n".join([
-  '#### 坏形状（围栏内 + 续行）', '', '```bash',
+  '#### 坏形状一：围栏内 + 续行，应用参数直接递给 mvn', '', '```bash',
   'mvn -B spring-boot:run ' + BS,
   '  ' + MM + 'spring.profiles.active=dev ' + BS,
   '  ' + MM + 'server.port=18086',
   '```', '',
   '围栏外同样的串是【描述】不是广告，不该被点名：`mvn spring-boot:run ' + MM + 'server.port=18086`。', '',
-  '合法形状：', '', '```bash',
+  '合法形状（空格分隔 + 整串带引号）：', '', '```bash',
+  'mvn -B spring-boot:run ' + DD + 'spring-boot.run.profiles=dev '
+  + DD + 'spring-boot.run.arguments="' + MM + 'z.base.db.schedule.disabled=true '
+  + MM + 'server.port=18999"',
+  '```', '',
+  '坏形状三：逗号分隔的 arguments 取值段。MVNOPT 摘掉整段后看不见它，必须 ARGCOMMA 点名：',
+  '', '```bash',
   'mvn -B spring-boot:run ' + DD + 'spring-boot.run.profiles=dev '
   + DD + 'spring-boot.run.arguments=' + MM + 'z.base.db.schedule.disabled=true,'
   + MM + 'server.port=18999',
@@ -751,15 +786,426 @@ open(os.path.join(d, 'app/src/main/java/x/A.java'), 'w', encoding='utf-8').write
   "class A {\n  /** 见 {@link #real()} 与 {@link #noSuchMethod()} */\n  void real() {}\n}\n")
 PY
 A15P=$(a15_scan "$WORK/prey_a15")
-if [ "${A15_MVNN:-0}" -gt 0 ] && [ "${A15_LINKN:-0}" -gt 0 ] \
-   && printf '%s' "$A15_MVN" | grep -qF '|-' && printf '%s' "$A15_LINK" | grep -qF '|-' \
-   && printf '%s' "$A15P" | grep -qF 'MVNOPT|3|a.yml:2 bad.md:4' \
+if [ "${A15_MVNN:-0}" -gt 0 ] && [ "${A15_ARGN:-0}" -gt 0 ] && [ "${A15_LINKN:-0}" -gt 0 ] \
+   && printf '%s' "$A15_MVN" | grep -qF '|-' && printf '%s' "$A15_ARG" | grep -qF '|-' \
+   && printf '%s' "$A15_LINK" | grep -qF '|-' \
+   && printf '%s' "$A15P" | grep -qF 'MVNOPT|4|a.yml:2 bad.md:4' \
+   && printf '%s' "$A15P" | grep -qF 'ARGCOMMA|2|bad.md:20' \
    && printf '%s' "$A15P" | grep -qF 'PHANTOM|2|app/src/main/java/x/A.java:#noSuchMethod'; then
-  ok "A15 两支都有牙：真树 $A15_MVNN 条 mvn 逻辑行里含点长选项 0 处、$A15_LINKN 个 {@link #成员} 逐个能在同一文件里找到声明；猎物树上坏形状两处各点名一次（围栏内含续行的 mvn + yml 注释同款），而围栏外那串同样的字面量与 -Dspring-boot.run.arguments= 取值段里的 --server.port 都【没】被误伤，{@link #real()} 也没被当成幽灵"
+  ok "A15 三支都有牙：真树 $A15_MVNN 条 mvn 逻辑行里含点长选项 0 处、$A15_ARGN 处 arguments 取值段里没有一处用逗号、$A15_LINKN 个 {@link #成员} 逐个能在同一文件里找到声明；同一份尺在猎物树上三种形状各点名一次（MVNOPT|4 = 围栏内续行 + yml 注释同款、ARGCOMMA|2 = 只有逗号那一支、PHANTOM = 只有 #noSuchMethod），而围栏外那串同样的字面量、空格分隔的带引号整串、{@link #real()} 都【没】被误伤"
 else
-  bad "A15 形状不对：[$A15_MVN][$A15_LINK] 猎物[$A15P]（期望 MVNOPT 分母>0 且两处 '-'，猎物恰好 a.yml:2 bad.md:4 与 A.java:#noSuchMethod）"
+  bad "A15 形状不对：[$A15_MVN][$A15_ARG][$A15_LINK] 猎物[$A15P]（期望三支分母都>0 且绿侧三处 '-'；猎物恰好 MVNOPT|4|a.yml:2 bad.md:4、ARGCOMMA|2|bad.md:20、A.java:#noSuchMethod）"
 fi
 
+# ---------- A16：部署面"同一个逻辑值的 N 份抄件"必须逐字相等（#42 的静态那一半） ----------
+# 起因是实测：vite 的 base 默认 '/meta/' 在构建期被烤进 admin 的 jar（pom 没替 npm 传 VITE_BASE），
+# 而运行时那个 context-path 与后端端口分散在 Dockerfile / k8s ConfigMap / 三份 compose / nginx 反代 /
+# 入口脚本 / deploy README 里 —— 同一个值写了 7+19 遍。任何一格漂，坏的只有"照那一格跑的那个人"：
+# 本机跑 mode 1 的人看不见 k8s 白屏，反之亦然 ⇒ 这种耦合靠眼看必漏，只能机械比。
+# 运行时那一半（真起 jar、逐路径读 HTTP 码、前缀从 jar 里读回来而不是从文档抄）在 ui_base_probe.sh。
+cat > "$WORK/a16_mirror.py" <<'PY'
+#!/usr/bin/env python3
+"""A16：部署面"同一个逻辑值的多个副本"必须逐字相等。
+
+起因（#42 实测）：vite 的 base 默认 '/meta/' 被烤进 admin 的 jar，而运行时那个
+context-path 分散在 Dockerfile / k8s ConfigMap / 三份 compose / nginx 反代里，端口同理
+（只有 Dockerfile 的 ENV SERVER_PORT 一处真值，别的全是抄件）。任何一格漂了，坏的只有
+"那一个模式"：本机跑 mode 1 的人看不见 k8s 白屏，反之亦然。⇒ 只能机械比，不能靠眼看。
+
+三种调用：
+  a16_mirror.py <root>                              只读扫真树
+  a16_mirror.py <root> selftest <workdir>           逐支猎物注入并核期望（PREY_CASES 那张表）
+  a16_mirror.py <root> prey <out> <rel> <old> <new> 手工单支：拷闭合清单、改一处、再扫
+"""
+import os
+import re
+import shutil
+import sys
+
+# 闭合清单：尺只读这些，所以"扫了哪些文件"本身是可数的（ prey 拷贝也照这份拷，
+# 不把 deploy/env/.env 之类带口令的文件搬来搬去）。
+CTX_FILES = [
+    'deploy/Dockerfile.backend',
+    'deploy/nginx.conf.template',
+    '_frontend/z-schedule-frontend/vite.config.js',
+]
+PORT_FILES = CTX_FILES + ['deploy/README.md']
+
+# 每个收集器至少要贡献一格（判红用，见 scan 里的 contrib）
+REQ_CTX = [
+    'deploy/Dockerfile.backend:ENV', '_frontend/z-schedule-frontend/vite.config',
+    'deploy/k8s/01-deployment-backend.yaml', 'deploy/docker-compose.yml',
+    'deploy/nginx.conf.template',
+]
+REQ_PORT = [
+    'deploy/Dockerfile.backend:ENV', 'deploy/Dockerfile.backend:EXPOSE',
+    '_frontend/z-schedule-frontend/vite.config', 'k8s/01-deployment-backend.yaml:containerPort',
+    'k8s/01-deployment-backend.yaml:port', 'k8s/03-service-backend.yaml:port',
+    'k8s/03-service-backend.yaml:targetPort', 'deploy/docker-compose.yml',
+    'docker-compose.split.yml', 'docker-compose.cluster.yml', 'nginx.conf.template',
+    'deploy/bin/start-mode1.sh', 'deploy/README.md',
+]
+
+
+def _list(root, rels):
+    return [os.path.join(root, r) for r in rels if os.path.isfile(os.path.join(root, r))]
+
+
+def compose_files(root):
+    d = os.path.join(root, 'deploy')
+    if not os.path.isdir(d):
+        return []
+    return sorted(os.path.join(d, f) for f in os.listdir(d)
+                  if f.startswith('docker-compose') and f.endswith(('.yml', '.yaml')))
+
+
+def k8s_files(root):
+    d = os.path.join(root, 'deploy', 'k8s')
+    if not os.path.isdir(d):
+        return []
+    return sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(('.yml', '.yaml')))
+
+
+def bin_files(root):
+    d = os.path.join(root, 'deploy', 'bin')
+    if not os.path.isdir(d):
+        return []
+    return sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith('.sh'))
+
+
+def all_files(root):
+    seen = []
+    for group in (CTX_FILES, PORT_FILES, ['deploy/Makefile']):
+        for r in group:
+            p = os.path.join(root, r)
+            if os.path.isfile(p) and p not in seen:
+                seen.append(p)
+    v = vite_cfg(root)          # 扩展名不猜：本机实测是 vite.config.js
+    if v and v not in seen:
+        seen.append(v)
+    for group in (compose_files, k8s_files, bin_files):
+        for p in group(root):
+            if p not in seen:
+                seen.append(p)
+    return seen
+
+
+def vite_cfg(root):
+    """SPA 那份 vite 配置。找不到就返回 ''，由调用方判红（不能静默少一个副本）。"""
+    d = os.path.join(root, '_frontend/z-schedule-frontend')
+    if not os.path.isdir(d):
+        return ''
+    c = sorted(f for f in os.listdir(d) if re.match(r'^vite\.config\.(js|ts|mjs|mts|cjs)$', f))
+    return os.path.join(d, c[0]) if c else ''
+
+
+def rel(root, p):
+    return os.path.relpath(p, root).replace(os.sep, '/')
+
+
+def norm_ctx(v):
+    v = (v or '').strip().strip('"').strip("'")
+    while len(v) > 1 and v.endswith('/'):
+        v = v[:-1]
+    return v
+
+
+def scan(root, quiet=False):
+    """返回结构化的三格读数；quiet 时不打印（selftest 用，打印由调用方统一做）。"""
+    ctx = []      # (label, value)
+    port = []
+    dk_ctx = dk_port = None     # Dockerfile 里那两行 ENV：运行时唯一真设定值
+    baked = 'unknown'
+    note = []
+
+    def rd(p):
+        with open(p, encoding='utf-8') as f:
+            return f.read()
+
+    # —— 设定值：这两个 ENV 在不在，决定"部署时的 context-path/端口"这件事有没有真来源 ——
+    dk = os.path.join(root, 'deploy/Dockerfile.backend')
+    if os.path.isfile(dk):
+        s = rd(dk)
+        m = re.search(r'(?m)^ENV\s+SERVER_SERVLET_CONTEXT_PATH=(\S+)\s*$', s)
+        if m:
+            dk_ctx = norm_ctx(m.group(1))
+            ctx.append((rel(root, dk) + ':ENV', dk_ctx))
+        m = re.search(r'(?m)^ENV\s+SERVER_PORT=(\d+)\s*$', s)
+        if m:
+            dk_port = m.group(1)
+            port.append((rel(root, dk) + ':ENV', dk_port))
+        for m in re.finditer(r'(?m)^EXPOSE\s+(\d+)\s*$', s):
+            port.append((rel(root, dk) + ':EXPOSE', m.group(1)))
+
+    # —— 前端基路径：烤进 jar 的那一份，必须等于部署时的 context-path ——
+    # 扩展名不猜：本机实测是 vite.config.**js**，第一版按 .ts 猜 ⇒ isfile 为假、整块静默跳过，
+    # 尺照样报"6 个副本全绿"，那一跑其实是空跑。所以 vite 文件名单独进 UIBASE 行，让 shell 能判红。
+    vc = vite_cfg(root)
+    if vc:
+        s = rd(vc)
+        m = re.search(r"""base:\s*(?:process\.env\.VITE_BASE\s*\|\|\s*)?['"]([^'"]*)['"]""", s)
+        if m:
+            ctx.append((rel(root, vc) + ':base', norm_ctx(m.group(1))))
+        else:
+            note.append('VITE-NOBASE|%s' % rel(root, vc))
+        m = re.search(r"""target:\s*['"]http://[^/'"]+:(\d+)['"]""", s)
+        if m:
+            port.append((rel(root, vc) + ':proxy', m.group(1)))
+        # baked 判的是"pom 有没有替 npm 传 VITE_BASE"：不传 ⇒ 每次 package 都把源码里那个
+        # 默认前缀烤进 jar，这条尺的前提才成立。哪天 pom 开始传，前提就变了，得改尺而不是让它绿着。
+        pom = os.path.join(root, 'z-schedule-admin/pom.xml')
+        baked = 'no' if (os.path.isfile(pom) and 'VITE_BASE' in rd(pom)) else 'yes'
+    else:
+        note.append('VITE-MISSING|_frontend/z-schedule-frontend 里没有 vite.config.*')
+
+    # —— 配置副本：context-path 与端口 ——
+    for p in k8s_files(root) + compose_files(root):
+        s = rd(p)
+        for m in re.finditer(r'(?m)^\s*SERVER_SERVLET_CONTEXT_PATH:\s*"?([^"\n]*)"?\s*$', s):
+            ctx.append((rel(root, p), norm_ctx(m.group(1))))
+        for m in re.finditer(r'(?m)^\s*(?:- )?SERVER_PORT[=:\s]+"?(\d+)"?\s*$', s):
+            port.append((rel(root, p) + ':env', m.group(1)))
+        if 'backend' in os.path.basename(p):
+            for m in re.finditer(r'(?m)^\s*containerPort:\s*(\d+)\s*$', s):
+                port.append((rel(root, p) + ':containerPort', m.group(1)))
+            for m in re.finditer(r'(?m)^\s*port:\s*(\d+)\s*$', s):
+                port.append((rel(root, p) + ':port', m.group(1)))
+            for m in re.finditer(r'(?m)^\s*targetPort:\s*(\d+)\s*$', s):
+                port.append((rel(root, p) + ':targetPort', m.group(1)))
+        if p in compose_files(root):
+            # 只看"build.dockerfile 指向 Dockerfile.backend"的那个 service 块，
+            # 否则前端 service 的 80:80 会被当成后端端口（那是合法的另一格）。
+            # re.split 带捕获组时结果是 [前文, 名, 体, 名, 体, ...] ⇒ 名次与体名必须成对取；
+            # 上一版把两者各自再排一遍，配对整体错一格，compose 的副本会静默少一批。
+            parts = re.split(r'(?m)^  ([\w-]+):\s*$', s)
+            for i in range(1, len(parts) - 1, 2):
+                name, body = parts[i], parts[i + 1]
+                if 'Dockerfile.backend' not in body:
+                    continue
+                for m in re.finditer(r'-\s*"?(\d+):(\d+)"?\s*$', body, re.M):
+                    # 只记容器侧那一格：宿主端口是给人改的旋钮（映射成 28086:18086 是合法配置），
+                    # 把它钉进"必须等于镜像 ENV"里就会禁掉那个旋钮。文档里 advertise 出去的
+                    # localhost:PORT 另计（那一格改了就必须改文档，所以它该进集合）。
+                    port.append(('%s:%s.ports' % (rel(root, p), name), m.group(2)))
+                for m in re.finditer(r'^\s*-\s*"?(\d+)"?\s*$', body, re.M):
+                    port.append(('%s:%s.expose' % (rel(root, p), name), m.group(1)))
+                for m in re.finditer(r'127\.0\.0\.1:(\d+)/', body):
+                    port.append(('%s:%s.healthcheck' % (rel(root, p), name), m.group(1)))
+
+    ngx = os.path.join(root, 'deploy/nginx.conf.template')
+    if os.path.isfile(ngx):
+        s = rd(ngx)
+        for m in re.finditer(r'proxy_pass\s+http://[^/:\s]+:?(\d*)(/[^\s/;]*)?/?;', s):
+            pre = norm_ctx(m.group(2) or '')
+            ctx.append((rel(root, ngx), pre))
+            if m.group(1):
+                port.append((rel(root, ngx), m.group(1)))
+
+    # —— 广告面：凡是写着 "host:PORT/meta…" 的 URL，那个 PORT 必须就是后端端口 ——
+    for p in bin_files(root) + [os.path.join(root, 'deploy/README.md')]:
+        if not os.path.isfile(p):
+            continue
+        s = rd(p)
+        for m in re.finditer(r'://(?:127\.0\.0\.1|localhost|z-schedule[\w-]*):(\d+)/meta\b', s):
+            port.append((rel(root, p), m.group(1)))
+
+    # 锚取"多数值"而不是取某个文件的字面量：锚在 Dockerfile 上的话，改坏 Dockerfile 时
+    # 尺会把另外 6 个无辜副本一起点名，而该点的那个名字反而不在名单里（实测过那个形状）。
+    # 多数值 + 逐格点名，才让"改哪格"和"红消息里出现哪格"对上。
+    def majority(copies):
+        cnt = {}
+        for _, v in copies:
+            cnt[v] = cnt.get(v, 0) + 1
+        top = sorted(cnt.items(), key=lambda kv: (-kv[1], kv[0]))
+        if len(top) > 1 and top[0][1] == top[1][1]:
+            return 'TIE', ['%s=%s' % (l, v) for l, v in copies]
+        win = top[0][0]
+        return win, ['%s=%s' % (l, v) for l, v in copies if v != win]
+
+    anchor_ctx, bad_ctx = majority(ctx)
+    anchor_port, bad_port = majority(port)
+
+    # 阳性对照：每个收集器必须各自至少贡献一格。少一个（改名、glob 坏掉、yaml 缩进换了、
+    # 整块被条件跳过）分母会悄悄塌，而"全等"照样绿 —— 这一格就是防那个的。
+    def contrib(copies, req):
+        have = [l for l, _ in copies]
+        return ' '.join(t for t in req if not any(t in h for h in have)) or '-'
+
+    miss_ctx = contrib(ctx, REQ_CTX)
+    miss_port = contrib(port, REQ_PORT)
+    res = {
+        'anchor_ctx': anchor_ctx or '-', 'bad_ctx': ' '.join(bad_ctx) or '-',
+        'miss_ctx': miss_ctx, 'n_ctx': len(ctx),
+        'anchor_port': anchor_port or '-', 'bad_port': ' '.join(bad_port) or '-',
+        'miss_port': miss_port, 'n_port': len(port),
+        'baked': baked, 'vite': rel(root, vc) if vc else 'MISSING',
+        'dk_ctx': dk_ctx or 'MISSING', 'dk_port': dk_port or 'MISSING',
+        'note': note,
+    }
+    if not quiet:
+        emit(res)
+    return res
+
+
+def prey(root, out, relp, old, new):
+    """把闭合清单里的文件拷到 <out>，对 <rel> 做**一处**替换，再扫那份树。
+
+    替换必须成立：'old' 不在原文里就返回 SETUP 而不是"绿"——
+    注入不出的猎物等于没测，那一格要记账（见 _doc/003_script/e2e/README.md §18）。
+    """
+    if os.path.isdir(out):
+        shutil.rmtree(out)
+    src = os.path.join(root, relp)
+    if not os.path.isfile(src):
+        return {'setup': '文件不存在 %s' % relp}
+    with open(src, encoding='utf-8') as f:
+        s = f.read()
+    if old not in s:
+        return {'setup': '串没找到，注入不成立：%s 里无 %r' % (relp, old)}
+    nhit = s.count(old)
+    for p in all_files(root):
+        d = os.path.join(out, rel(root, p))
+        os.makedirs(os.path.dirname(d), exist_ok=True)
+        shutil.copyfile(p, d)
+    t = os.path.join(out, relp)
+    with open(t, 'w', encoding='utf-8') as f:
+        f.write(s.replace(old, new, 1))
+    r = scan(out, quiet=True)
+    # 只改第一处。若那一处落在注释里（尺的正则先命中注释，被"改坏"的其实不是量面上那一格），
+    # 则 bad 列不会是期望的那个名字 ⇒ 下面的判据会报 WRONG，而不是让空跑冒充一次成功的自证。
+    r['prey'] = '%s|%s=>%s|hits=%d' % (relp, old, new, nhit)
+    return r
+
+
+def emit(r):
+    for n in r['note']:
+        print(n)
+    print('UIBASE|%s|baked=%s|vite=%s|dk_ctx=%s|dk_port=%s' % (
+        r['anchor_ctx'], r['baked'], r['vite'], r['dk_ctx'], r['dk_port']))
+    print('CTX|%d|%s|%s|%s' % (r['n_ctx'], r['anchor_ctx'], r['bad_ctx'], r['miss_ctx']))
+    print('PORT|%d|%s|%s|%s' % (r['n_port'], r['anchor_port'], r['bad_port'], r['miss_port']))
+
+
+# 每支猎物 = (说明, 文件, 旧串, 新串, 判据种类, 期望)
+#   'bad'   → 那一片的 bad 列必须恰好只有期望这一个名字
+#   'clean' → CTX 与 PORT 的 bad 列都必须是 '-'（误伤对照：合法的旋钮不许被钉死）
+#   'miss'  → 那一片的 missing 列必须含期望，且设定值列必须是 MISSING
+PREY_CASES = [
+    ('Dockerfile 的 SERVER_PORT 抄件漂', 'deploy/Dockerfile.backend',
+     'ENV SERVER_PORT=18086', 'ENV SERVER_PORT=18099', 'bad:PORT',
+     'deploy/Dockerfile.backend:ENV=18099'),
+    ('k8s ConfigMap 的 context-path 漂', 'deploy/k8s/01-deployment-backend.yaml',
+     'SERVER_SERVLET_CONTEXT_PATH: "/meta"', 'SERVER_SERVLET_CONTEXT_PATH: "/metax"',
+     'bad:CTX', 'deploy/k8s/01-deployment-backend.yaml=/metax'),
+    ('nginx 反代前缀漂', 'deploy/nginx.conf.template',
+     'http://${BACKEND_SERVICE}:18086/meta/;', 'http://${BACKEND_SERVICE}:18086/metax/;',
+     'bad:CTX', 'deploy/nginx.conf.template=/metax'),
+    ('vite base 漂（烤进 jar 的那一份）', '%VITE%',
+     "VITE_BASE || '/meta/'", "VITE_BASE || '/metax/'", 'bad:CTX',
+     '%VITE%:base=/metax'),
+    ('vite dev proxy 端口漂', '%VITE%',
+     "target: 'http://localhost:18086'", "target: 'http://localhost:18099'", 'bad:PORT',
+     '%VITE%:proxy=18099'),
+    ('compose 容器侧端口漂（后端 service 块）', 'deploy/docker-compose.yml',
+     '"18086:18086"', '"18086:18087"', 'bad:PORT',
+     'deploy/docker-compose.yml:z-schedule-admin.ports=18087'),
+    ('compose 集群版探针 URL 端口漂', 'deploy/docker-compose.cluster.yml',
+     'http://127.0.0.1:18086/meta/actuator/health',
+     'http://127.0.0.1:18099/meta/actuator/health', 'bad:PORT',
+     'deploy/docker-compose.cluster.yml:z-schedule-backend.healthcheck=18099'),
+    ('k8s containerPort 漂', 'deploy/k8s/01-deployment-backend.yaml',
+     'containerPort: 18086', 'containerPort: 18099', 'bad:PORT',
+     'deploy/k8s/01-deployment-backend.yaml:containerPort=18099'),
+    ('入口脚本广告出去的 URL 端口漂', 'deploy/bin/start-mode1.sh',
+     'localhost:18086/meta', 'localhost:18099/meta', 'bad:PORT',
+     'deploy/bin/start-mode1.sh=18099'),
+    # —— 两支"设定值被摘掉"：收集器死了必须归零式报红，不能悄悄少一格还全绿 ——
+    ('摘掉 Dockerfile 的 ENV SERVER_PORT', 'deploy/Dockerfile.backend',
+     'ENV SERVER_PORT=18086', '# ENV SERVER_PORT=18086', 'miss:PORT',
+     'deploy/Dockerfile.backend:ENV'),
+    ('摘掉 Dockerfile 的 ENV SERVER_SERVLET_CONTEXT_PATH', 'deploy/Dockerfile.backend',
+     'ENV SERVER_SERVLET_CONTEXT_PATH=/meta', '# ENV SERVER_SERVLET_CONTEXT_PATH=/meta',
+     'miss:CTX', 'deploy/Dockerfile.backend:ENV'),
+    # —— 误伤对照：宿主端口是给人改的旋钮，改它不算漂 ——
+    ('compose 宿主侧改映射（合法旋钮，不许红）', 'deploy/docker-compose.yml',
+     '"18086:18086"', '"28086:18086"', 'clean', '-'),
+]
+
+
+def selftest(root, work):
+    """逐支猎物跑一遍；只在与"注入点确实落在量面上"这个前提成立时才记分。"""
+    vc = vite_cfg(root)
+    if not vc:
+        print('SELFTEST|0|0|vite.config.* 找不到，%VITE% 那两支无从注入')
+        return 1
+    vrel = rel(root, vc)
+    total = fired = 0
+    for i, (why, f, old, new, kind, expect) in enumerate(PREY_CASES):
+        f = f.replace('%VITE%', vrel)
+        expect = expect.replace('%VITE%', vrel)
+        total += 1
+        r = prey(root, os.path.join(work, 'c%02d' % i), f, old, new)
+        if r.get('setup'):
+            print('SELFTEST|%d|%s|SETUP-FAIL|%s' % (i, why, r['setup']))
+            fired += 1
+            continue
+        if kind.startswith('bad'):
+            col = 'bad_%s' % kind.split(':')[1].lower()
+            got = r[col]
+            good = (got == expect)
+        elif kind == 'clean':
+            good = (r['bad_ctx'] == '-' and r['bad_port'] == '-')
+            got = 'CTX=%s PORT=%s' % (r['bad_ctx'], r['bad_port'])
+        else:
+            part = kind.split(':')[1]
+            col, dk = ('miss_ctx', 'dk_ctx') if part == 'CTX' else ('miss_port', 'dk_port')
+            good = (expect in r[col]) and (r[dk] == 'MISSING')
+            got = '%s/%s' % (r[col], r[dk])
+        if not good:
+            fired += 1
+        print('SELFTEST|%d|%s|%s|%s' % (
+            i, why, 'ok' if good else 'WRONG', '-' if good else '期望[%s]实得[%s]' % (
+                expect if kind != 'clean' else '两侧都 -', got)))
+    print('SELFTEST|N=%d|WRONG=%d|%s' % (total, fired, 'ok' if fired == 0 else 'fail'))
+    return 0 if fired == 0 else 1
+
+
+if __name__ == '__main__':
+    r = sys.argv[1]
+    mode = sys.argv[2] if len(sys.argv) > 2 else 'scan'
+    if mode == 'prey':
+        res = prey(r, sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6])
+        if res.get('setup'):
+            print('PREY-SETUP|%s' % res['setup'])
+            sys.exit(3)
+        print('PREY|%s' % res['prey'])
+        emit(res)
+    elif mode == 'selftest':
+        sys.exit(selftest(r, sys.argv[3]))
+    else:
+        scan(r)
+PY
+A16=$(python3 "$WORK/a16_mirror.py" "$REPO")
+A16_UI=$(printf '%s\n' "$A16" | grep '^UIBASE' | head -1)
+A16_CTX=$(printf '%s\n' "$A16" | grep -E '^CTX\|' | head -1)
+A16_PORT=$(printf '%s\n' "$A16" | grep -E '^PORT\|' | head -1)
+A16_CTXN=$(printf '%s' "$A16_CTX" | cut -d'|' -f2)
+A16_PORTN=$(printf '%s' "$A16_PORT" | cut -d'|' -f2)
+# 12 支注入逐个核期望（那张表就在尺的文件头 PREY_CASES 里，改判据改表，不用改 shell）。
+# 其中三支不是"改坏要红"：两支把 Dockerfile 的 ENV 注释掉 ⇒ 收集器瞎了必须归零式报红
+# （missing 列非空 + dk_*=MISSING）；一支把 compose 的宿主端口改成 28086:18086 ⇒ 必须【不】红
+# （宿主端口是给人改的旋钮，钉进"必须等于镜像 ENV"就禁掉了那个旋钮）。
+A16ST=$(python3 "$WORK/a16_mirror.py" "$REPO" selftest "$WORK/prey_a16")
+if [ "${A16_CTXN:-0}" -ge 5 ] && [ "${A16_PORTN:-0}" -ge 12 ] \
+   && printf '%s' "$A16_UI" | grep -qF 'baked=yes' \
+   && ! printf '%s' "$A16_UI" | grep -qE 'vite=MISSING|dk_ctx=MISSING|dk_port=MISSING' \
+   && printf '%s' "$A16_CTX" | awk -F'|' '{exit ($3!="-" && $4=="-" && $5=="-")?0:1}' \
+   && printf '%s' "$A16_PORT" | awk -F'|' '{exit ($3!="-" && $4=="-" && $5=="-")?0:1}' \
+   && printf '%s' "$A16ST" | grep -qF 'SELFTEST|N=12|WRONG=0|ok'; then
+  ok "A16 镜像等值：context-path 的 $A16_CTXN 份抄件逐字等于 $(printf '%s' "$A16_CTX" | cut -d'|' -f3)、后端端口的 $A16_PORTN 份抄件逐字等于 $(printf '%s' "$A16_PORT" | cut -d'|' -f3)（真设定值是 Dockerfile 那两行 ENV；jar 里烤进去的前缀由 pom 不传 VITE_BASE 决定 ⇒ baked=yes）；12 支注入逐个点名被改的那一份，含两支「摘掉 Dockerfile ENV ⇒ missing 列报红」与一支「compose 宿主侧 28086:18086 不许红」"
+else
+  bad "A16 形状不对：[$A16_UI][$A16_CTX][$A16_PORT] 注入[$(printf '%s\n' "$A16ST" | grep -v '|ok|-$' | tr '\n' ' ')]（期望 CTX≥5、PORT≥12、两侧 bad 与 missing 都是 '-'、vite/dk_ctx/dk_port 都不 MISSING、baked=yes、SELFTEST N=12 WRONG=0）"
+fi
 echo ""
 echo "PASS=$PASS FAIL=$FAIL（臂 A 结束）"
 if [ "${P24_A_ONLY:-0}" = "1" ]; then

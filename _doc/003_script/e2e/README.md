@@ -1614,3 +1614,163 @@ A15 两支：MVNOPT 抓"把应用参数递给 Maven"那种写法（只认长选�
 - `DevDataSourceConfig.java`：删幽灵 javadoc 条目与四个死 import，把"`disabled=true` 是前置条件"写进注释。
 - 顺手抓到的一处**抄来的数**：根 README 与我新写的 `_doc/001_arch` 都写"7 张表"，
   真表 6 张 —— 是 A14 的 SQL 那一支（拿 7 当猎物判红）在绿侧第一遍就把我自己那句假数打出来了。
+
+## 18. #42：起得来 ≠ 看得见 —— 白屏那一格，和 `arguments` 的逗号雷（A16 + `ui_base_probe.sh`）
+
+§17 那条 m4 的读数是"**起来了**：`Tomcat started on port(s): 8080 (http) with context path ''`"。
+当时我只验了 HTTP 码就说它"外壳 200"——**这一节推翻我自己那句的一半**：那一屏在浏览器里是白的。
+原因不在后端起没起，而在**前端产物里写死的资源前缀**与**运行时 context-path** 是两个各写一遍的值。
+
+### 18.1 链条（每一环都量过，不是推的）
+
+| 环 | 实物 | 读数 |
+|---|---|---|
+| ① 源码里的默认前缀 | `_frontend/z-schedule-frontend/vite.config.js:15` | `base: process.env.VITE_BASE \|\| '/meta/'` |
+| ② 打包时有没有人覆写它 | `grep -c VITE_BASE z-schedule-admin/pom.xml` | **0** ⇒ frontend-maven-plugin 只跑 `npm run build`，不传 `VITE_BASE` ⇒ 每次打包都把 ① 那个默认前缀**烤进 jar** |
+| ③ 烤进去之后长什么样 | `unzip -p z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar BOOT-INF/classes/static/index.html` | `<script … src="/meta/assets/index-B3o72KK5.js">` + `<link … href="/meta/assets/index-CUyu9iPG.css">` —— **绝对路径，带前缀** |
+| ④ 而 m4 那条命令没设前缀 | 日志 `Tomcat started … with context path ''` | static 挂在**根**上：文件在，但没人按 `/meta/assets/…` 这个名字去取 ⇒ 页面自己声明的两条资源 **404** ⇒ `<div id="root">` 空着 ⇒ **白屏** |
+
+所以"200 的外壳"这个说法本身没错了——它漏掉了最要紧的那一半。判据也不能停在"页面 200"：
+**页面 200 + 它自己引用的资源 404 + 同一份文件在剥掉前缀的路径上 200**，三条同时成立才叫白屏
+（如果前端产物根本没进 jar，第三条也会是 404，那是另一种病）。
+
+### 18.2 两臂运行时读数（`ui_base_probe.sh`，2026-09-27 07:45:14 本机，rc=0）
+
+```
+base  = /meta  （jar 内 index.html 声明的前缀）      ← 前缀是从 jar 里读回来的，不是从文档抄的
+res   = /meta/assets/index-B3o72KK5.js /meta/assets/index-CUyu9iPG.css
+=== 路 1：文档里那条不设 context-path 的命令（进程挂在 /）===
+port=58679 ctx='' 首次应答=200
+  ok   GET /                                        200（期望 200）
+  ok   GET /meta/assets/index-B3o72KK5.js           404（期望 404）
+  ok   GET /assets/index-B3o72KK5.js  （剥掉前缀）    200（期望 200）
+  ok   GET /meta/assets/index-CUyu9iPG.css          404（期望 404）
+  ok   GET /assets/index-CUyu9iPG.css  （剥掉前缀）   200（期望 200）
+=== 路 2：补 --server.servlet.context-path=/meta ===
+port=58705 ctx='/meta' 首次应答=404
+  ok   GET /meta/                                   200（期望 200）
+  ok   GET /meta/assets/index-B3o72KK5.js            200（期望 200）
+  ok   GET /assets/index-B3o72KK5.js  （反而不在）    404（期望 404）
+  ok   GET /meta/assets/index-CUyu9iPG.css           200（期望 200）
+  ok   GET /assets/index-CUyu9iPG.css  （反而不在）   404（期望 404）
+PASS=10 FAIL=0
+```
+
+`bash _doc/003_script/e2e/ui_base_probe.sh`，rc 语义 0=两条路各五格全对 / 1=有格不对 / 2=前置不满足
+（`*-exec.jar` 份数≠1 之类）。两臂各起各的 JVM，端口由 `bind(("127.0.0.1",0))` 现取 ⇒ 不碰 250:18098 那台常驻、
+也不碰本机别人的端口；就绪判据是"任一应答码非 000"而不是 `/actuator/health` UP —— dev 那份 H2 是空库，
+health 是 503，拿它当就绪条件会永远等不到（§17 第 4 条的连带后果）。
+两臂端口每次不同（上一跑是 55527 / 55656）——`PASS=10 FAIL=0` 与端口令无关，这一跑与前两跑逐字相同。
+
+探针只管"页面与它自己声明的资源"这一对。路径面另外单量了一次（07:43:01 起住，端口 58255，
+同一组前置 + `--server.servlet.context-path=/meta`）：`/meta/` 200 len=417、
+`/meta/actuator/health` 200 len=49、两条 `/meta/assets/*` 200；**剥掉前缀的那几条全 404**
+（`/`、`/actuator/health`）；数据接口 `/meta/jobinfo/list` 500 len=118、`/meta/dashboard/stats`
+500 len=121。这五格与 §17.1 的 m4（前缀为空：`/actuator/health` 200、`/meta/actuator/health` 404）
+正好左右相反 —— 前缀一挂上，不带前缀的那一组就全没了，这正是"白屏"与"能玩"两屏的分工。
+
+### 18.3 顺手抓到的一条真雷：`-Dspring-boot.run.arguments` 只能用**空格**分隔
+
+`mvn` 里那个"逗号分隔"的直觉在这条参数上是**静默失效**的。07:39 现场复现（日志
+`~/.cache/zs_docface/m7_comma_argv.log`，**只在 cache，未跟踪**）的那条命令是
+
+| 段 | 值 |
+|---|---|
+| 前两条 | `mvn -B spring-boot:run` + `-Dspring-boot.run.profiles=dev` |
+| 第三条 | `-Dspring-boot.run.arguments=` 后接 `--z.base.db.schedule.disabled=true` **逗号** `--server.servlet.context-path=/meta` **逗号** `--server.port=59835` |
+
+（这条**故意不写成 ```bash 围栏**：A15 只量围栏里的命令，因为围栏是"给人复制跑的"，
+而这一条是坏形状的记录 —— §17.1 里那条被 Maven 当场拒掉的 m1 同样记在表格而不是围栏里，一个道理。）
+
+被 fork 出来的那个应用 JVM，它的 argv（`ps -o command= -p <pid>` 读回来按空格切）是：
+
+```
+7:--z.base.db.schedule.disabled=true,--server.servlet.context-path=/meta,--server.port=59835
+```
+
+**三条参数挤在一个 argv 元素里**。日志的后果：`The following 1 profile is active: "dev"`（:92，
+profiles 是另一条通道，它生效了）→ `Tomcat started on port(s): 8080 (http) with context path ''`（:150，
+要的是 59835 与 `/meta`，两条都没进）。**不报错、不崩、进程好端端起在 8080。**
+
+更阴的一层：那串逗号被绑成属性值 `"true,--server.servlet.context-path=/meta,--server.port=59835"`，
+而 starter 那两支 `@Bean` 的条件是 `@ConditionalOnProperty(name = "z.base.db.schedule.disabled",
+havingValue = "false", matchIfMissing = true)`（`ZScheduleAutoConfiguration.java:137`、`:174`）
+⇒ 垃圾值 ≠ `"false"` ⇒ starter 照样退让 ⇒ 连 §17 第 3 条那个"不给 `disabled=true` 就
+`APPLICATION FAILED TO START`"的症状**也一起被抹掉**。也就是说这条雷把唯一的报警信号一并拆了。
+
+⇒ 这条已经进了 A15 的第三支（`ARGCOMMA`），文档里教的空格分隔带引号那串才是合法形状。
+
+### 18.4 A16：镜像等值（`p24.sh` 新臂，静态那一半）
+
+② 那个"烤进去"的前提要一直成立才有人守得住，而它靠的是**同一个值在仓里写了很多遍**：
+`/meta` 7 份、后端端口 18086 19 份，散布在 `deploy/Dockerfile.backend`（`ENV` 是真设定值，
+`SERVER_PORT` 全仓**只有这一处** setter）、`deploy/k8s/01-deployment-backend.yaml` 的 ConfigMap、
+三份 `docker-compose*.yml`、`deploy/nginx.conf.template` 的 `proxy_pass`、`deploy/bin/*.sh`
+与 `deploy/README.md` 广告出去的 URL、`vite.config.js` 的 `base` 与 dev proxy。
+任何一格漂，坏的只有"照那一格跑的那个人"——本机跑 mode 1 的人看不见 k8s 白屏，反之亦然。
+这层耦合靠眼看必漏，所以机械比：**多数值当锚**（锚在 Dockerfile 上的话，改坏 Dockerfile 会点名 6 个无辜副本），
+逐格点名，外加每支注入都要正好点到被改的那一份。
+
+`P24_A_ONLY=1 bash p24.sh`（bash 3.2.57）三遍逐字相同：`PASS=23 FAIL=0`，其中
+
+```
+UIBASE|/meta|baked=yes|vite=_frontend/z-schedule-frontend/vite.config.js|dk_ctx=/meta|dk_port=18086
+CTX|7|/meta|-|-
+PORT|19|18086|-|-
+SELFTEST|N=12|WRONG=0|ok
+```
+
+12 支注入里有 9 支是"改坏必须红且只点被改那一格"（Dockerfile 的 `ENV SERVER_PORT`、ConfigMap 的
+`SERVER_SERVLET_CONTEXT_PATH`、nginx 的 `proxy_pass` 前缀、vite 的 `base` 与 dev proxy、
+compose 后端 service 块的容器侧端口、集群版 healthcheck URL、k8s `containerPort`、
+`deploy/bin/start-mode1.sh` 广告出去的 URL）。剩下 3 支是尺自己的反向对照：
+
+- 两支**把 Dockerfile 的 `ENV SERVER_PORT` / `ENV SERVER_SERVLET_CONTEXT_PATH` 注释掉**
+  ⇒ 必须红在 `missing` 列（且 `dk_*=MISSING`）。收集器瞎了不许绿——这是 §18.5 第 2 条换来的形状。
+- 一支**把 compose 的端口映射改成 `"28086:18086"`** ⇒ 必须**不**红。宿主端口是给人改的旋钮，
+  把它钉进"必须等于镜像 ENV"就等于禁掉了那个旋钮（第一版真禁了，被这一支照出来）。
+
+### 18.5 尺伤（六条，全在量具上；按"改量具==改被测物"记账）
+
+1. **curl 的 label 与 URL 不一致**：第一版探针打印 `GET /meta/ -> 404`，而它请求的其实是 `/`
+   ⇒ 我据此写下的"m4 那屏 `/meta/` 404"是**量具的错**，真值是 200（§18.2 路 2 第一格）。
+   复测那份是 `n3_paths.sh`。错的那一句已从文档里改掉。
+2. **`vite.config.ts` 是我猜的扩展名**：真文件叫 `.js` ⇒ `isfile` 为假、整块**静默跳过**，
+   尺照样报"6 个副本全等"——那一跑从头到尾是空跑。修法不是加个 `.js` 就完：
+   ① 五种扩展名 glob，② 把 `vite=<文件名|MISSING>` 打进 `UIBASE` 行让 shell 能判红，
+   ③ 每个收集器加 `contrib()` 阳性对照（`REQ_CTX`/`REQ_PORT` 闭合清单，少一格就进 `missing` 列）。
+   这条与 §13 那批"glob 悄悄少了一批文件"同族。
+3. **锚在某个文件的字面量上** ⇒ 改坏那个文件时，红消息点名的是另外几格。换成多数值锚。
+4. **compose 把宿主侧端口也收进集合** ⇒ 合法映射被误伤；现在只收容器侧，并把宿主侧变成一支"不许红"的对照。
+5. **注入串先命中注释**：`'/meta/'` 在 `vite.config.js:9` 的注释里也有，`:18086/meta/` 在
+   `nginx.conf.template:4` 的注释里也有，`http://127.0.0.1:18086/meta/actuator/health` 在
+   `docker-compose.split.yml:84` 的注释里也有 —— 第一版"注入成功"改的其实都是注释，
+   那一格尺从头到尾没看见 ⇒ 等于没测。改成把注入串锚到真设定值那一行，
+   并让 `prey()` 回报 `hits=N`。这条与 §17.3 第 2 条（`DOCIDX` 的"提到≠索引了"）是同一型。
+6. **MVNOPT 自己咬了改对的命令**：`arguments=` 取值段第一版只按 `\S+` 摘 ⇒ 照本节教的
+   "带引号、内含空格"那串只摘掉前半截，后半截 ` --server.servlet.context-path=/meta"` 撞上"长选项名含点"
+   被判红（真树上第一遍就是 `MVNOPT|21|_doc/001_arch/z-schedule-admin.md:82`）。改成带引号优先整段摘。
+   连带 `ARGCOMMA` 的取值段第一版直接 `group(4)`，在 yml 头注释那种**裸写法**上 `IndexError`
+   （只有带引号那两支有内层捕获组）⇒ 改成 2→3→1 依次回退。
+
+⚠ 一条已知的脆弱：A15 的猎物期望里写着 `bad.md:4` / `bad.md:20` 这种**行号**，
+行号跟着 fixture 的文本走。改 fixture 会把它弄红——红了先照 `bad` 消息里打出的实读回来看，
+别直接把期望改成新数（那等于把牙磨平）。
+
+### 18.6 这一格改了什么
+
+- **文档面**（产品字节未动）：根 `README.md`「三条跑起来的路」第三行改成**两条独立前置**
+  （`disabled=true` 管起不起得来、`context-path=/meta` 管看不看得见）；
+  `_doc/001_arch/z-schedule-admin.md`「本地启动」新增「起得来 ≠ 看得见」一节，
+  方式 A 的命令改成空格分隔带引号那串并附实测行，方式 B 补 `context-path` 且纠正"jar 名跟着
+  admin 模块自己的 `<version>`（当前字面 `1.0.0`，**不是**根 pom 的 `<revision>` 1.0.4）"（#38 同源）；
+  `application.yml` / `application-dev.yml` 头部注释同步改口。
+- **量具**：新增 `_doc/003_script/e2e/ui_base_probe.sh`（跟踪，运行时那一半）；
+  `p24.sh` 内嵌的 `a14_docface.py` 加 `ARGCOMMA` 一支、A15 的 fixture 从两形状扩成三形状，
+  新增 `a16_mirror.py` 与 A16 臂。`p24.sh` 字节 `md5 44bdd2c9131047a8820235d81a32abd7`、
+  `ui_base_probe.sh` `md5 3678709f5ad8522b00e27293e0241eb0`。
+  嵌进 `p24.sh` 的 `a16_mirror.py` 与开发副本**逐字节相等**；`a14_docface.py` 的差只有那行 docstring
+  （开发副本说"再嵌进 p24.sh"，嵌进来之后这句得改口）与一个尾随空行。
+- **没做的**：pom 不传 `VITE_BASE` 这件事本身没改——对**容器部署**它是对的（`SERVER_SERVLET_CONTEXT_PATH=/meta`
+  与之一致），本机那条路要不要做成"零配置也看得见"属于 #32（等点头）。
+  A16 只保证"改任何一格都会在 CI 里红"，不替谁决定那个值该是多少。

@@ -42,9 +42,12 @@
 > | `… -Dspring-boot.run.arguments=--z.base.db.schedule.disabled=true` | 起来了：`Tomcat started on port(s): 8080 (http) with context path ''` ⇒ **端口是 8080、context-path 是空**，`/meta/**` 实测 404 |
 >
 > 18086 与 `/meta` 这两个值**在本仓的任何 yml/properties 里都不存在**（`grep -rn 'server.port\|context-path' src/main/resources` 只命中注释）。
-> 它们只来自镜像的 `ENV SERVER_PORT=18086` / `SERVER_SERVLET_CONTEXT_PATH=/meta`（`deploy/Dockerfile.backend`）
-> 与 compose 的 env ⇒ **照文档在本机 `mvn` 起的人拿不到那个地址**，而 `deploy/docker-compose.yml` 的
-> healthcheck 却写死了 `http://127.0.0.1:18086/meta/...`（那条在容器里成立，因为 env 给过）。
+> 它们是**部署面**的值，来源各有一处设定 + 若干抄件：
+> `SERVER_PORT=18086` 只在 `deploy/Dockerfile.backend` 的 `ENV` 里设过一次（k8s 的 ConfigMap 都没设它），
+> `SERVER_SERVLET_CONTEXT_PATH=/meta` 则同时写在 Dockerfile 的 `ENV`、`deploy/k8s/01-deployment-backend.yaml`
+> 的 ConfigMap 和三份 compose 的 env 里 ⇒ **照文档在本机 `mvn` 起的人拿不到那个地址**，而
+> `deploy/docker-compose.yml` 的 healthcheck 却写死了 `http://127.0.0.1:18086/meta/...`
+> （那条在容器里成立，因为 env 给过）。这几处抄件现在由 `p24.sh` 的 A16 逐字比着，漂一处即红一处。
 
 ### dev profile 的两条前置（缺一条就起不来）
 
@@ -59,20 +62,42 @@
    也就是说"dev = 零依赖能玩"目前**不成立**，它只是"进程起得来"。
    要不要把这条路补成真正可玩（自带建表，或明确必须先有库）是 #32 那一格，等拍板。
 
-### 方式 A：`mvn spring-boot:run`（起得来，但只能看外壳）
+### 起得来 ≠ 看得见：还差一条 context-path（#42）
+
+上面第 4 条那格"起来了"只量到进程与接口，界面这一层是 2026-09-27 第二次量才露出来的：
+`target/classes/static/index.html`（以及 exec jar 里那份）引用的是**绝对路径** `/meta/assets/index-*.js`
+—— vite 的 `base` 默认 `'/meta/'`，而 admin pom 的 frontend-maven-plugin 不传 `VITE_BASE`，
+所以每次 `package` 都把这个前缀烤进 jar。进程挂在 `/` 上时，页面本身 200、它自己声明的两条资源 404
+⇒ **浏览器里就是一片白**，而这两个文件在 `/assets/...` 上是 200（东西在，前缀不对）。
+
+`bash _doc/003_script/e2e/ui_base_probe.sh` 一次跑两条路、10 条断言（八条"该 404/200"配上"同一个文件
+在剥掉前缀的路径上是 200"这一对反向对照），逐格读数与复跑命令见 `_doc/003_script/e2e/README.md` §18。
+所以本地要看界面就得把它钉成同一个前缀：`--server.servlet.context-path=/meta`（下面方式 A/B 都这么写了）。
+反过来，`base` 想改，就得连 `deploy/` 那几处 `SERVER_SERVLET_CONTEXT_PATH` 一起改 —— A16 那把尺会点名。
+
+### 方式 A：`mvn spring-boot:run`（起得来，但默认那条命令下界面是白的）
 
 ```bash
 cd z-schedule/z-schedule-admin
 mvn -B spring-boot:run \
   -Dspring-boot.run.profiles=dev \
-  -Dspring-boot.run.arguments=--z.base.db.schedule.disabled=true
-# 实测绑定：http://localhost:8080  （context-path 为空，没有 /meta）
-# / 与 /actuator/health ⇒ 200；/jobinfo/list ⇒ 500（上面第 2 条前置）
+  -Dspring-boot.run.arguments="--z.base.db.schedule.disabled=true --server.servlet.context-path=/meta"
+# 实测（我跑的那条多带了一句 --server.port=<空闲端口>，其余逐字相同）：
+#   Tomcat started on port(s): 62442 (http) with context path '/meta'
+# 路径级读数在下面「方式 B」那条测量里给（同一个 jar、同一个前缀 ⇒ 挂出来的路径一样）。
+# 不带 server.port 时就是上面 m4 那格量到的 8080（那一格只差 context-path）。
 ```
 
 给 Maven 传应用参数只能走 `-Dspring-boot.run.*`；把 `--server.port=…` 直接跟在 `mvn` 后面
-是 Maven 的命令行而不是应用参数，它会拒（见上面的表）。端口要换就写进 arguments 里：
-`-Dspring-boot.run.arguments=--z.base.db.schedule.disabled=true,--server.port=18999`。
+是 Maven 的命令行而不是应用参数，它会拒（见上面的表）。端口要换就写进 arguments 里。
+
+⚠ **`arguments` 的多个参数只能用空格分隔，不能用逗号**（这条是 2026-09-27 现场量出来的）：
+`-Dspring-boot.run.arguments="--a=1,--b=2"` 会整串当一个参数送进 JVM，子进程 argv 实测是
+`--z.base.db.schedule.disabled=true,--server.servlet.context-path=/meta,--server.port=59835`，
+于是三条一句都没生效 —— 日志仍是 `Tomcat started on port(s): 8080 … with context path ''`，
+而**进程起得来、不报任何错**。更阴的一层：那个逗号串被绑成属性值 `"true,--…"`，
+它不等于 `"false"` ⇒ starter 的同名 `@Bean` 照样退让 ⇒ 连"缺 disabled 就崩"那条症状都不响。
+所以这一格不能靠"起来了"当证据，得回读日志里那行 `Tomcat started … with context path`。
 
 ### 方式 B：编出 exec jar 后启动
 
@@ -80,10 +105,18 @@ mvn -B spring-boot:run \
 cd z-schedule
 mvn -B -pl z-schedule-admin -am package -DskipTests
 
-# jar 名跟着 <revision> 走，别抄版本号：这里让 shell 去匹配，命中 0 个或多于 1 个都会响
+# jar 名跟着 admin 模块自己的 <version> 走（当前是字面 1.0.0，**不是**根 pom 的 <revision> 1.0.4——
+# 见 #38；所以这里让 shell 去匹配，命中 0 个或多于 1 个都会响）
 java -jar "$(ls z-schedule-admin/target/*-exec.jar)" \
   --spring.profiles.active=dev \
-  --z.base.db.schedule.disabled=true
+  --z.base.db.schedule.disabled=true \
+  --server.servlet.context-path=/meta
+# 实测（端口由 bind(("127.0.0.1",0)) 现取）：`Tomcat started on port(s): 58255 (http) with
+# context path '/meta'`，逐路径读 HTTP 码：`/meta/` 200 len=417、`/meta/actuator/health` 200
+# len=49、`/meta/assets/index-*.js|css` 200；**剥掉前缀的那几条全 404**（`/`、`/actuator/health`），
+# 数据接口 `/meta/jobinfo/list` 与 `/meta/dashboard/stats` 都 500（就是下面这条缺口）。
+# 可复跑的形态在 `_doc/003_script/e2e/ui_base_probe.sh`（两臂各 5 格、PASS=10 FAIL=0，
+# 含"同一个文件在剥掉前缀的路径上 200 vs 404"这对反向对照），逐格读数在 §18.2。
 # 这条的缺口与方式 A 相同（H2 无表）。要真跑调度链路，得先有一个建好 6 张表的库，
 # 键给 z.base.db.schedule.*（不是 spring.datasource.*，那是另一个池），见 deploy/README.md「数据库」一节
 ```
