@@ -285,6 +285,33 @@ public class TokenAuthFilterTest {
     }
 
     @Test
+    public void 共享密钥那一支留下全权标记而会话与匿名不留() throws Exception {
+        // 下游要分辨的不是"能不能进门"，而是"知不知道是谁"：铸管理员这类动作只有答得出
+        // "是谁在铸"的凭证才允许（见 UserController.canMintAdmin），所以这个标记是那道闸的唯一依据。
+        LoginSessionStore store = new LoginSessionStore();
+        String adminToken = store.issue(user(51, "boss", "ADMIN")).getToken();
+
+        Map<String, Object> byKey = new LinkedHashMap<String, Object>();
+        HttpServletRequest secretRequest = bearer("/jobinfo/list", "secret", byKey);
+        filter("secret", store).doFilter(secretRequest, new RecordingResponse().proxy(), new RecordingChain());
+        assertTrue("共享密钥放行的那一次必须留下全权标记", TokenAuthFilter.presentedSharedSecret(secretRequest));
+
+        Map<String, Object> bySession = new LinkedHashMap<String, Object>();
+        HttpServletRequest sessionRequest = bearer("/jobinfo/list", adminToken, bySession);
+        filter("secret", store).doFilter(sessionRequest, new RecordingResponse().proxy(), new RecordingChain());
+        assertFalse("会话令牌不是共享密钥（它是 ADMIN 会话也一样，别把两种凭证混成一个标记）",
+                TokenAuthFilter.presentedSharedSecret(sessionRequest));
+        assertNotNull("但它必须带出身份", TokenAuthFilter.currentIdentity(sessionRequest));
+
+        Map<String, Object> anonymous = new LinkedHashMap<String, Object>();
+        HttpServletRequest demoRequest = request("/user/add", "/user/add", "", null, null, null, anonymous);
+        filter(null, store).doFilter(demoRequest, new RecordingResponse().proxy(), new RecordingChain());
+        assertFalse("演示模式的匿名请求两种凭证都不是 ⇒ 两个标记都拿不到",
+                TokenAuthFilter.presentedSharedSecret(demoRequest));
+        assertNull(TokenAuthFilter.currentIdentity(demoRequest));
+    }
+
+    @Test
     public void 普通会话改不了账号而管理员会话能() throws Exception {
         LoginSessionStore store = new LoginSessionStore();
         String normal = store.issue(user(31, "peon", "NORMAL")).getToken();

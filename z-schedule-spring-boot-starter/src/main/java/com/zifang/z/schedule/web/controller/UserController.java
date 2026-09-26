@@ -16,7 +16,9 @@ import java.util.List;
  * <p>
  * API 基础路径: /user
  * 所属模块: z-schedule-admin
- * 鉴权: 由 {@code TokenAuthFilter} 统一拦；建/改/删账号只接受 ADMIN 会话（见其 ADMIN_ONLY_PATHS）
+ * 鉴权: 由 {@code TokenAuthFilter} 统一拦；建/改/删账号只接受 ADMIN 会话（见其 ADMIN_ONLY_PATHS），
+ * 而"把某个账号变成 ADMIN"这一步另有一道闸：只有 ADMIN 会话或共享 accessToken 放行的请求才做得了
+ * （见 {@link #canMintAdmin}）——演示模式对匿名敞开的是管理面，不该把"铸管理员"也一起敞开。
  *
  * <p>主要端点:
  * <ul>
@@ -36,6 +38,29 @@ public class UserController {
     private UserService userService;
 
     /**
+     * "把账号变成管理员"需要哪种凭证。
+     * <p>
+     * 光靠 {@code ADMIN_ONLY_PATHS} 的角色闸拦不住这件事：未配置 accessToken 的演示模式下
+     * 管理面对匿名敞开，而 {@code /user/add} 的 role 是请求体自填的——真机实测（p22 的 A.1）
+     * 匿名 POST 一个 {@code role=ADMIN} 就真的铸出了一个管理员。铸管理员要能回答"是谁在铸"，
+     * 所以只认两种答得出来的凭证：ADMIN 会话（知道是谁）、共享密钥（知道握着口令）。
+     */
+    private static final String NEED_ADMIN_CREDENTIAL =
+            "创建或提升为 ADMIN 需要 ADMIN 会话或 accessToken；未配置 accessToken 时匿名请求只能建 NORMAL";
+
+    private static boolean wantsAdmin(User user) {
+        return user != null && LoginSession.ROLE_ADMIN.equalsIgnoreCase(user.getRole());
+    }
+
+    private static boolean canMintAdmin(HttpServletRequest request) {
+        if (TokenAuthFilter.presentedSharedSecret(request)) {
+            return true;
+        }
+        LoginSession identity = TokenAuthFilter.currentIdentity(request);
+        return identity != null && identity.isAdmin();
+    }
+
+    /**
      * 获取用户列表.
      *
      * @return 用户列表的封装结果
@@ -53,7 +78,10 @@ public class UserController {
      * @return 操作结果(成功/失败以及错误信息)
      */
     @PostMapping("/add")
-    public ReturnT<String> add(@RequestBody User user) {
+    public ReturnT<String> add(@RequestBody User user, HttpServletRequest request) {
+        if (wantsAdmin(user) && !canMintAdmin(request)) {
+            return ReturnT.fail(NEED_ADMIN_CREDENTIAL);
+        }
         return userService.add(user);
     }
 
@@ -64,7 +92,10 @@ public class UserController {
      * @return 操作结果(成功/失败以及错误信息)
      */
     @PostMapping("/update")
-    public ReturnT<String> update(@RequestBody User user) {
+    public ReturnT<String> update(@RequestBody User user, HttpServletRequest request) {
+        if (wantsAdmin(user) && !canMintAdmin(request)) {
+            return ReturnT.fail(NEED_ADMIN_CREDENTIAL);
+        }
         return userService.update(user);
     }
 

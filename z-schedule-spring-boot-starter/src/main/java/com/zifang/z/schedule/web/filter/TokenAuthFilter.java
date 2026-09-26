@@ -49,6 +49,15 @@ public class TokenAuthFilter implements Filter {
     public static final String IDENTITY_ATTRIBUTE = "z.schedule.loginSession";
 
     /**
+     * "这一次是靠共享密钥进来的"标记的属性名。
+     * <p>
+     * 两种凭证的差别不在"能不能进门"，而在**知不知道是谁**：共享密钥不区分人，会话令牌区分。
+     * 所以要判断"能不能做只有管理员能做的事"，只有这个属性 + {@link #IDENTITY_ATTRIBUTE}
+     * 合起来才答得出——缺了前者，管理员自己带的会话和无主的名令在同一段代码里长得一样。
+     */
+    public static final String FULL_AUTHORITY_ATTRIBUTE = "z.schedule.fullAuthority";
+
+    /**
      * 不需要 token 就能到的路径。
      * <p>
      * 只放"登录前就必须能用"的东西：登录口本身、静态外壳（SPA 的 html/js 不含任何数据）、
@@ -102,6 +111,15 @@ public class TokenAuthFilter implements Filter {
     public static LoginSession currentIdentity(HttpServletRequest request) {
         Object attribute = request.getAttribute(IDENTITY_ATTRIBUTE);
         return attribute instanceof LoginSession ? (LoginSession) attribute : null;
+    }
+
+    /**
+     * 这次请求是不是共享密钥放进来的（{@link #IDENTITY_ATTRIBUTE} 的反面：全权，但没有人）。
+     *
+     * @return 只有过滤器在校验通过的共享密钥那一支上才会置真；会话令牌与演示模式匿名都是假
+     */
+    public static boolean presentedSharedSecret(HttpServletRequest request) {
+        return Boolean.TRUE.equals(request.getAttribute(FULL_AUTHORITY_ATTRIBUTE));
     }
 
     @Override
@@ -159,6 +177,9 @@ public class TokenAuthFilter implements Filter {
 
         // 再认共享密钥
         if (tokenMatches(configuredToken, presented)) {
+            // 记一笔"这次是全权凭证放行的"：会话令牌带身份，共享密钥不带——
+            // 下游要区分"管理员会话在做管理员的事"和"握着口令的任何人"，只能靠这个属性。
+            httpRequest.setAttribute(FULL_AUTHORITY_ATTRIBUTE, Boolean.TRUE);
             chain.doFilter(request, response);
         } else {
             log.warn("accessToken 不合法, uri={}, remoteAddr={}", uri, httpRequest.getRemoteAddr());
