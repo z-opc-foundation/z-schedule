@@ -97,6 +97,21 @@ public interface JobLogService {
     /** {@code query} 未显式给上限时的默认返回条数。 */
     int DEFAULT_PAGE_SIZE = 100;
 
+    /**
+     * {@code query} 那一参数真正生效的上限：非正数取 {@link #DEFAULT_PAGE_SIZE}，超过
+     * {@link #MAX_PAGE_SIZE} 被收窄。
+     * <p>
+     * 钉在接口上而不是只留在实现里，是因为"不限组的日志按每个允许的组各查一遍再合并"那种调用方
+     * 也必须截到<b>同一个</b>数：各查 limit 条、合并后仍按原始 limit 截，在
+     * {@code limit > MAX_PAGE_SIZE} 时会拿到 N 组 × 1000 行——实现侧收窄了，调用方却没跟着收窄。
+     */
+    static int effectiveLimit(int limit) {
+        if (limit <= 0) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(limit, MAX_PAGE_SIZE);
+    }
+
     /** 一段调度时间内的执行结果计数。 */
     class Stats {
         private final long total;

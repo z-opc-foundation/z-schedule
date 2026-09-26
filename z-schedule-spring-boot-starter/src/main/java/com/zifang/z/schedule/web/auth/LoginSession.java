@@ -62,25 +62,61 @@ public class LoginSession {
     /**
      * 这个身份能不能碰某个 jobGroup。
      * <p>
+     * 判据只有一份，就是 {@link #declaredGroups()}：点名某一组（{@code /jobinfo/list?jobGroup=}）
+     * 和展开列表（"不限组"那种查询要按每个允许的组各查一遍）走的是同一个集合，
+     * 两边各写一套解析就会出现"点名被拦、列表却能看见"这种自相矛盾的脸。
+     * <p>
      * 三种"不限制"：管理员；{@code permission} 留空（向后兼容的那一半——现存 NORMAL 账号这一列
      * 全是空串，把空读成"一组都不能碰"会一夜之间把所有普通账号锁在管理面之外，那是另一个决定）；
      * 其余情况必须命中列表里的某一组。非数字的 token（{@code "1,abc,2"}）按"不匹配"处理而不是抛异常：
      * 这一列是人手填的，判据不能因为一个错字就整个接口 500。
      */
     public boolean permits(int jobGroup) {
-        if (isAdmin()) {
-            return true;
+        return unrestricted() || declaredGroups().contains(jobGroup);
+    }
+
+    /**
+     * 这个身份是不是"一组都不受限制"（管理员，或 {@code permission} 留空）。
+     * <p>
+     * {@link #permits(int)} 对这两者恒真，所以想知道"到底能碰哪几组"必须先问这一句：留空的账号
+     * 展开 {@link #declaredGroups()} 得到的是空列表，拿它去逐组查询会把一个本该看见全部的人裁成
+     * 什么都看不见。
+     */
+    public boolean unrestricted() {
+        return isAdmin() || permission == null || permission.trim().isEmpty();
+    }
+
+    /**
+     * {@code permission} 里那几组，去掉非数字的 token 并按填写顺序去重
+     * （{@code "2,1,2"} 是两组，不是三次同样的查询）。
+     * <p>
+     * 不受限的身份这里返回<b>空列表</b>——"不限"不等于"全部组"，调用方要自己先判
+     * {@link #unrestricted()}。
+     */
+    public List<Integer> declaredGroups() {
+        List<Integer> groups = new ArrayList<Integer>();
+        if (permission == null) {
+            return groups;
         }
-        if (permission == null || permission.trim().isEmpty()) {
-            return true;
-        }
-        String wanted = String.valueOf(jobGroup);
         for (String token : permission.split(",")) {
-            if (token.trim().equals(wanted)) {
-                return true;
+            Integer parsed = parseGroup(token);
+            if (parsed != null && !groups.contains(parsed)) {
+                groups.add(parsed);
             }
         }
-        return false;
+        return groups;
+    }
+
+    /** 一个 token 是不是某一组；错字返回 {@code null}（不匹配），不抛。 */
+    static Integer parseGroup(String token) {
+        if (token == null) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(token.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     boolean isExpired(long nowMillis) {

@@ -76,7 +76,7 @@ public class JobLogServiceImpl implements JobLogService {
         }
         wrapper.orderByDesc(JobLogDO::getTriggerTime);
         wrapper.orderByDesc(JobLogDO::getId);
-        wrapper.last("LIMIT " + pageSize(limit));
+        wrapper.last("LIMIT " + JobLogService.effectiveLimit(limit));
         return DoMapper.toLogDTOList(jobLogMapper.selectList(wrapper));
     }
 
@@ -100,10 +100,7 @@ public class JobLogServiceImpl implements JobLogService {
     }
 
     private static int pageSize(int limit) {
-        if (limit <= 0) {
-            return DEFAULT_PAGE_SIZE;
-        }
-        return Math.min(limit, MAX_PAGE_SIZE);
+        return JobLogService.effectiveLimit(limit);
     }
 
     /** 别名大小写随驱动而变(H2 会把 total 变成 TOTAL),按不区分大小写取值. */

@@ -51,6 +51,9 @@ public class ScheduleDashboardControllerTest {
         inject(dashboard, "registryService", new FakeRegistryService());
         inject(dashboard, "jobGroupService", new FakeJobGroupService());
         inject(jobLogController, "jobLogService", logs);
+        // /joblog/list 只给 jobId 时要问任务那一行属于哪个组；这几例都是匿名（request=null），
+        // 注入是为了"少了这个 bean 会启动失败"不在这里发生
+        inject(jobLogController, "jobInfoService", infos);
     }
 
     // ---- /stats ----
@@ -189,13 +192,15 @@ public class ScheduleDashboardControllerTest {
     @Test
     public void 失败筛选覆盖所有失败码而不只是500() {
         logs.rows = new ArrayList<>();
-        jobLogController.list(0, 0, 2, 50);
+        // request=null：这几例钉的是 status→handleCode 的翻译，身份那一层由
+        // JobLogControllerGroupAccessTest 钉；无请求上下文按"不受约束"走全局查询
+        jobLogController.list(0, 0, 2, 50, null);
         assertEquals("status=2 必须是 ANY_FAILURE", JobLogService.ANY_FAILURE, logs.lastHandleCode);
 
-        jobLogController.list(0, 0, 1, 50);
+        jobLogController.list(0, 0, 1, 50, null);
         assertEquals("status=1 仍是精确成功码", ReturnT.SUCCESS_CODE, logs.lastHandleCode);
 
-        jobLogController.list(0, 0, 0, 50);
+        jobLogController.list(0, 0, 0, 50, null);
         assertEquals("status=0 不过滤", -1, logs.lastHandleCode);
     }
 
