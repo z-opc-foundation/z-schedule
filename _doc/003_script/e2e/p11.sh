@@ -6,6 +6,9 @@
 set -uo pipefail
 cd ~/z-schedule-e2e
 BASE="${BASE:-http://127.0.0.1:18086}"
+# #39：本脚本第一版是靠 run.sh 的默认构件起起来的，而那个默认值是个**名字**
+# （`z-schedule-admin-1.0.0-exec.jar`，在 250 上先后对应过 4 份不同字节）⇒ 复跑必须点名。
+JAR="${JAR:?必须显式指定 JAR（#39：run.sh 的默认构件是个被复用过 4 次的名字）}"
 q() { ./q.sh -N -B -e "$1"; }
 hit() { curl -s -m 10 -H 'Content-Type: application/json' -X POST "$BASE$2" -d "$3"; echo; }
 
@@ -15,7 +18,7 @@ if [ -n "$OLD" ] && kill -0 "$OLD" 2>/dev/null; then
   kill -0 "$OLD" 2>/dev/null && { echo "FATAL: 旧进程未退, 拒绝双实例"; exit 1; }
 fi
 rm -f logs/boot3.out
-PORT="${PORT:-18086}" setsid nohup ./run.sh > logs/boot3.out 2>&1 < /dev/null &
+PORT="${PORT:-18086}" JAR="$JAR" setsid nohup ./run.sh > logs/boot3.out 2>&1 < /dev/null &
 echo $! > app.pid
 for i in $(seq 90); do
   [ "$(curl -s -m 3 -o /dev/null -w '%{http_code}' "$BASE/jobinfo/list?start=0&length=1" 2>/dev/null || echo 0)" = "200" ] && { echo "UP after ${i}s"; break; }

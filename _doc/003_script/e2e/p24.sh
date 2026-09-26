@@ -266,6 +266,66 @@ CTRL=$(grep -rhoE '@RequestMapping\("/jobinfo"' "$DEPLOY/../z-schedule-spring-bo
 [ -n "$CTRL" ] && ok "A10b 对照：控制器确实挂在根上（$CTRL），没有任何 /api 前缀可转" \
                || echo "    （A10b 对照没取到控制器串，A10 的结论只看 nginx 自身）"
 
+# A11（#39）每一条 ./run.sh 调用都必须显式点名构件。为什么要钉这一格：run.sh 的默认值是
+#     `z-schedule-admin-1.0.0-exec.jar` 这样一个**名字**，而这名字在 250 上先后对应过 4 份不同字节
+#     （README 那条"同一个名字对应过 4 份字节"的坑）。裸调 ⇒ 脚本今天绿、明天起来的可能仍是那个
+#     名字下的另一代字节，而结论全记在"这一版修好了"名下——和 #38 那格"字面量喂静默错字节"同一类病，
+#     只是这里没有 docker 会替我响。
+# ⚠ 两处我自己踩过的口径：
+#   ① 扫描必须折叠续行：p20/p22 的 `JAR=` 在上一行、行尾带 `\`。第一版用单行 grep 判"谁裸调"，
+#      把这两条读成裸调用，报出"6 个裸调用方"，真值 4 个。
+#   ② 不能拿 `glob p*.sh` 当分母：本尺自己的源码里就写着 './run.sh' 这个串（判定条件 + 那条 ok 消息），
+#      自指被数成调用、分母从 11 涨到 13。⇒ 分母钉成显式清单 A11_FILES，另加一条**覆盖守卫**：
+#      清单之外任何 p*.sh 出现 './run.sh' 就报红，这样"新加了调用方却没进清单"会响，不会静默漏量。
+A11_FILES="p10.sh p11.sh p13.sh p14.sh p15.sh p16.sh p17.sh p18.sh p20.sh p22.sh p23.sh"
+runsh_scan() {  # $1=目录 $2=空格分隔的文件名 ⇒ "<调用条数>|<裸调用条数>|<点名>"
+  python3 - "$1" "$2" <<'PY'
+import re, os, sys
+d, names = sys.argv[1], sys.argv[2].split()
+tot, bare = 0, []
+for nm in names:
+    f = os.path.join(d, nm)
+    if not os.path.isfile(f):
+        bare.append('%s:文件不在' % nm); continue
+    txt = open(f, encoding='utf-8').read()
+    for n, ln in enumerate(re.sub(r'\\\n[ \t]*', ' ', txt).split('\n'), 1):
+        s = ln.strip()
+        if s.startswith('#') or './run.sh' not in s:
+            continue
+        tot += 1
+        if 'JAR=' not in s and '${JAR' not in s:
+            bare.append('%s:%d' % (nm, n))
+print('%d|%d|%s' % (tot, len(bare), ' '.join(bare) or '-'))
+PY
+}
+# 覆盖守卫：清单外还有谁写着 ./run.sh（p24 自己是尺，排除）
+A11_OUTSIDE=""
+for f in p*.sh; do
+  [ "$f" = "p24.sh" ] && continue
+  case " $A11_FILES " in *" $f "*) continue;; esac
+  grep -vE '^[[:space:]]*#' "$f" | grep -q '\./run\.sh' && A11_OUTSIDE="$A11_OUTSIDE $f"
+done
+A11=$(runsh_scan "$(pwd)" "$A11_FILES")
+A11_TOT=${A11%%|*}; A11_REST=${A11#*|}; A11_BARE=${A11_REST%%|*}; A11_NAMES=${A11_REST#*|}
+# 猎物：拿一份**当下合规**的显式调用（p20 那条带 JAR="$JAR"），只把 JAR 那一截摘掉 ⇒ 必须被点名
+mkdir -p "$WORK/prey_a11"
+python3 - "$(pwd)/p20.sh" "$WORK/prey_a11/p20.sh" <<'PY'
+import sys
+t = open(sys.argv[1], encoding='utf-8').read()
+p = t.replace('JAR="$JAR" ', '', 1)
+assert p != t, '猎物注入没改动任何字节（说明 p20 里那串 JAR= 不是我以为的样子）'
+open(sys.argv[2], 'w', encoding='utf-8').write(p)
+PY
+A11P=$(runsh_scan "$WORK/prey_a11" "p20.sh")
+if [ -n "$A11_OUTSIDE" ]; then
+  bad "A11 分母不闭合：清单外的脚本里出现了 ./run.sh 却没被量到 [$A11_OUTSIDE] ⇒ 先把调用方加进 A11_FILES（分母不能靠 glob，本尺自己就被 glob 数进去过一次）"
+elif [ "$A11_TOT" != "0" ] && [ "$A11_BARE" = "0" ] \
+   && [ "${A11P%%|*}" = "1" ] && [ "$(printf '%s' "$A11P" | awk -F'|' '{print $2}')" != "0" ]; then
+  ok "A11 清单里 $A11_TOT 条 ./run.sh 调用（${A11_FILES// /、}）全部显式点名构件、裸调用 0 条；同一把尺在摘掉 p20 那截 JAR= 的猎物上把裸调用数到 $(printf '%s' "$A11P" | awk -F'|' '{print $2}') 条并点名 $(printf '%s' "$A11P" | awk -F'|' '{print $3}') ⇒ 不是恒零；覆盖守卫数到清单外命中 0 处"
+else
+  bad "A11 尺或面不对：真值 调用=$A11_TOT 裸=$A11_BARE [$A11_NAMES]，猎物[$A11P]（期望 真值裸=0 且调用>0 且猎物被点名）⇒ 要么还有裸调用，要么这把尺看不见它"
+fi
+
 echo ""
 echo "PASS=$PASS FAIL=$FAIL（臂 A 结束）"
 if [ "${P24_A_ONLY:-0}" = "1" ]; then

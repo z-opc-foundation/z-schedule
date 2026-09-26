@@ -7,6 +7,10 @@
 set -uo pipefail
 cd ~/z-schedule-e2e
 BASE="${BASE:-http://127.0.0.1:18086}"
+# #39：这一轮的"多久才真的开始执行"是拿**某一个构件**量的，而 run.sh 的默认值只是个名字
+# （`z-schedule-admin-1.0.0-exec.jar`，250 上先后对应过 4 份不同字节）⇒ 复跑必须点名，否则
+# 24 s → 5 s 那个差值说不清是谁跑出来的。
+JAR="${JAR:?必须显式指定 JAR（#39：run.sh 的默认构件是个被复用过 4 次的名字）}"
 MAXWAIT=${1:-75}
 q() { ./q.sh -N -B -e "$1"; }
 hit() { curl -s -m 10 -H 'Content-Type: application/json' -X POST "$BASE$2" -d "${3:-}"; echo; }
@@ -22,7 +26,7 @@ if [ -n "$OLD" ] && kill -0 "$OLD" 2>/dev/null; then
   echo "旧进程 $OLD 退出耗时 $(( $(date +%s) - KS ))s"
 fi
 rm -f logs/boot4.out
-PORT="${PORT:-18086}" setsid nohup ./run.sh > logs/boot4.out 2>&1 < /dev/null &
+PORT="${PORT:-18086}" JAR="$JAR" setsid nohup ./run.sh > logs/boot4.out 2>&1 < /dev/null &
 echo $! > app.pid
 
 UP=0

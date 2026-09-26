@@ -5,6 +5,9 @@
 set -uo pipefail
 cd ~/z-schedule-e2e
 BASE="${BASE:-http://127.0.0.1:18086}"
+# #39：鉴权面是**按构件**兑现的（#12 那条修复就在 jar 里），run.sh 的默认值只是个被复用过 4 次的
+# 名字 ⇒ 复跑必须点名，否则"其余入口一律 403"可能量的是旧字节。
+JAR="${JAR:?必须显式指定 JAR（#39：run.sh 的默认构件是个被复用过 4 次的名字）}"
 TOK="e2e-$(date +%s)-p14"
 q() { ./q.sh -N -B -e "$1"; }
 code() { curl -s -m 8 -o /dev/null -w '%{http_code}' "$@"; }
@@ -15,7 +18,12 @@ OLD=$(cat app.pid 2>/dev/null || true)
   kill -0 "$OLD" 2>/dev/null && { echo "FATAL: 旧进程未退, 拒绝双实例"; exit 1; }
 }
 rm -f logs/boot5.out
-ACCESS_TOKEN="$TOK" PORT="${PORT:-18086}" setsid nohup ./run.sh > logs/boot5.out 2>&1 < /dev/null &
+# 两个改动一次做掉（#39）：
+#   · JAR 必须点名（见上面那条 guard）。
+#   · token 从 ACCESS_TOKEN= 换成 Z_SCHEDULE_ACCESSTOKEN=：前者 run.sh 会把它拼成
+#     `--z.schedule.access-token=…` 进 java argv，同机任何人 ps 就读走了（p22 早就走 env 这条路，
+#     本脚本是漏改的那一处）。测的还是同一件事：同一个 token，只是换了搬运方式。
+Z_SCHEDULE_ACCESSTOKEN="$TOK" PORT="${PORT:-18086}" JAR="$JAR" setsid nohup ./run.sh > logs/boot5.out 2>&1 < /dev/null &
 echo $! > app.pid
 for i in $(seq 60); do
   [ "$(code "$BASE/user/login" -X POST -H 'Content-Type: application/json' -d '{}')" != "000" ] && { echo "UP after ${i}s"; break; }

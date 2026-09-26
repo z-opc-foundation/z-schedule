@@ -6,6 +6,10 @@ set -uo pipefail
 cd ~/z-schedule-e2e
 TOKEN="e2e-token-$(date +%s)"
 BASE="${BASE:-http://127.0.0.1:18086}"
+# #39 起的规矩：起哪一份 exec jar 必须点名，不许吃 run.sh 的默认值。默认值 `z-schedule-admin-1.0.0-exec.jar`
+# 是个**名字**，而这名字在 250 上先后对应过 4 份不同字节 ⇒ 裸调会把结论挂到错的构件上。
+# 复跑写法：JAR=<那份 jar> bash p10.sh（量具：p24.sh 的 A11）
+JAR="${JAR:?必须显式指定 JAR（#39：run.sh 的默认构件是个被复用过 4 次的名字）}"
 
 stop_app() {
   local old
@@ -18,7 +22,7 @@ stop_app() {
 
 start_app() {
   rm -f logs/boot2.out
-  PORT="${PORT:-18086}" setsid nohup ./run.sh > logs/boot2.out 2>&1 < /dev/null &
+  PORT="${PORT:-18086}" JAR="$JAR" setsid nohup ./run.sh > logs/boot2.out 2>&1 < /dev/null &
   echo $! > app.pid
   for i in $(seq 90); do
     code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' "$BASE/jobinfo/list?start=0&length=1" 2>/dev/null || echo 000)
