@@ -19,6 +19,8 @@ GROUP="${GROUP:-90098}"
 PORT="${PORT:-18098}"
 N="${N:-3}"
 WINDOW="${WINDOW:-25}"
+# 日志按端口命名；换构件重启请沿用同一个文件（进程持有的是 inode，改名后仍会继续写）
+LOG="${LOG:-logs/service_${PORT}.out}"
 
 q() { ./q.sh -N -B --skip-column-names "$@" 2>&1; }
 
@@ -52,6 +54,10 @@ echo "  HTTP=$HTTP（000/403 都不算通过）"
 [ "$HTTP" = "200" ] || { echo "FATAL: 管理面没答 200"; exit 1; }
 
 echo "=== 2) 播种 $N 个 FIX_RATE 任务，handler=demoHandler（IJobHandler 接口版）==="
+# 日志行基线：上一次的行必须排除在外，否则"成功=72"会包含历史、而 0 次成功的老行
+# 也能凑出一个 VERDICT: OK（首次实跑就是这个现象：日志行=72 里只有 30 行是本次的）
+LOGID0=$(q -e "SELECT COALESCE(MAX(id),0) FROM z_schedule_job_log WHERE job_group=$GROUP")
+echo "  job_log 基线 id>$LOGID0 才算本次"
 q -e "UPDATE z_schedule_job_info SET trigger_status=0 WHERE job_group=$GROUP" >/dev/null
 q -e "DELETE FROM z_schedule_job_info WHERE job_group=$GROUP" >/dev/null
 rows=""
@@ -70,21 +76,28 @@ SQL
 SEED=$(q -e "SELECT COUNT(*) FROM z_schedule_job_info WHERE job_group=$GROUP AND trigger_status=1")
 echo "  已启用任务数=$SEED/$N"
 [ "$SEED" -lt "$N" ] && { echo "FATAL: 任务没建出来"; exit 1; }
+# 阳性对照必须从"我播种之后"那一行开始数：日志文件是跨重启沿用的，
+# 从文件头数会把**上一个构件**留下的 demoHandler 行算进来——那正是"陈旧的正对照"。
+[ -f "$LOG" ] || { echo "FATAL: 找不到服务日志 $LOG（对照拿不到，别说跑通了）"; exit 1; }
+BASE=$(wc -l < "$LOG")
+echo "  日志基线 $LOG 第 $BASE 行之后才算本次"
 
 echo "=== 3) 等 ${WINDOW}s，数成功结论（只认 handle_code=200 的行）==="
 sleep "$WINDOW"
-OK=$(q -e "SELECT COUNT(*) FROM z_schedule_job_log WHERE job_group=$GROUP AND handle_code=200")
-ANY=$(q -e "SELECT COUNT(*) FROM z_schedule_job_log WHERE job_group=$GROUP")
-ERR=$(q -e "SELECT COUNT(*) FROM z_schedule_job_log WHERE job_group=$GROUP AND handle_code<>200")
-echo "  日志行=$ANY，其中成功=$OK，非成功=$ERR"
-q -e "SELECT id, job_id, handle_code, LEFT(handle_msg,40) FROM z_schedule_job_log WHERE job_group=$GROUP ORDER BY id DESC LIMIT 3" \
+OK=$(q -e "SELECT COUNT(*) FROM z_schedule_job_log WHERE job_group=$GROUP AND id>$LOGID0 AND handle_code=200")
+ANY=$(q -e "SELECT COUNT(*) FROM z_schedule_job_log WHERE job_group=$GROUP AND id>$LOGID0")
+# handle_code=0 是"进行中"（那一行刚被 INSERT，结论还没回写），不是失败：
+# 旧口径 handle_code<>200 会把一次正常派发中途采到的行算成非成功 ⇒ 自己造红
+ERR=$(q -e "SELECT COUNT(*) FROM z_schedule_job_log WHERE job_group=$GROUP AND id>$LOGID0 AND handle_code NOT IN (0,200)")
+echo "  本次日志行=$ANY，其中成功=$OK，非成功=$ERR（每个任务 2 s 一次 ⇒ 期望约 $((N * WINDOW / 2)) 行）"
+q -e "SELECT id, job_id, handle_code, LEFT(handle_msg,40) FROM z_schedule_job_log WHERE job_group=$GROUP AND id>$LOGID0 ORDER BY id DESC LIMIT 3" \
   | awk -F'\t' '{printf "    log=%s job=%s code=%s msg=%s\n", $1,$2,$3,$4}'
 # 阳性对照：demoHandler 里那行 logger.info 必须真的出现过，否则"200"可能是别处写进去的
-LOGHITS=$(grep -ac "demoHandler 执行 jobId" logs/service_18098.out)
-echo "  [对照] 服务日志里 'demoHandler 执行 jobId' 行数=$LOGHITS"
-if [ "$OK" -lt 1 ] || [ "$ERR" -gt 0 ] || [ "$LOGHITS" -lt 1 ]; then
-  echo "VERDICT: FAIL —— 成功行=$OK 非成功行=$ERR handler 侧证=$LOGHITS"
-  echo "         看 logs/service_18098.out 与 'GROUP=$GROUP ./svc_smoke.sh status'"
+LOGHITS=$(tail -n +$((BASE + 1)) "$LOG" | grep -ac "demoHandler 执行 jobId")
+echo "  [对照] 本次新增日志里 'demoHandler 执行 jobId' 行数=$LOGHITS（基线第 $BASE 行之后）"
+if [ "$OK" -lt "$N" ] || [ "$ERR" -gt 0 ] || [ "$LOGHITS" -lt 1 ]; then
+  echo "VERDICT: FAIL —— 本次成功行=$OK（至少要有 $N，每个任务各一次）非成功=$ERR handler 侧证=$LOGHITS"
+  echo "         看 $LOG 与 'GROUP=$GROUP ./svc_smoke.sh status'"
   exit 1
 fi
 echo "VERDICT: OK —— IJobHandler 派发支在真机上跑通，结论确实落库"
