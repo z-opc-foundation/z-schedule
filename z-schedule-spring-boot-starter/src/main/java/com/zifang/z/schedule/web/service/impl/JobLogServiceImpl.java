@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,6 +21,9 @@ import java.util.Map;
  */
 @Service
 public class JobLogServiceImpl implements JobLogService {
+
+    /** 清理日志时单批删除的行数上界, 见 {@link #deleteBefore(Date)}. */
+    static final int CLEAR_BATCH_SIZE = 1000;
 
     @Resource
     private JobLogMapper jobLogMapper;
@@ -148,7 +152,53 @@ public class JobLogServiceImpl implements JobLogService {
         if (days < 7) days = 7;
         java.util.Calendar cal = java.util.Calendar.getInstance();
         cal.add(java.util.Calendar.DAY_OF_MONTH, -days);
-        return jobLogMapper.delete(
-                new LambdaQueryWrapper<JobLogDO>().lt(JobLogDO::getTriggerTime, cal.getTime()));
+        return deleteBefore(cal.getTime());
+    }
+
+    /**
+     * 删除触发时间早于 {@code cutoff}（不含）的日志，按主键分批。
+     * <p>
+     * 一条 {@code DELETE FROM ... WHERE trigger_time < ?} 能删多少行完全由外部条件决定：
+     * 保留期配多长、调度中心停了多久，事务就有多大——锁持有时间、undo、binlog 事件
+     * 一起跟着涨，而且没有回头路。这里先按主键取一批、再按主键删一批，
+     * 把单批大小钉死在 {@link #CLEAR_BATCH_SIZE}。
+     *
+     * @return 实际删除的行数
+     */
+    int deleteBefore(Date cutoff) {
+        int total = 0;
+        while (true) {
+            List<Long> ids = idsBefore(cutoff, CLEAR_BATCH_SIZE);
+            if (ids.isEmpty()) {
+                return total;
+            }
+            int deleted = jobLogMapper.deleteByIds(ids);
+            if (deleted <= 0) {
+                // 一批取到的 id 一个都没删掉（被别的连接抢先了），不能再按同一批原地转
+                return total;
+            }
+            total += deleted;
+            if (ids.size() < CLEAR_BATCH_SIZE) {
+                return total;
+            }
+        }
+    }
+
+    private List<Long> idsBefore(Date cutoff, int batch) {
+        List<JobLogDO> rows = jobLogMapper.selectList(new LambdaQueryWrapper<JobLogDO>()
+                .select(JobLogDO::getId)
+                .lt(JobLogDO::getTriggerTime, cutoff)
+                .orderByAsc(JobLogDO::getId)
+                .last("LIMIT " + batch));
+        if (rows == null || rows.isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+        List<Long> ids = new ArrayList<Long>(rows.size());
+        for (JobLogDO row : rows) {
+            if (row.getId() != null) {
+                ids.add(row.getId());
+            }
+        }
+        return ids;
     }
 }
