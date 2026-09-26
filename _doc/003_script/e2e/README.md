@@ -190,7 +190,7 @@ curl -s -X POST "http://127.0.0.1:$PORT/user/add?accessToken=$SECRET" \
 | `p19.sh` | **同一时刻有几条连接在忙**（忙=`COMMAND='Query'`）＋ STATE 直方图；自带 `preytest`：埋 6 条并发 `SELECT SLEEP(4)`，尺数不到 6 就 FATAL | 把"连接数"这个量从猜测变成读数 |
 | `p20.sh` | **固定需求只改池上限**（`max-active` 20/40/80），同时量吞吐与忙连接 ⇒ 池是不是那堵墙 | 天花板归属（见第 4 节，答案是"是"） |
 | `p21.sh` | **一次执行的 2 条语句里钱花在哪**：同一批 id 上 narrow(4 列) / wide(12 列) 两臂判"形状"，pair2(2 次提交) / pair1(1 次提交) 两臂判"次数" | ③ 的前提：收窄 SET 到底值不值（答案：不值，见 §4.4） |
-| `p22.sh` | **登录态 + 铸权闸 + 按组分权在真机上兑现到哪一步**：S 段先起一台配了 `accessToken` 的关门实例（`Z_SCHEDULE_ACCESSTOKEN` 走环境变量、argv 0 命中）并用共享密钥种下第一个 ADMIN，A 段打常驻那台（演示模式：签发形状 / 角色闸 / **匿名铸 ADMIN 被拒**＋NORMAL 阳性对照），B 段回到关门实例逐条验三种撤销，**D 段在关门实例上验 `permission` 那一列真的参与判定**（建两个分组 + 两行任务 ⇒ 列表裁剪、点名要别组被拒、读/触发/停/启/删五支越组被拒且**库里那一行没被写过**、ADMIN 不受约束、改 `permission` 会踢掉旧会话），收尾数库、验租约 | #19、#28（见 §9′；两台是必需的——撤销在演示模式下观察不到，而种子账号在演示模式下已经铸不出来） |
+| `p22.sh` | **登录态 + 铸权闸 + 按组分权在真机上兑现到哪一步**：S 段先起一台配了 `accessToken` 的关门实例（`Z_SCHEDULE_ACCESSTOKEN` 走环境变量、argv 0 命中）并用共享密钥种下第一个 ADMIN，A 段打常驻那台（演示模式：签发形状 / 角色闸 / **匿名铸 ADMIN 被拒**＋NORMAL 阳性对照），B 段回到关门实例逐条验三种撤销，**D 段在关门实例上验 `permission` 那一列真的参与判定**（建两个分组 + 两行任务 ⇒ 列表裁剪、点名要别组被拒、读/触发/停/启/删五支越组被拒且**库里那一行没被写过**、ADMIN 不受约束、改 `permission` 会踢掉旧会话），**E 段把同一套收口打到日志那一侧**（`job_log.job_group` 是另一张表：派发行的组号由写侧兑现、`/joblog/*` 四口都认行上那一组、不限组时逐组合并重排并与 MySQL 现算的期望序对拍、`clear` 的"没删"配一支"会删"的猎物、`limit` 远超上限时收窄到 1000），收尾数库、验租约 | #19、#28（见 §9′；两台是必需的——撤销在演示模式下观察不到，而种子账号在演示模式下已经铸不出来） |
 | `svc_smoke.sh` | **常驻实例现在还活着吗**：播种 3 个 2 s 任务 → 数 `handle_code=200` → 用 handler 自己那行日志做阳性对照 → 停用。两处基线（`job_log` 的 `MAX(id)` 与日志文件行数）把**上一次运行**的行排除在外——不加基线时实测过 `成功=72`，其中 42 行是历史 | 0b9ac0f 的 `IJobHandler` 派发支要在真机上被观察到；陈旧正对照/陈旧计数 |
 
 ## 4. 天花板到底压在哪一层
@@ -477,7 +477,7 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 | `/jobinfo/*` 八支端点按组收口：普通会话只见/只动 `permission` 里列出的组。**留空 = 不限**（不把既有账号一夜锁死）；ADMIN / 共享密钥 / 匿名结构上不受约束（`restrictable` 提前返回 `null`，它们连"为判组多打一次库"都不发生）。`update` 判**两道**：库里那一行的组 + 请求体里的组 | `GroupAccess.restrictable/narrow/denialReason` ← `JobInfoController` 的 `list/getById/add/update/remove/stop/start/trigger` | `JobInfoControllerGroupAccessTest` 10 例（`G1`–`G4`、`G6`、`G7`、`G9` 逐支红在具名判据上；`G8` 只能红在身份层，见下面那段）、真机 `p22` 的 `D` 段 |
 | 改 `permission` ⇒ 同样作废会话（**新值要重新登录才生效**：旧令牌带着旧的一组组号就是隐身入口） | `UserServiceImpl.update` 的 `permissionChanged`（在合并进库里那行**之前**算） | `改分组会把该用户的旧会话踢下线`（`G10` 摘掉即红、`G11` 放宽成"填了就算变"也即红）、真机 `D.14`/`D.15`/`D.16` |
 | **日志侧判的是日志行自己那一列**（`job_log.job_group`），与任务那一行不是一张表：`/joblog/*` 四口都收口。`list` 四分支：点名别组 = 拒绝（不是空表）、点名 `jobId` = 先问任务现在那行、什么都没点名 = 见下一行、`clear` 的 `type=0` 对分权会话直接拒绝 | `GroupAccess.restrictable/denialReason` ← `JobLogController` 的 `list/getById/executionLog/clear` | `JobLogControllerGroupAccessTest` 13 例里的 `H4`/`H5`/`H6`/`H7`/`H8`/`H9`、真机 `p22` 的 `E.7`/`E.9`/`E.10`/`E.12` |
-| 不限组的列表是**逐组各查一页再合并重排**，截断按 `JobLogService.effectiveLimit(limit)`（不是原始 `limit`）——"先全局查一页再裁"在别的组更忙时会把手里那页整个挤空 | `JobLogController.newestAcross` + `NEWEST_FIRST`（空 `trigger_time` 视最旧、同刻按 id 倒序，与 `query` 的 `ORDER BY` 同规则） | `H1`（改成全局查一页再裁）、`H2`（合并后按原始 `limit` 截）、`H3`（合并后不排序）；真机 `E.5`（合并等于 SQL 现算的期望序）与 `E.6`（空时间末位 + 同刻 id 倒序，逐位对拍） |
+| 不限组的列表是**逐组各查一页再合并重排**，截断按 `JobLogService.effectiveLimit(limit)`（不是原始 `limit`）——"先全局查一页再裁"在别的组更忙时会把手里那页整个挤空 | `JobLogController.newestAcross` + `NEWEST_FIRST`（空 `trigger_time` 视最旧、同刻按 id 倒序，与 `query` 的 `ORDER BY` 同规则） | `H1`（改成全局查一页再裁）、`H2`（合并后按原始 `limit` 截）、`H3`（合并后不排序）；真机 `E.5`（合并等于 SQL 现算的期望序）与 `E.6`（空时间末位 + 同刻 id 倒序，逐位对拍）、`E.15`（一个组灌到 1,207 行时 `limit=5000` 收窄到 1000，合并侧也是 1000） |
 | **写侧那一列不能是死值**：派发落库时组号从库里那一行取，库里没有的任务不落行 | `ExecutorCallbackController.run`（`job.getJobGroup()` + `job == null` 先拒） | `E1`–`E3` 三支注入（写死 0 / 摘空值守卫 / 取错字段）、真机 `E.2`（`job_group` 回读 = 任务的组）与 `E.3`（全表行数不变） |
 | `/user/logout` 幂等：不回答"这把令牌先前在不在用" | `UserController.logout` | `令牌能过过滤器而登出后过不了` |
 | 过滤器与签发方共用**同一个** store 实例 | `ZScheduleAutoConfiguration.tokenAuthFilterRegistration` | `过滤器必须注册在整个应用入口上`（M8，就是坑 20 那条红） |
@@ -545,6 +545,13 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 76 → 92 那 16 条 = `E` 段 14 条 + 新加的两支构件形状判据 `0.4d`/`0.4e`；4 条观察一字未变
 （`S.9b` 无盐 MD5、`A.20`/`A.20b` 演示模式看不见撤销、`D.13` `/jobgroup/list` 仍不裁）。
 
+09-26 23:33、23:38、23:39 再连跑三次（构件仍是 `a16473a`，脚本两端 md5 `76f17d399274aa7ecc33f54da60cb1a0`）：
+**93 条 PASS / 0 FAIL / 4 条观察**。92 → 93 只多一条，因为 `E` 段这一版只加了 `E.15`（硬上限那一格，
+见下表），原来的收尾断言从 `E.14` 改号为 `E.16` 不是新增。顺带一个运维读数：一轮 28 s（`S` 段那台
+临时实例 `Started ... in 6.591 seconds`），所以"连跑三遍看是不是稳定"在这台机器上不到两分钟——
+便宜的复跑没有理由不跑——上一格那两条 FAIL 之所以能定性成"量具的错"而不是"产品的错"，靠的就是
+FAIL 消息把两侧原样贴出来 + 改完复跑立刻归零（下一段记的是同一条）。
+
 **首跑那次是 90 PASS / 2 FAIL，而两条 FAIL 全长在量具上**：`ids_of` 拿 `tr '\n' ' '` 收尾留了个尾空格，
 `e_expect` 那条 SQL 出来的串没有 ⇒ 整串比较永远不等；两条 FAIL 消息里贴的"实得"与"期望"id 序列逐位相同。
 改的是脚本不是产品，复跑即 92/0。**⇒ 整串比较的两侧必须归一到同一条成形规则**；而 FAIL 消息把两边都
@@ -568,6 +575,7 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 | `E.7`/`E.11` 阴性读数的阳性对照 | 点名第三组 = 拒绝且理由带着组号，点名自己那组照给；管理员会话一份列表里三组的行**都在**（含那四行"比 peon 的两组都新"的）⇒ `E.5` 的"没有它的行"是被裁掉，不是那几行查不出来 |
 | `E.12`+`E.13` 清理口的"没删"与"会删"同框 | 分权会话三挡都拦：`type=0` 全表仍 151985 行、越组 `type=1` 那任务仍 5 行、组解析不出的任务也拦；**同一个口换成共享密钥清它 ⇒ 5→0**，而另一个任务的 8 行不受牵连 ⇒ 前面三个"没删"是闸拦的，不是这个口从来不删 |
 | `E.8` `status` 两挡在真库上互斥 | `status=2` 有 `handle_code=500` 那行、没有 `=200` 那行、也没有 `=0`（未执行）那行；`status=1` 反过来。**`0` 不能被算成失败**——否则每一条刚派发还没跑的行都会进"失败日志"列表 |
+| `E.15` 硬上限只有真库给得出 | 往 A 组灌到 1,207 行（比 `MAX_PAGE_SIZE` 多），`limit=5000` 点名单组实得 **1000** 行、不限组（两组合并）也是 **1000** 而不是 1200/2000、`limit=50` 照旧 50 ⇒ 收窄发生在查询侧，且**合并方用的是同一个 `effectiveLimit` 而不是原始 `limit`**。H2 那 13 例（`H1`/`H2`）里行数是我自己造的，造不出"一个组里比上限还多"这种数据形状 |
 | `D.4` 列表被裁到自己那一组 | peon 的 `permission=3`：`/jobinfo/list` 里有 A 组那行、没有 B 组那行。**裁剪发生在返回前，不是替数据库少查**——所以 `D.13` 那份没裁的组列表才是真漏，不是读数误差 |
 | `D.5` 点名要别的组是**拒绝**而不是一张空表 | HTTP 200 + `code:500`，理由里带着组号（controller 那一层，见坑 23）；`D.6` 阳性对照：同一个人点名要自己那组照样给 |
 | `D.8`/`D.9`/`D.10`/`D.11` 闸落在写之前 | 越组的 trigger/stop/start/remove 全被拒，而且**库里那一行没动过**：B 组那行的日志行数 `0 → 0`、`trigger_status` 不变、行还在。两支阳性对照（同请求换 A 组那行：触发真落库=1 行、启停真把 `0→1→0`）证明那些零不是"这个口从来不写" |

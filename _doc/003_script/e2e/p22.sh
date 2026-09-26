@@ -664,10 +664,26 @@ else
       bad "E.13 该删的没删干净：$(printf '%s' "$CK4" | cut -c1-140) $JC 行数 $CEC→$AFTER，$JA=$CJA→$(logrows "$JA")"
     fi
 
+    # 硬上限那一格只有真库能给：一个组里灌 1200 行，比 MAX_PAGE_SIZE 多，limit 又远大于两者。
+    # 实现侧收窄了而合并方不跟着收窄的话，读到的会是 1200（单组）或"两组各 1000"拼出来的 2000。
+    q -e "INSERT INTO z_schedule_job_log (job_group, job_id, executor_handler, trigger_time, trigger_code, handle_code, handle_msg) SELECT $GA, $JA, 'p22_e', DATE_ADD(NOW(), INTERVAL rn SECOND), 200, 0, 'p22 e2e 夹紧' FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) rn FROM z_schedule_job_log ORDER BY id LIMIT 1200) x" >/dev/null
+    CLAMP_SEED=$(q -e "SELECT COUNT(*) FROM z_schedule_job_log WHERE executor_handler='p22_e'" | tr -d '[:space:]')
+    BIG=$(raw GET "$BB/joblog/list?jobGroup=$GA&limit=5000&$EP")
+    MERGED=$(raw GET "$BB/joblog/list?limit=5000&$EP")
+    SMALL=$(raw GET "$BB/joblog/list?jobGroup=$GA&limit=50&$EP")
+    N_BIG=$(ids_of "$(printf '%s' "$BIG" | cut -f2-)" | tr ' ' '\n' | grep -c . || true)
+    N_MERGED=$(ids_of "$(printf '%s' "$MERGED" | cut -f2-)" | tr ' ' '\n' | grep -c . || true)
+    N_SMALL=$(ids_of "$(printf '%s' "$SMALL" | cut -f2-)" | tr ' ' '\n' | grep -c . || true)
+    if [ "$CLAMP_SEED" -ge 1200 ] && [ "$N_BIG" = "1000" ] && [ "$N_MERGED" = "1000" ] && [ "$N_SMALL" = "50" ]; then
+      ok "E.15 硬上限真库实测：A 组现有 $CLAMP_SEED 行播种日志，limit=5000 点名单组回 1000 行、不限组（两组合并）也回 1000 行而不是 1200/2000，limit=50 照旧 50 ⇒ 收窄发生在查询侧且合并方跟着用同一个数"
+    else
+      bad "E.15 上限形状不对：播种 $CLAMP_SEED 行，limit=5000 单组=$N_BIG 合并=$N_MERGED，limit=50=$N_SMALL（期望 >=1200 / 1000 / 1000 / 50）"
+    fi
+
     q -e "DELETE FROM z_schedule_job_log WHERE executor_handler='p22_e'" >/dev/null
     LEFT_E=$(q -e "SELECT COUNT(*) FROM z_schedule_job_log WHERE executor_handler='p22_e'" | tr -d '[:space:]')
-    [ "$LEFT_E" = "0" ] && ok "E.14 播种行（handler='p22_e'）已清完 ⇒ 下一轮 E.5 的行数断言不被上一轮污染" \
-      || bad "E.14 还剩 $LEFT_E 行播种数据"
+    [ "$LEFT_E" = "0" ] && ok "E.16 播种行（handler='p22_e'）已清完 ⇒ 下一轮 E.5 的行数断言不被上一轮污染" \
+      || bad "E.16 还剩 $LEFT_E 行播种数据"
   fi
 fi
 
