@@ -83,7 +83,7 @@ javap -c  /tmp/x.class | grep -c 'stepDown'         # 例：#18 的关停释放�
 
 | 项 | 值（09-26 20:1x 实测，随每次换构件会变） | 怎么复现这个读数 |
 |---|---|---|
-| jar | `~/z-schedule-e2e/z-schedule-admin-svc-7c9de99-exec.jar`，md5 `f000e2f684b0fc769bf6bee6a85cbd78` | `md5sum z-schedule-admin-svc-*.jar`（**文件名不算证据**，见上一节） |
+| jar | `~/z-schedule-e2e/z-schedule-admin-svc-baa4458-exec.jar`，md5 `1350144a0c7fcf03237348a450862e19`（含 #19 的登录态；上一版 `7c9de99`/`f000e2f6…` 仍在同目录，别拿文件名当版本） | `md5sum z-schedule-admin-svc-*.jar`（**文件名不算证据**，见上一节） |
 | 端口 | `18098`（**故意不用 18086**：那是 `p16/p20` 的性能台架端口，撞上就会量到一个"我没控制、不知道配置"的实例——坑 14） | `ss -ltnp \| grep 18098` |
 | 存活判据 | `GET /` → 200；`GET /jobinfo/list` → 200 | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18098/jobinfo/list` |
 | 真跑一次 | `./svc_smoke.sh`（播种 → 数 `handle_code=200` → 停用） | 见第 3 节 |
@@ -97,7 +97,9 @@ scp z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar 250:~/z-schedule-e2e
 #    两端 md5 必须逐字节相同；再用字节码确认修复在 jar 里（不只看文件名）
 #    unzip -p <exec.jar> BOOT-INF/lib/z-schedule-spring-boot-starter*.jar → javap -c | grep setBroadcastTotal
 # 2) 停旧：SIGTERM（会走 @PreDestroy ⇒ "Stepped down from LEADER"，新实例不必等 30 s 租约）
-kill -TERM <pid>; 等到 ss -ltn 上 18098 空出来
+#    pid 只从端口取——~/z-schedule-e2e/app.pid 是历史遗留，run.sh 从不写它（坑 21）
+PID=$(ss -ltnp | grep ':18098' | sed -n 's/.*pid=\([0-9]*\).*/\1/p'); kill -TERM $PID
+#    等到 ss -ltn 上 18098 空出来（实测 1 s）
 # 3) 起新：setsid 脱离 ssh 会话，日志沿用同一个文件（进程持的是 inode）
 setsid env JAR=z-schedule-admin-svc-<sha>-exec.jar PORT=18098 ./run.sh >logs/service_18098.out 2>&1 < /dev/null &
 # 4) 只等因果那行：Started ZScheduleAdminApplication（单次 grep 会在 Tomcat 刚绑端口时误判，见坑 14）
@@ -105,6 +107,18 @@ setsid env JAR=z-schedule-admin-svc-<sha>-exec.jar PORT=18098 ./run.sh >logs/ser
 
 > 从工作站一条命令做完 2)+3)：把上面两段包进 `ssh 250 'cd ~/z-schedule-e2e && …'`。
 > 口令只走环境变量、绝不进 argv（第 2 节），`setsid` 是为了让它活过 ssh 会话结束。
+
+起一台**关了门**的实例（`p22.sh` 的 B 段就是这么起的）只需要多一个环境变量：
+
+```bash
+PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+setsid env Z_SCHEDULE_ACCESSTOKEN="$SECRET" JAR="$JAR" PORT="$PORT" ./run.sh >logs/x.out 2>&1 </dev/null &
+```
+
+`Z_SCHEDULE_ACCESSTOKEN` 能喂进 `z.schedule.accessToken`，靠的是 Spring 的 relaxed binding
+比较属性名时去掉 `-` 并统一大小写（`access-token` 与 `accesstoken` 的 uniform 形式相同）。
+**别用 `run.sh` 的 `ACCESS_TOKEN=`**：它把值拼成 `--z.schedule.access-token=<值>`，
+于是同机任何人 `ps` 一下就拿到口令（实测条数：`pgrep -af '[j]ava' | grep -c 'access-token='`）。
 
 **为什么"端口 200"不够**：常驻实例平时 ring 里 0 个任务，日志每 15 s 只打一条
 `Engine loaded 0 jobs into ring`——那是 reconcile 在跑，不是"能执行任务"。
@@ -148,6 +162,7 @@ setsid env JAR=z-schedule-admin-svc-<sha>-exec.jar PORT=18098 ./run.sh >logs/ser
 | `p19.sh` | **同一时刻有几条连接在忙**（忙=`COMMAND='Query'`）＋ STATE 直方图；自带 `preytest`：埋 6 条并发 `SELECT SLEEP(4)`，尺数不到 6 就 FATAL | 把"连接数"这个量从猜测变成读数 |
 | `p20.sh` | **固定需求只改池上限**（`max-active` 20/40/80），同时量吞吐与忙连接 ⇒ 池是不是那堵墙 | 天花板归属（见第 4 节，答案是"是"） |
 | `p21.sh` | **一次执行的 2 条语句里钱花在哪**：同一批 id 上 narrow(4 列) / wide(12 列) 两臂判"形状"，pair2(2 次提交) / pair1(1 次提交) 两臂判"次数" | ③ 的前提：收窄 SET 到底值不值（答案：不值，见 §4.4） |
+| `p22.sh` | **登录态在真机上兑现到哪一步**：A 段打常驻那台（演示模式），B 段自己起一台配了 `accessToken` 的（`Z_SCHEDULE_ACCESSTOKEN` 走环境变量、argv 0 命中），逐条验签发形状 / 角色闸 / 三种撤销，收尾数库、验租约 | #19（见 §9′；两台是必需的——撤销在演示模式下观察不到） |
 | `svc_smoke.sh` | **常驻实例现在还活着吗**：播种 3 个 2 s 任务 → 数 `handle_code=200` → 用 handler 自己那行日志做阳性对照 → 停用。两处基线（`job_log` 的 `MAX(id)` 与日志文件行数）把**上一次运行**的行排除在外——不加基线时实测过 `成功=72`，其中 42 行是历史 | 0b9ac0f 的 `IJobHandler` 派发支要在真机上被观察到；陈旧正对照/陈旧计数 |
 
 ## 4. 天花板到底压在哪一层
@@ -334,6 +349,14 @@ docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" z-schedule-e2e-mysql mysql -h127
     `过滤器必须注册在整个应用入口上` 红在"两个不同的 store 实例"上——磁盘上的源码是对的，
     红的是 M8 留下的旧 class。⇒ 还原后必须 `os.utime(path, None)` 抬时间戳，
     或者干脆 `mvn clean test`。**"文件已按字节还原"和"下一次量的是还原后的字节"是两件事。**
+21. **`~/z-schedule-e2e/app.pid` 是历史遗留，`run.sh` 从来不通它**：09-26 换构件时
+    `kill -TERM $(cat app.pid)` 报 `No such process`，而 `ss -ltnp` 明明白白写着 18098 上是 pid 6208
+    （文件里那个数对不上）。⇒ 停实例只从端口取 pid。这比"脚本不好用"更糟的地方是
+    **pid 号会被复用**：拿着一个过期 pid 去 kill，杀掉的可能是毫无关系的进程。
+22. **一条 URL 里放两个 `?`，第二个会被并进第一个参数的值**：`/user/remove?id=11?accessToken=xxx`
+    的 id 成了字符串 `11?accessToken=xxx`，于是"我删了探针账号"其实是**没删**——旧构件那次控制组
+    跑完库里就剩了 1 行，而 HTTP 层完全看不出异常。⇒ 多参数一律 `&`；判"清干净"要 `SELECT COUNT(*)`，
+    不能拿"接口回了 200"当清理完成（同第 5 节"200 不算证据"）。
 
 ## 7. 路由策略：广告与兑现的差（④ 的收口）
 
@@ -408,6 +431,35 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 | 过滤器与签发方共用**同一个** store 实例 | `ZScheduleAutoConfiguration.tokenAuthFilterRegistration` | `过滤器必须注册在整个应用入口上`（M8，就是坑 20 那条红） |
 
 八支注入的读数：`8/8 KILLED-exact`（每支都只红在预期的那条具名判据上，还原后 md5 逐支对账）。
+
+### 9′. 真机读数：`p22.sh`（250，MySQL 8，构件 `baa4458` / md5 `1350144a…`）
+
+上表那张"谁来红"是 H2 + 手写替身级别的证据；`p22.sh` 把同一批主张拿到真进程上重打一遍，
+**并同时起两台**：常驻的 18098 没配 `accessToken`（演示模式），临时那台配了（把门关起来）。
+必须两台的原因是这一格最反直觉的一条：
+
+> **撤销在演示模式下观察不到。** 令牌被撤销 = 解析不出身份 = 等同"没出示凭证"，
+> 而演示模式对"没出示"是放行的。于是"logout 生效"与"logout 完全没写"在 18098 上返回一模一样
+> （实测 `A.18`：登出后的普通令牌打 `/user/add` 从 403 变回 200 —— 撤销反而**放宽**了它）。
+> 只有关了门的那台能把两者分开（`B.13` 登出后 403、`B.16` 改角色后 403、`B.21` 删账号后 403）。
+
+09-26 21:1x 实测：**38 条 PASS / 0 FAIL / 2 条观察**（全文落 `logs/p22.txt`；21:13 与 21:16 连跑两次
+同读数，中间只改过一句判据文案，没动任何断言）。挑几条只有真机才给得出的：
+
+| 判据 | 读数 |
+|---|---|
+| `0.3` 修复在**跑着的那个文件**里（不看文件名、不看 mtime） | 从常驻实例 argv 取到 jar，`unzip -p` 出嵌套 starter，`LoginSessionStore.class` 在里面 |
+| `A.4` 令牌形状 | `base64url(32 字节)` = **43 字符**。（第一版在这里断成"64 位十六进制"，把自己跑红了：形状是 Base64 URL 安全集，不是 hex） |
+| `A.13` 角色闸真的有牙 | 同一条 `/user/add`、同一个请求体：普通会话 403，匿名 200。这两次只差"有没有自报身份" |
+| `B.3` 口令不进 argv | `pgrep -af '[j]ava' \| grep -c 'access-token=' = 0`（走 `Z_SCHEDULE_ACCESSTOKEN` 环境变量；`run.sh` 的 `ACCESS_TOKEN=` 那条路会把口令写进 argv） |
+| `B.10` 普通会话改不动账号 | 普通会话 POST `/user/add` 带 `"role":"ADMIN"` ⇒ 403。**别把它读成"自填 role 的洞补完了"**：那个洞的真身在 `A.1`——演示模式（不配 `accessToken`）下**匿名**仍能建出 `role=ADMIN`，因为"谁在调用"根本没有答案可问。角色闸只在"出示了会话令牌"的那一支上有牙 |
+| `C.6` 两台启停之后集群没人丢租约 | `z_schedule_job_leader.expire_time` 领先 `NOW()` 28 s（这张表**没有**"最后续约时间"列，列名以 `DESC` 为准，坑 22 的 SQL 版本） |
+
+控制组（同一台机器、同一个库，只换构件）：拿 #19 **之前**的 `7c9de99` 起重实例，
+`/user/login` 回的是 `{"msg":"登录成功","content":"p23_pre"}` —— **content 就是用户名**（7 字符），
+而把它当凭证打 `/jobinfo/list` 得到 **403**，同一条口用共享密钥是 200。
+⇒ 改之前"登录"这件事不是"弱"，是**换回来的东西过不了任何门**：一句成功的 `msg` 加一串公开可查的用户名。
+这条也就是 `A.5` 的猎物（把它摘掉，`A.5` 在旧字节上必红）。
 
 **这一格没有做完的部分，别当成已经生效**：
 
