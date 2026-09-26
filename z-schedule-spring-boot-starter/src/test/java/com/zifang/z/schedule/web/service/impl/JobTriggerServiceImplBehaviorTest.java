@@ -5,7 +5,9 @@ import com.zifang.z.schedule.core.enums.TriggerCodeEnum;
 import com.zifang.z.schedule.core.enums.TriggerTypeEnum;
 import com.zifang.z.schedule.core.model.JobInfo;
 import com.zifang.z.schedule.core.model.JobLog;
+import com.zifang.z.schedule.core.handler.IJobHandler;
 import com.zifang.z.schedule.core.model.ReturnT;
+import com.zifang.z.schedule.core.param.TriggerParam;
 import com.zifang.z.schedule.web.cluster.JobScheduleEngine;
 import com.zifang.z.schedule.web.cluster.LeaderElector;
 import com.zifang.z.schedule.web.service.AlarmService;
@@ -53,6 +55,9 @@ public class JobTriggerServiceImplBehaviorTest {
         context.getBeanFactory().registerSingleton("okHandler", new OkHandler());
         context.getBeanFactory().registerSingleton("boomHandler", new BoomHandler());
         context.getBeanFactory().registerSingleton("slowHandler", new SlowHandler());
+        context.getBeanFactory().registerSingleton("interfaceHandler", new InterfaceHandler());
+        context.getBeanFactory().registerSingleton("interfaceFailHandler", new InterfaceFailHandler());
+        context.getBeanFactory().registerSingleton("noExecuteHandler", new NoExecuteHandler());
 
         logService = new FakeJobLogService();
         alarmService = new FakeAlarmService();
@@ -100,6 +105,57 @@ public class JobTriggerServiceImplBehaviorTest {
 
         assertEquals("只有 trigger_status=1 的子任务被带起来", 2, OkHandler.calls.get());
         assertEquals(2, logService.saved.size());
+    }
+
+    // ---- IJobHandler 契约：库里唯一的 handler 接口，此前引擎调不到它 ----
+
+    @Test
+    public void 实现IJobHandler的bean能被执行并记成功() {
+        InterfaceHandler.calls.set(0);
+        service.triggerJob(job(20, "interfaceHandler", "p-20"));
+
+        assertEquals("execute(TriggerParam) 那一支必须也被派发", 1, InterfaceHandler.calls.get());
+        JobLog log = logService.saved.get(0);
+        assertEquals(ReturnT.SUCCESS_CODE, log.getHandleCode());
+        assertEquals("接口返回 ReturnT.success 不该被当成失败", 0, log.getAlarmStatus());
+    }
+
+    @Test
+    public void 接口型handler拿到的TriggerParam带齐jobId参数与logId() {
+        service.triggerJob(job(21, "interfaceHandler", "p-21"));
+
+        TriggerParam seen = InterfaceHandler.lastParam;
+        assertEquals(21, seen.getJobId());
+        assertEquals("p-21", seen.getExecutorParams());
+        assertEquals("interfaceHandler", seen.getExecutorHandler());
+        assertTrue("logId 必须是那条日志的真实主键，否则分片/回调对不上行: " + seen.getLogId(),
+                seen.getLogId() > 0);
+        assertEquals("TriggerParam.logId 要和落库那行的 id 同一个",
+                logService.saved.get(0).getId(), seen.getLogId());
+    }
+
+    @Test
+    public void 接口返回非成功码要记失败并告警() {
+        InterfaceFailHandler.calls.set(0);
+        service.triggerJob(job(22, "interfaceFailHandler", null));
+
+        assertEquals(1, InterfaceFailHandler.calls.get());
+        JobLog log = logService.saved.get(0);
+        assertNotEquals("handler 自己说失败，不能按成功回写",
+                ReturnT.SUCCESS_CODE, log.getHandleCode());
+        assertEquals(1, log.getAlarmStatus());
+        assertTrue("失败原因要带 handler 的 msg: " + log.getHandleMsg(),
+                log.getHandleMsg().contains("业务侧失败"));
+    }
+
+    @Test
+    public void 两种execute都没有时报可读错误而不是反射原文() {
+        service.triggerJob(job(23, "noExecuteHandler", null));
+
+        JobLog log = logService.saved.get(0);
+        assertNotEquals("两个合法形状都没有 ⇒ 不能算成功", ReturnT.SUCCESS_CODE, log.getHandleCode());
+        assertTrue("要说清两个合法形状，而不是抛 NoSuchMethodException 原文: " + log.getHandleMsg(),
+                log.getHandleMsg().contains("execute(String)") && log.getHandleMsg().contains("TriggerParam"));
     }
 
     // ---- 失败与重试 ----
@@ -331,6 +387,36 @@ public class JobTriggerServiceImplBehaviorTest {
                 interrupted.countDown();
                 throw e;
             }
+        }
+    }
+
+    /** 库内唯一的 handler 契约（{@code IJobHandler}），业务方照接口文档写的就是这个形状。 */
+    public static class InterfaceHandler implements IJobHandler {
+        static final AtomicInteger calls = new AtomicInteger();
+        static volatile TriggerParam lastParam;
+
+        @Override
+        public ReturnT<String> execute(TriggerParam triggerParam) {
+            calls.incrementAndGet();
+            lastParam = triggerParam;
+            return ReturnT.success();
+        }
+    }
+
+    public static class InterfaceFailHandler implements IJobHandler {
+        static final AtomicInteger calls = new AtomicInteger();
+
+        @Override
+        public ReturnT<String> execute(TriggerParam triggerParam) {
+            calls.incrementAndGet();
+            return ReturnT.fail("业务侧失败");
+        }
+    }
+
+    /** 既没有 execute(String) 也没实现 IJobHandler ⇒ 只能是配置错，报错要能看懂。 */
+    public static class NoExecuteHandler {
+        public String run(String param) {
+            return param;
         }
     }
 

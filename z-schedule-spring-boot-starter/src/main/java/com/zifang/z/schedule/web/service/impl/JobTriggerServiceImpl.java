@@ -6,6 +6,7 @@ import com.zifang.z.schedule.core.enums.TriggerTypeEnum;
 import com.zifang.z.schedule.core.model.JobInfo;
 import com.zifang.z.schedule.core.model.JobLog;
 import com.zifang.z.schedule.core.model.ReturnT;
+import com.zifang.z.schedule.core.param.TriggerParam;
 import com.zifang.z.schedule.web.cluster.JobScheduleEngine;
 import com.zifang.z.schedule.web.cluster.LeaderElector;
 import com.zifang.z.schedule.web.service.AlarmService;
@@ -205,7 +206,7 @@ public class JobTriggerServiceImpl implements JobTriggerService {
                         finishFailure(jobInfo, log, "未指定 executorHandler", TriggerCodeEnum.INVALID_PARAM.getCode());
                         return; // 配置错误不重试
                     }
-                    executeHandler(handler, jobInfo.getExecutorParam());
+                    executeHandler(handler, jobInfo, logId);
                     long costMs = System.currentTimeMillis() - start;
                     log.setHandleCode(ReturnT.SUCCESS_CODE);
                     log.setHandleMsg("执行成功,耗时 " + costMs + "ms" + (isRetry ? " (" + logLabel + ")" : ""));
@@ -309,7 +310,7 @@ public class JobTriggerServiceImpl implements JobTriggerService {
         }
     }
 
-    private void executeHandler(String handler, String param) throws Exception {
+    private void executeHandler(String handler, JobInfo jobInfo, long logId) throws Exception {
         Object bean;
         try {
             bean = applicationContext.getBean(handler);
@@ -320,9 +321,31 @@ public class JobTriggerServiceImpl implements JobTriggerService {
         if (bean == null) {
             throw new ExecutorNotFoundException("执行器 bean 为空: " + handler);
         }
+        boolean wantsTriggerParam;
+        Method executeMethod;
         try {
-            Method executeMethod = bean.getClass().getMethod("execute", String.class);
-            executeMethod.invoke(bean, param);
+            executeMethod = bean.getClass().getMethod("execute", String.class);
+            wantsTriggerParam = false;
+        } catch (NoSuchMethodException notAStringHandler) {
+            // 库里唯一的 handler 契约是 IJobHandler.execute(TriggerParam)：接口随 z-schedule-core
+            // 一起发布，但此前这一步只找 execute(String)，所以照接口文档写的业务方会在**派发**这一步
+            // 拿到 NoSuchMethodException，日志记成一次普通"执行失败"——接口在库里却没人能实现它。
+            try {
+                executeMethod = bean.getClass().getMethod("execute", TriggerParam.class);
+                wantsTriggerParam = true;
+            } catch (NoSuchMethodException neither) {
+                throw new ExecutorNotFoundException("执行器 bean 没有可调用的 execute(String) 或 "
+                        + "execute(TriggerParam): " + handler + " (" + bean.getClass().getName() + ")");
+            }
+        }
+        try {
+            Object result = executeMethod.invoke(bean,
+                    wantsTriggerParam ? buildTriggerParam(jobInfo, logId) : (Object) jobInfo.getExecutorParam());
+            // 接口版是**有返回**的：handler 自己说失败（ReturnT.fail）就不能回写成成功。
+            if (result instanceof ReturnT && ((ReturnT<?>) result).getCode() != ReturnT.SUCCESS_CODE) {
+                ReturnT<?> ret = (ReturnT<?>) result;
+                throw new RuntimeException("handler 返回非成功码 " + ret.getCode() + ": " + ret.getMsg());
+            }
         } catch (InvocationTargetException e) {
             Throwable cause = e.getCause() == null ? e : e.getCause();
             if (cause instanceof InterruptedException) {
@@ -335,6 +358,24 @@ public class JobTriggerServiceImpl implements JobTriggerService {
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static TriggerParam buildTriggerParam(JobInfo jobInfo, long logId) {
+        TriggerParam param = new TriggerParam();
+        param.setJobId(jobInfo.getId());
+        param.setExecutorHandler(jobInfo.getExecutorHandler());
+        param.setExecutorParams(jobInfo.getExecutorParam());
+        param.setExecutorBlockStrategy(jobInfo.getExecutorBlockStrategy());
+        param.setExecutorTimeout(orZero(jobInfo.getExecutorTimeout()));
+        param.setExecutorFailRetryCount(orZero(jobInfo.getExecutorFailRetryCount()));
+        param.setLogId(logId);
+        param.setLogDateTime(jobInfo.getTriggerLastTime());
+        return param;
+    }
+
+    /** #11 之后这两个字段是装箱的：库里没值就是 null，直接喂给 int setter 会变成派发期 NPE。 */
+    private static int orZero(Integer value) {
+        return value == null ? 0 : value;
     }
 
     /** handler bean 缺失，与"业务执行异常"区分开，便于日志里落到 EXECUTOR_NOT_FOUND。 */
