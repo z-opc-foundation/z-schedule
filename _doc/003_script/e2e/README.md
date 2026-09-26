@@ -525,6 +525,19 @@ cd <repo>/z-schedule && rm -rf */target/surefire-reports && mvn test
 里那份报告是**这个模块的第一份**——在此之前 admin 一条测试都没有，所有测试都住在 starter 里
 （这也是为什么 §10.1 那条键位缺陷能安静存活：admin 的 yml 从来没有被判过）。
 
+09-27 提交树 `79d0087`（#38 那一格：五处 exec jar 面改通配 + 两份 pom 的"admin 不在 reactor"改口）
+在**本机 macOS** 上 `mvn -B test`（05:57:14 起、rc=0，原始日志 `~/.cache/zsched_test/local_head.log`，
+输入 `git rev-parse --short HEAD` 现取）从 `*/target/surefire-reports/*.xml` 聚合：
+**28 份报告 / 320 例 / 0 失败 / 0 错 / 0 跳过**，模块拆分逐位与上一格相同（core 45 + starter 269 + admin 6）。
+⇒ #38 只动部署面与文档，一例 Java 测试都没动到——这句是**读出来的**，不是推出来的。
+顺带把那条自相矛盾的记录钉住：顶层 `pom.xml` 的 `<modules>` 一直列着 `z-schedule-admin`，
+而它自己开头的注释与 admin pom 的注释都写着"不在 reactor"——`mvn -B test` 的 reactor 里 admin 是
+第 [4/4] 个模块，实测把那句话否了（三处注释已改口，机制仍写清：`maven.deploy.skip=true` +
+parent 是 `spring-boot-starter-parent` ⇒ 不继承 `central` profile，`central-publishing`/`gpg` 在 admin pom 0 命中）。
+⚠ 这一格的"尺"要打折说：我用 `ET.parse` 与 `xmllint` 各自验两份 pom 都能过，而故意注入的猎物
+（注释里插 ` -- `，违反 XML 规范）**两把都照样放行** ⇒ 这两把尺对注释内容没牙，
+真正兜住"注释没改坏 pom"的是 `mvn -B validate`（rc=0）。别把前两句当成有牙的证据。
+
 09-26 提交树 `04326ac`（`/joblog/*` 四口按组收口 + 逐组合并落地之后）`mvn test` 实测：
 **27 份报告 / 314 例 / 0 失败 / 0 错 / 0 跳过**（core 5 份 45 例 + starter 22 份 269 例）。
 上一格是 `44acc07` 的 26 份 / 297 例（再往前 25 份 / 285 例），多出来的 17 例分三处、两处各量一遍对得上：

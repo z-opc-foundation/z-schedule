@@ -5,8 +5,8 @@
     <modelVersion>4.0.0</modelVersion>
 
     <!--
-        z-schedule-admin: 独立可启动演示应用 (不进 reactor, 顶层 pom.xml 不列本模块).
-        本地启动: mvn spring-boot:run
+        z-schedule-admin: 独立可启动演示应用 (在 reactor 内——顶层 pom.xml 的 <modules> 列了本模块，
+        统一构建会跑到本模块的测试；本地起法 mvn spring-boot:run 或 java -jar target/*-exec.jar).
         默认端口 / context-path 见 application.yml (18086 / meta)
         凭证: 读环境变量 SPRING_DATASOURCE_PASSWORD, 不在 application.yml 写明文.
               本地开发用 src/main/resources/application-local.yml (gitignored).
@@ -25,7 +25,9 @@
     <name>z-schedule :: admin (Standalone Demo App, NOT published to Central)</name>
     <description>
         Z-Schedule 独立可启动演示应用. 本地 spring-boot:run 启动一个完整的调度中心 UI.
-        不入中央 (admin 不进 reactor, 不发 Maven Central).
+        不入中央（机制有两条，都实测过：maven.deploy.skip=true；本模块的 parent 是
+        spring-boot-starter-parent，不继承顶层 pom 的 central profile，故 central-publishing /
+        gpg 那套插件在本模块 0 命中）。"不发"与"不在 reactor"是两件事——本模块在 reactor 内。
     </description>
 
     <properties>

@@ -12,7 +12,11 @@
         模块结构:
           - z-schedule-core                     : 底层 entity/router/util
           - z-schedule-spring-boot-starter      : Spring Boot Starter (重命名自 z-schedule-web), 业务模块一行 import
-        注: z-schedule-admin 是独立可启动演示应用 (不在 reactor, 本地 mvn spring-boot:run)
+        注: z-schedule-admin 是独立可启动演示应用，而它【确实在】reactor 内（下面 <modules> 里那一行
+            的注释就是这件事；本行旧措辞写的是"不在 reactor"，与 <modules> 自相矛盾，已改口。
+            要复核：mvn -B test 的 reactor 列表里 admin 是第 [4/4] 个模块）；
+            它同时 maven.deploy.skip=true、且 parent 是 spring-boot-starter-parent（不继承本 pom 的
+            central profile）⇒ 产物只作 docker 镜像源 / 本地 java -jar 演示，永不上 Maven Central。
     -->
     <groupId>io.github.yuku123</groupId>
     <artifactId>z-schedule</artifactId>
