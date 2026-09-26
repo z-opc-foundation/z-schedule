@@ -45,21 +45,47 @@ spring:
       filters: stat,wall,slf4j
       connection-properties: druid.stat.mergeSql=true;druid.stat.slowSqlMillis=5000
 
-  actuator:
-    endpoints:
-      web:
-        exposure:
-          include: health,info
-    endpoint:
-      health:
-        show-details: always
-
   # Leader 续约与周期 reconcile 都挂在 @Scheduled 上，Spring 默认只给 1 条调度线程，
   # 两者会互相排队（续约窗口 30s、reconcile 15s）；独立应用直接开 2 条。
   task:
     scheduling:
       pool:
         size: 2
+
+# 运维探针面。
+# 这一段原先写作 `spring.actuator.*`（缩进在 spring: 之下），而 Boot 读的是顶层 `management.*`
+# ⇒ 整块是死配置，和下面 logging.level 那条（包名改了 yml 没跟着改，引擎 debug 日志哑了两周）同一种病。
+# 250 真机在跑着的构件 a16473a 上实测（不带任何 override）：
+#   /actuator/info                404     ← include 没生效，默认只暴露 health
+#   /actuator/health              200 {"status":"UP"}   ← show-details 没生效
+#   /actuator/health/liveness     404
+#   /actuator/health/readiness    404
+# 而 deploy/k8s/01-deployment-backend.yaml 的 livenessProbe/readinessProbe 指的就是后两条。
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      # Boot 只在"检测到 Kubernetes 平台"时才自动建这两个组，所以在本机 / 250 / docker-compose 里
+      # 它们天生 404 —— 部署文件承诺的探测在离集群的地方一次都没被验过。显式打开，任何平台都能验。
+      probes:
+        enabled: true
+      # 实测到的真缺陷：Boot 自动建的 readiness 组**不含数据源**。把 spring.datasource.url 指到
+      # 一个没人听的 33999 端口后，顶层 /actuator/health 正确 503 DOWN（druid 报
+      # GetConnectionTimeoutException），而 /actuator/health/readiness 仍回 **200 UP**
+      # ⇒ 照 manifest 部署时，库死了 pod 依然"就绪"、继续接流量。这里显式把 db 拉进 readiness。
+      # liveness 故意不含 db：库短暂抖动不该把进程重启掉（重启只会让 reconcile 更糟）。
+      group:
+        liveness:
+          include: ping,livenessState
+        readiness:
+          include: readinessState,db
+      # 明细不对匿名铺：上面那次 DOWN 的 detail 里带着 druid 的报错原文（含被配死的 JDBC 地址），
+      # 而演示模式（没配 accessToken）整个 HTTP 面是敞开的。探针靠 HTTP 码说话，不靠 body。
+      # 改回 always 的那一格在 _doc/001_arch/z-schedule-admin.md 里已经写明它其实从未生效过。
+      show-details: when-authorized
 
 # 调度引擎自己的连接池（starter 的 dataSourceSchedule 读这里，不读上面 spring.datasource.druid.*）。
 # 250 真机 N=800 个 1Hz 任务、30s 窗口实测：max-active 20 ⇒ 316 次/s，40 ⇒ 540 次/s，80 ⇒ 808 次/s，
