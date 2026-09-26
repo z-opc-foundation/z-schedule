@@ -13,7 +13,10 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.backend
       args:
-        JAR_FILE: "${JAR_FILE:-z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar}"
+        # 通配而不是抄死的 z-schedule-admin-<ver>-exec.jar：抬版后字面量要么 COPY 失败、要么把
+        # target/ 里那份旧 jar 静默烤进新版本 tag 里（各格形状都在 250 上量过，见 e2e README §14；
+        # 这一行渲染出来是不是通配，由 p26.sh 的 B0 现读插值结果，不读文件字面量）。
+        JAR_FILE: "${JAR_FILE:-z-schedule-admin/target/*-exec.jar}"
     restart: unless-stopped
     ports:
       - "18086:18086"

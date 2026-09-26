@@ -24,11 +24,6 @@
 # ---- 构建阶段：基于 node 跑 vite build ----
 FROM node:18-alpine AS builder
 
-# SPA 的挂载点。nginx 在根上服务 ⇒ 资源前缀必须是 /。
-# Mode 1 那份 dist（admin pom 复制进 jar、/meta context-path 下服务）用仓里的默认值，不受这里影响。
-ARG FRONTEND_BASE=/
-ENV VITE_BASE=${FRONTEND_BASE}
-
 # 兄弟目录布局：/src/z-schedule-frontend 与 /src/z-schedule-frontend-component
 WORKDIR /src
 
@@ -39,6 +34,28 @@ COPY _frontend/z-schedule-frontend-component/ ./z-schedule-frontend-component/
 COPY _frontend/z-schedule-frontend/package.json ./z-schedule-frontend/
 COPY _frontend/z-schedule-frontend/package-lock.json* ./z-schedule-frontend/
 RUN cd z-schedule-frontend && npm ci --no-audit --no-fund
+
+# SPA 的挂载点。nginx 在根上服务 ⇒ 资源前缀必须是 /。
+# Mode 1 那份 dist（admin pom 复制进 jar、/meta context-path 下服务）用仓里的默认值，不受这里影响。
+#
+# ⚠ 这两行必须在 npm ci **之后**：base 只有下面的 npm run build 会读，放在上面等于让
+#   `--build-arg FRONTEND_BASE=/meta/` 从 ENV 那一步起把整条链分叉、连 npm ci 一起作废。p26.sh 的 B7c
+#   要用这个旋钮现造一份"改前形状"的镜像当猎物，09-27 就是这样红过一次——猎物构建去联网跑 npm ci，
+#   撞上 250 出网抖动（`npm error … non-zero code: 146`），读出来是"尺没有牙"，实际是"没量成"。
+#   挪下来之后实测（250，同一条命令连打两遍 + 删掉自己的 tag 再打一遍，04:59 / 05:06）：
+#   Step 1–10 全 CACHED、整发 1–3 秒 ⇒ 猎物臂与主构建**共用** deps 层，不再分叉。
+#   ⚠ 但"共用"不等于"必然吃得到缓存"：250 上同一档 p26 里 **B1c 那发 `--no-cache` 的猎物构建**会把
+#   共享的 `RUN npm ci` 记录顶掉，于是 run8–run11 都读到 `deps 层 Using cache=0`。曾以为把 B1c 挪到
+#   B7c 之后就好了（run12 确实读到命中），那是位置运气——同顺序的 run13 又冷在 Step 6。两支探针对着看
+#   （250，`~/.cache/nocache_probe/`）：`runner.log` 05:15:49/05:16:05 —— 基线 CACHED → 一发**带**
+#   `--no-cache` 的 teeth → 同一条基线命令变冷、npm ci 重跑 20 s；`runner2.log` 05:34:49→05:35:15 ——
+#   唯一差别是去掉那个开关，teeth 仍 rc=2（`can't cd to ../z-schedule-frontend-component`），后面的基线
+#   `Step6=CACHED 耗时=1s`。⇒ 作废者是 `--no-cache` 本身，不是它在档里的位置；B1c 已删掉该开关（删 COPY
+#   那行本身就改了那条指令的缓存键，牙齿不靠 `--no-cache`）。
+#   真正兜住这条臂的是 B7c 的"先分三类（没量成 / 没复现 / 复现了）再下结论、认出网络形状就重试一次"。
+#   逐 Step 的断点读数由尺自己打（p26.sh 的 prey_readings）。
+ARG FRONTEND_BASE=/
+ENV VITE_BASE=${FRONTEND_BASE}
 
 # 拷源码 + build（build 脚本自己先构建组件层，再 vite build 应用层）
 COPY _frontend/z-schedule-frontend/ ./z-schedule-frontend/

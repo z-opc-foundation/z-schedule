@@ -45,7 +45,8 @@ mvn spring-boot:run
 cd z-schedule
 mvn -pl z-schedule-admin -am package -DskipTests
 
-java -jar z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar
+# jar 名跟着 <revision> 走，别抄版本号：这里让 shell 去匹配，命中 0 个或多于 1 个都会响
+java -jar "$(ls z-schedule-admin/target/*-exec.jar)"
 ```
 
 ### 方式 C：docker（与 deploy/ 配合）

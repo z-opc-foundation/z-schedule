@@ -112,7 +112,9 @@ javap -c  /tmp/x.class | grep -c 'stepDown'         # 例：#18 的关停释放�
 ```bash
 # 1) 本机出构件并一对一拷过去（多源 scp 到同一目录会造出同名影子文件）
 mvn -q -pl z-schedule-admin -am package -DskipTests
-scp z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar 250:~/z-schedule-e2e/z-schedule-admin-svc-<sha>-exec.jar
+scp z-schedule-admin/target/z-schedule-admin-*-exec.jar 250:~/z-schedule-e2e/z-schedule-admin-svc-<sha>-exec.jar
+#    （jar 名一律用通配取，别抄 `<ver>`：抄进来的版本号没有尺会读它，抬版后它就是假路径——
+#     deploy/ 那五处同样的字面量已经犯过，形状与实测见 §14）
 #    两端 md5 必须逐字节相同；再用字节码确认修复在 jar 里（不只看文件名）
 #    unzip -p <exec.jar> BOOT-INF/lib/z-schedule-spring-boot-starter*.jar → javap -c | grep setBroadcastTotal
 # 2) 停旧：SIGTERM（会走 @PreDestroy ⇒ "Stepped down from LEADER"，新实例不必等 30 s 租约）
@@ -1070,12 +1072,24 @@ P18 自己带一支猎物：一份"改前形状"的文件（`DB_PORT` 退回 `:-
 
 ## 13. Mode 2/3 彩排：前端镜像第一次真建出来，反代那几条第一次有人探（#36，`p26.sh`）
 
-12.5 第 2 条末尾那句"留作下一格"就是这一格。`p26.sh` 静态 6 项（S1/S1b/S2/S2b/S3/S4）+ 运行时 28 项
-（Z0 + Mode 2 的 20 项 + Mode 3 的 6 项 + 收口对账 Z2），09-27 在 250 上跑：
+12.5 第 2 条末尾那句"留作下一格"就是这一格。`p26.sh` 的分母按小节数是（run12 实测，一节一节数出来的，
+不是凑总数）：**静态 6**（S1/S1b/S2/S2b/S3/S4）+ **运行时前置 2**（Z0 常驻服务、B0 是 #38 加的
+`JAR_FILE` 插值臂，它两条都在"运行时前置"那一节里）+ **Mode 2 那 20**（B1 2、B2 2、B3 3、B6–B12 12、
+B13 1）= 28；再把 Mode 3 的 6 项与收口对账 Z2 加回来 = 35。
+⚠ 这一格原先写的是"静态 7 项（S1…S4 + B0）+ 运行时 28 项"——B0 其实不在静态那一节，
+`P26_STATIC_ONLY=1` 跑出来只有 6 项就是这件事的读数。09-27 在 250 上跑：
 **run1 29/3**（三条红全是尺自己的错，见 13.3）、**run2 33/0**、**run3 34/0**（B5b 就是第 28 项运行时臂）、
 **run4 27/0**（同一份档 `P26_SKIP_CLUSTER=1` 只跑 Mode 2：B5b 换成"照文档那条命令真去敲一遍并要求 UP"之后
 的重验，判据改了而仓库字节没动，静态 6 + Z0 + Mode 2 那 20 项 = 27）、**run5 27/0**（run4 那遍的消息里
-把拆分手抄错了，改成从尺里取变量之后重跑一遍，见 13.3 第四条）。
+把拆分手抄错了，改成从尺里取变量之后重跑一遍，见 13.3 第四条）、
+**run6 35/0**（#38 那一格改动后全档重跑：多了 B0 一项 ⇒ 6+2+20+6+1=35；Mode 3 的 C3 第四遍读到"Leader 落在
+哪个副本上不固定"，run6 是 `1=0 2=1 3=0`，见 13.4）、**run7 27/1**（Mode 2-only；唯一那条红是 B7c 的
+**尺伤**，不是产品形状，见 13.3 第五条——它直接把 `Dockerfile.frontend` 里两行的位置改了）、
+**run8 28/0**、**run9 28/0**、**run10 28/0**、**run11 28/0**、**run12 28/0**、**run13 35/0**
+（run8–run12 五遍都是 Mode 2-only；run6 起多了 B0 ⇒ 静态 6 + 运行时前置 2 + Mode 2 那 20 项 = 28。
+run13 是含 Mode 3 的全档。run8–run12 那几遍 B7c 全绿而构建通道的读数一路可疑（四遍 `deps 层 Using
+cache=0`、run12 偶然 `=1`），我在 13.3 第六条里先归因成"B1c 的位置"、被 run13 的 cold 读数否掉，
+最后由两支只改一个开关的探针对到 `--no-cache` 本身 ⇒ 那一个开关已从 B1c 删除，见 13.3 第六条）。
 每遍收口对账都是 容器/卷/网络 = 0/0/0，常驻 18098 的 pid 逐字未变。
 
 ### 13.1 两条"从没被跑过"的缺陷，各自的原文症状
@@ -1115,7 +1129,7 @@ P18 自己带一支猎物：一份"改前形状"的文件（`DB_PORT` 退回 `:-
 | B12 | 「不映射 18086 到 host（仅 internal network 访问）」 | 宿主 18086 `closed`，同一条 URL 在网内 `UP` ⇒ 不是"服务没起"造成的假阴 |
 | B13 | 停止 | 容器残留 0、发布口释放（`down rc` 只作读数：`make down` 三条都挂着 `|| true`，恒 0，拿它当证据等于没证据） |
 
-### 13.3 四处尺伤（都是本档自己写的），以及各自教的那条
+### 13.3 六处尺伤（都是本档自己写的），以及各自教的那条
 
 - **B7c 第一遍是假红**：猎物容器被 `docker run` 扔到默认 bridge 上，那里没有按名字的 DNS，nginx
   在配置解析阶段就退出（正是 B7d 量到的那条），而我读到的是"路径为空 + code=000"，被写成"猎物没复现
@@ -1133,6 +1147,63 @@ P18 自己带一支猎物：一份"改前形状"的文件（`DB_PORT` 退回 `:-
   一律从尺里取变量（现在三个 `DOC3/DOC4/DOC5` 各自量），否则一条绿消息里可以藏一个假数。
   同一轮里还有一件与尺无关的事：一个后台完成通知带着"run5 已跑到 B5b/B6"的读数回来，而当时 `run5.log`
   只有 24 行、进程还在 B3 建库 ⇒ **通知正文里的输出也是待证断言**，判进度只认盘上文件 + `pgrep`。
+- **run7 那条红把账记错了对象**（第五处，也是被一条红逼出来的那处）：B7c 报
+  `B7c 猎物没能复现白屏形状（路径=[] 读数='000 '）⇒ B7 的判据没有牙`，而"000 = 它根本没在服务"正是
+  我给这条臂写的第一遍教训（上面第一条）。真因就躺在同一份 `build_prey.log` 里：
+  `The command '/bin/sh -c cd z-schedule-frontend && npm ci --no-audit --no-fund' returned a non-zero code: 146`
+  加下一步的 `Get "https://registry-1.docker.io/v2/": … Client.Timeout exceeded while awaiting headers`
+  ⇒ **猎物镜像根本没建成**，那条"尺没有牙"是用一次没发生的测量下出来的结论。两处修法：
+  ① 判据三分——`build rc≠0` 只能报"没量成"（记环境的账，且认出 `npm error`/`Client.Timeout`/`137|143|146`
+  这类网络形状时重试一次），只有构建成功而形状没复现才允许说"没有牙"；
+  ② 根因在 `Dockerfile.frontend`：`ARG FRONTEND_BASE` + `ENV VITE_BASE` 原先写在 `npm ci` **之上**，
+  翻这个旋钮就把 deps 层一起作废 ⇒ 每次造猎物都要联网重装一遍依赖（run1–run6 那几遍绿各白跑了一次
+  `npm ci`，只是那几次出网恰好可用）。两行挪到 `npm ci` 之后，`--build-arg` 只影响 vite 那一步。
+  ⇒ 教的那条：**负对照臂不许把自己的构建通道和被测物共用的外部依赖绑在一起**；它的红必须先分类
+  （没量成 / 没复现 / 复现了），三类压成一条 `FAIL` 就是把网络抖动记成产品结论。
+- **run8–run10 那三遍绿里的一个读数，我放过去了两次**（第六处，形状跟前五条都不同：**错的是"只有红才会
+  被读到的诊断字段"**）。第五条那处修法把 `ARG/ENV` 挪到 `npm ci` 之后，我在 `Dockerfile.frontend` 里
+  顺手写了"挪下来之后猎物只重跑 vite"。而 run8、run9 两遍的 B7c 都回 `deps 层 Using cache=0、vite 重跑=2`
+  ⇒ 与我自己那句话正面冲突，两条绿却没有任何一条逼我去看是谁对。拆开才发现**尺上两处口径不够**：
+  ① 重试是 `>>` **追加**进同一份 `build_prey.log` 的，`grep -A1 '…npm ci' | grep -c 'Using cache'`
+  于是把两遍混成一个数 ⇒ 那两遍的 `cache=0 vite=2` 既可能是"一遍冷构建"，也可能是"第一遍死在 `npm ci`、
+  第二遍才建成"，而 `retry=` 这个能区分它们的值**只在红分支里打印过**；
+  ② 逐 Step 的原始日志在 `$WORK` 里，而 trap 收尾 `rm -rf "$WORK"` ⇒ 想事后归因已经没有东西可看
+  （09-27 我想回读 run9 的断点，`logs/p26_11546/` 早就不在了）。
+  修法两条都是加字段不是改判据：两遍各自一份日志、读数只取**产出镜像那遍**，并把 `retry=` 与
+  **第一个未命中缓存的 Step** 打进 stdout（stdout 重定向进长期留着的 `~/.cache/p26/runN.log`）。
+  改完先拿"已知答案"喂尺两遍：热的 `build_A.log` 走旧 grep ⇒ `Using cache=1`（证明那条 grep 不是恒零）、
+  走新的 `prey_readings` ⇒ `deps 层 Using cache=1 vite 重跑=0 首个未命中=[Step 14/16 : EXPOSE 80]`；
+  然后 run10 才给出第一遍可信的读数：`retry=0 deps 层 Using cache=0 首个未命中=[Step 6/16 : RUN … npm ci]`
+  ⇒ 断点确实在 `npm ci` 本身，而**不是**我注释里写的"猎物臂必然重跑 vite"那条链。
+  归因过程排掉了一条、抓住了另一条：先证 `docker rmi -f` 摘叶子**不背账**
+  （`docker build --build-arg FRONTEND_BASE=/meta/ -f deploy/Dockerfile.frontend -t local/ccR$n .`
+  在 250 的仓库副本里连打两遍、再 `rmi -f` 摘掉自己的两个 tag 打第三遍，04:59 / 05:06，全是 1–3 秒、
+  Step 1–10 全 CACHED）；然后把这一臂自己的动作按顺序复演一遍（05:15:49 / 05:16:05，
+  `~/.cache/nocache_probe/runner.log`）：① 基线建一份 `/meta/` ⇒ Step 6 CACHED；② 照 **B1c** 那发
+  `--no-cache` 的猎物构建（删组件层 COPY，rc=2）建完 `rmi -f` 摘叶子；③ 同一条命令再建那份 `/meta/`
+  ⇒ **Step 6 冷、耗时 20 s**。⇒ 作废者是**同一档里 B1c 那发 `--no-cache`**：它把共享的 `RUN npm ci`
+  缓存记录顶掉了，而 B7c 排在它后面 ⇒ 每次都要重新联网装依赖。run10、run11 两遍读到同一个断点
+  （run8/run9 的同一处数字因为①的口径歧义不能单独作证）。我第一步的修法是"把 B1c 整臂挪到 B7c
+  **之后**"（判据一个字没改，只换顺序），并把它当成已被证实：run12 读到 `deps 层 Using cache=1
+  vite 重跑=0 首个未命中=[Step 14/16 : EXPOSE 80]`。**这句今天被 run13 否了**：同一版脚本、同一顺序，
+  B7c 又读到 `retry=0 deps 层 Using cache=0 vite 重跑=2 首个未命中=[Step 6/16 : RUN cd
+  z-schedule-frontend && npm ci --no-audit --no-fund]`（那一遍本身 `总判：PASS=35 FAIL=0`，含 Mode 3 全绿）
+  ⇒ n=1 的归纳，位置只是运气好。
+  真正的修法靠一支**只改一个开关**的对照探针定下来（250，`~/.cache/nocache_probe/runner2.log`，
+  05:34:49→05:35:15）：① 基线冷建 → ② **不带** `--no-cache` 建 teeth，`rc=2` 且报
+  `sh: cd: line 0: can't cd to ../z-schedule-frontend-component: No` → ③ 同一条基线命令
+  `rc=0 Step6=CACHED 耗时=1s`。对照上一支（`runner.log`，05:15:49/05:16:05）——那里 ② **带**
+  `--no-cache`，③ 就变冷、npm ci 重跑 20 s。两遍唯一差别就是那个开关 ⇒ **`--no-cache` 就是作废者，
+  位置无关**（run12/run13 同顺序一读热一读冷也正是这个意思）。B1c 现已删掉 `--no-cache`；
+  牙齿不靠它：删掉 `COPY _frontend/z-schedule-frontend-component/` 那一行本身就改了那条指令的缓存键，
+  构建必然走到那一步才红，② 的 `rc=2` 就是实测。顺序保留，但注释里写明它不是修法。
+  另：`docker rmi -f local/z-schedule-frontend:p26teeth`（摘自己的叶子标签）**不**顶 deps 记录，
+  它是被排除的嫌疑，别再当第二个作废者去改。
+  对产品判据无影响（B7c 的三分类 + 重试兜得住，13.1 第 2 条的 `404 text/html` 三遍逐字复现）。
+  ⇒ 教的那条：**只在失败分支里打印的诊断字段等于没有字段**——它结构上读不到"一切正常但其实我理解错了"
+  这一类，而那恰恰是账最贵的一类；负对照臂要把"这一遍是怎么量出来的"（第几遍、断在哪一步）
+  **和结论打在同一个 PASS 行上**。还有一条同轮的：绿灯的一次不能当修法的证据（run12），
+  要一支只改一个变量的对照才作数。
 
 ### 13.4 Mode 3 的读数，和一条关于 nginx 什么时候解析名字的事实
 
@@ -1142,11 +1213,12 @@ P18 自己带一支猎物：一份"改前形状"的文件（`DB_PORT` 退回 `:-
   已改成一条与 project 无关的命令。
 - **C2** 4/4 容器 healthy（三副本共用同一个临时库，各自的 healthcheck 都真跑过）。
 - **C3 只有一个 Leader**：逐容器 `Became LEADER` 计数，run1 = `1=1 2=0 3=0`、run2 = `1=0 2=0 3=1`、
-  run3 = `1=0 2=0 3=1`
+  run3 = `1=0 2=0 3=1`、run6 = `1=0 2=1 3=0`
   （**谁当主不确定，所以判据不钉编号**，钉了就会随运气翻红）；库里 `z_schedule_job_leader` 那行的 `host`
-  正是打过那条日志的容器（`29b8abf41001` / `0a3cec7853cd` / `ed210ad4c36a`）。顺带一条时钟证据：`db_now`
-  与 `lease_expire` 同侧（19:59:10 / 19:59:38、20:05:13 / 20:05:42、20:09:41 / 20:10:07）——租约是 Java 侧写、
-  DB 侧比的，跨了时区就会在这一行显形。
+  正是打过那条日志的容器（`29b8abf41001` / `0a3cec7853cd` / `ed210ad4c36a` / run6 的 `892852920b59`）。
+  顺带一条时钟证据：`db_now`
+  与 `lease_expire` 同侧（19:59:10 / 19:59:38、20:05:13 / 20:05:42、20:09:41 / 20:10:07，run6 是
+  20:34:44 / 20:35:13）——租约是 Java 侧写、DB 侧比的，跨了时区就会在这一行显形。
   ⇒ 副本数不放大调度（这一条只在"调度语义"层面，不等于吞吐会跟着涨，见 §性能那几档）。
 - **C4** 停掉一个后端（run2 停的正好是当时那个 Leader）之后，**第 1 次**探 `/api/actuator/health` 就 200 UP。
 - **C5** 服务名 `z-schedule-backend` 在前端容器里解析出 **3 个地址**（对照：同一条尺数 `z-schedule-frontend`
@@ -1172,3 +1244,102 @@ P18 自己带一支猎物：一份"改前形状"的文件（`DB_PORT` 退回 `:-
    `P26_SKIP_CLUSTER=1`）。为什么不只探存在性：`curl` 在不在镜像里不是文档的事，但"有 curl"和"这一串
    URL 答 UP"是两件事——前者绿而后者的 URL 写错，文档仍然是一次空验收。
    这一臂顺手把 `deploy/bin/start-mode2.sh:27` 也拉进被核对的面（它 echo 给用户的正是同一条命令）。
+
+## 14. 只有抬版那天才会显形的一格：deploy 面把 exec jar 的名字抄死了（#38）
+
+13.2 那张表里 B1 的构建上下文是 103.6 MB，其中近一半是 `target/` 里那两份 jar——这一格的起因就在这儿。
+`JAR_FILE` 在**五处**都是抄死的 `z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar`：
+`Dockerfile.backend` 的 `ARG` 默认、三份 compose 的 `build.args` 默认、`deploy/env/.env.example`。
+（09-27 04:20 在 250 上量的现状，`~/.cache/p38/inventory.log`：三份 compose 当时都在**第 16 行**、逐字相同的
+那条默认，加上 `ls` 出来的 `target/` 里当时只有 `p25-exec.jar`、`p26-exec.jar` 两份——**没有**一个叫
+`z-schedule-admin-1.0.0-exec.jar`。）
+
+根因不是"版本号写错了"，是**这些字面量没有任何读者**：`<revision>` 抬到 1.0.1、1.0.2…直到 1.0.4，
+没有任何一把尺会把 `JAR_FILE` 的名字和 `<revision>` 放在一起比，所以它们从第一次抬版起就已经是坏的，
+只是坏得安静。`deploy/bin/build-images.sh:39` 一开始写的就是
+`JAR="$(ls -1 z-schedule-admin/target/*-exec.jar 2>/dev/null | head -1)"`——它是这五处里唯一一直对的那处，
+也是这次统一的形状。
+
+### 14.1 五种形状的原文读数（字面量喂的是"静默错字节"那一格）
+
+小上下文（一份 36 字节、内容写着 `decoy-bytes-p38-not-a-real-artifact` 的假 jar）+ 从工作树那份
+Dockerfile 现造的两份只差 `ARG` 一行的 Dockerfile，全部量完即删。这一整段现在是**脚本**：
+`bash p38_shapes.sh`（本目录），它自证三件事——两份猎物抹平 ARG 行之后 diff 0 行、五种形状各自 rc、
+收尾 `p38prey` 镜像与 `p38probe` 容器都归零。09-27 05:07 在 250 上复跑过一遍，输出留在
+`~/.cache/p38/shapes.log`（39 行，`总判：PASS=9 FAIL=0`、`VERDICT: OK`）。下面这张表的 rc 与原文
+引文即出自那份日志（只有 `Successfully built <id>` 的 id 每遍不同：那一遍是 `4985d7345291` / `3fea319dc9e1`）：
+
+| 形状 | 默认值 | 盘上那份 jar | rc | 原文读数 |
+|------|--------|-------------|----|---------|
+| 1 | 字面量 | 不存在 | **1** | `COPY failed: file not found in build context or excluded by .dockerignore: stat z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar: file does not exist` |
+| 2 | 字面量 | 同名位置放了一份**假 jar** | **0** | `Successfully built …`，而 `docker run --rm --entrypoint md5sum <猎物 tag> /app/app.jar` 回的 md5 **就是那份假 jar 的 md5** ⇒ **镜像里就是它** |
+| 3 | 通配 | 一份都不匹配 | **1** | `COPY failed: no source files were specified` |
+| 4 | 通配 | 恰好一份 | **0** | 构建过，镜像里 md5 同上（就是那一份，没有第二次选择） |
+| 5 | 通配 | 两份（`only-exec.jar`、`second-exec.jar`） | **1** | `When using COPY with more than one source file, the destination must be a directory and end with a /` |
+
+（第一次量这五种形状是在 09-27 04:37 的一轮手工取证里，假 jar md5 `18e8f0b7ab54e09ccdad45ffa47d0d98`、
+形状 2 的镜像 tag `p38prey:2` 读出 `18e8f0b7ab54e09ccdad45ffa47d0d98`、形状 4 的 `p38prey:4` 同一个值；
+`p38_shapes.sh` 就是那一轮的固化，跑法与判据未变。）
+
+形状 5 在**真 103.6 MB 上下文**上也量过一次（`~/.cache/p38/e1.log`：compose 传通配、`target/` 里当时是
+p25/p26 那两份）；形状 4 在真上下文同样跑通过（`~/.cache/p38/e2.log`，`Successfully built c31e902a60e3`、
+上下文 51.93 MB）。形状 1 也在真上下文量过（`~/.cache/p38/prey.log` 的 Prey A，`A_RC=1`）。
+
+**只有形状 2 不会红。** 它交出去的是一个"tag 写着新版本、里面是旧字节/别的字节"的镜像——所有下游检查
+（`docker inspect` 的 tag、compose 的 `image:`、清单的 `image:`）都会绿，因为那些尺量的都是名字。
+所以这一处不是"风格统一"，是把失败模式从"静默错字节"换成"要么唯一、要么当场失败"：通配的三种形状里
+两种 rc=1、一种唯一命中，字面量的两种形状里一种 rc=1、另一种 **rc=0 且内容是错的**。
+
+### 14.2 为什么没顺手改成 `${JAR_FILE:?…}` 必填守卫
+
+看起来更严：不给就拒。实测否决（同一份 split 清单，只把 `build.args` 那一行换成 `:?`，
+env 模板里 `DB_*` 五项**给齐**、`JAR_FILE` 那一行**删掉**，project 名 `p38probe` 与本轮容器隔离）：
+
+```
+--- 只缺 JAR_FILE（DB_* 都给）：config ---
+error while interpolating services.z-schedule-backend.build.args.JAR_FILE: required variable JAR_FILE is missing a value: …
+rc=1
+--- 只缺 JAR_FILE（DB_* 都给）：ps ---     …同上…  rc=1
+--- 只缺 JAR_FILE（DB_* 都给）：down ---   …同上…  rc=1
+--- 阳性对照：同一 env 下退回通配默认，config ---
+        JAR_FILE: z-schedule-admin/target/*-exec.jar
+rc=0
+```
+
+compose 的插值对**整份文档**是提前做的，`build.args` 里一个只在 build 那一刻用得上的变量，会把 `ps`
+和 `down` 一起拦下来：停一个 Mode 2 的人必须先知道自己那份 exec jar 叫什么名字。这和 §12.3、§11.5
+里那五个 `DB_*` 必填是**两类东西**——`DB_*` 缺了会起一个连不上库的容器（B12 量过的坏形状），
+`JAR_FILE` 缺了顶多是"你没在构建"。守卫该只留给"缺了会静默起坏东西"的键。
+
+### 14.3 判据两把，各钉一面
+
+- **A6c（`p24.sh` 臂 A，静态）**：五处文件（`Dockerfile.backend` + 三份 compose + `env/.env.example`）
+  必须每处都含 `target/*-exec.jar`，且全库这一集合里 `z-schedule-admin-[0-9]+\.[0-9]+\.[0-9]+-exec\.jar`
+  命中 0 个文件。猎物 = 同一批文件的副本、把其中 `docker-compose.cluster.yml` 一处 sed 回写死版本号。
+  250 原文读数（`~/.cache/p24/run_a6c.log`，改注释后又跑一遍 `run_a6c_b.log`，两遍逐字相同）：
+  `[PASS] A6c 五处 exec jar 面全走通配、零写死版本号；同一把尺在退回写死形状的那份猎物上点名
+  [docker-compose.cluster.yml] 并数到 1 处字面量 ⇒ 这一臂认得那种病`，臂 A `PASS=17 FAIL=0`。
+- 同一把尺在**第二台机**上量的是"将要提交的那份树"（本机 macOS，05:49:02，`P24_A_ONLY=1 bash p24.sh`）：
+  臂 A `PASS=17 FAIL=0`，A6c 那行的三个读数与 250 逐一对上（猎物点名 `docker-compose.cluster.yml`、
+  字面量 1 处、五处全含通配）⇒ A6c 不依赖 250 的环境，它钉的是文件字面量本身。
+  ⚠ 但别把这条当"重复测量"用：臂 A 是静态检文件，两机同字节必然同读数（见
+  [[feedback-single-green-run-is-not-evidence]] 那句"两机各一遍≠重复测量"）。它证明的是
+  "提交树合格"，不是"这判据被测过两次"。
+- **B0（`p26.sh`，读的是插值结果不是文件字面量）**：把仓库里那份模板 `sed` 成可渲染的 env（只改
+  `DB_HOST`/`DB_PASSWORD`），拿**交付的那份清单**跑 `compose config`，要求渲染出的 `JAR_FILE` 是通配；
+  再显式指一份具体 jar，要求渲染跟着变。run6 原文读数：
+  `[PASS] B0 模板渲染出的 JAR_FILE 是通配（' z-schedule-admin/target/*-exec.jar '），显式指一份具体 jar
+  时渲染跟着换成 '        JAR_FILE: z-schedule-admin/target/whatever-exec.jar' ⇒ 数的是插值结果，不是恒串`。
+  为什么两把都要：A6c 只看文件，看不见"通配写在 `${VAR:-…}` 的默认段里、而某人 `.env` 里留着一行旧字面量"
+  这一格；B0 只看渲染，看不见另外四处默认漂没漂。
+
+### 14.4 这一档没做的
+
+1. **`run.sh` 的默认构件没翻**（`_doc/003_script/e2e/run.sh:13` 还是写死的那份）——它被 p10/p11/p13/p14/p20/p22
+   六个裸调用方依赖，翻默认会一次打断六条。另开 #39：先给六个调用方补上 `JAR=`，再翻默认。
+2. **Makefile 那一层在 250 上量不到**（没装 make，见 13.4 C1 的同一处境），它的 `JAR_FILE` 是否透传
+   只能靠读文本。
+3. **k8s 面不涉及 jar 名**（清单里只有镜像 tag），A6/A6b 已经把"tag 与构建脚本默认参数一致"钉住了。
+4. **形状 2 是在小上下文里量的**，不是真 103.6 MB 那一份。选小上下文是有意的：这一格量的是
+   `ARG` 默认值 + `COPY` 的语义，与上下文大小无关，而真上下文要付两份 56 MB jar 的传输。
+   真上下文这边量的是形状 1、4、5（见 14.1 表格下面那段）。

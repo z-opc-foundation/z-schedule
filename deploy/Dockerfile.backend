@@ -1,20 +1,25 @@
 # Z-Schedule admin 后端镜像（Mode 1 合体 / Mode 2/3 后端共用）
-# 输入：mvn 出来的 z-schedule-admin-{ver}-exec.jar
+# 输入：mvn 出来的 *-exec.jar
 # 输出：JRE 17 + jar + 健康检查
 #
 # 构建前置：
 #   cd .. && mvn -B -DskipTests -pl z-schedule-admin -am package
 #
-# 构建命令：
-#   docker build -f deploy/Dockerfile.backend \
-#     --build-arg JAR_FILE=z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar \
-#     -t ghcr.io/yuku123/z-schedule-admin:1.0.1 ..
+# 构建命令（推荐走 bin/build-images.sh，它自己 `ls target/*-exec.jar` 取 jar）：
+#   docker build -f deploy/Dockerfile.backend -t ghcr.io/yuku123/z-schedule-admin:<ver> ..
 #
-# 端口：18086（Spring Boot），context-path /meta
+# JAR_FILE 的默认值是一条通配而不是 `z-schedule-admin-<ver>-exec.jar` 那样的字面量：抄死版本号
+# 的那份默认在抬版后有五种形状，250 上各量过一遍（原文读数与复跑命令见 e2e README §14）——
+#   字面量 + 文件不在        → rc=1，COPY failed: … file does not exist（这一种还算客气）
+#   字面量 + 同名放了一份别的 jar → **rc=0**，tag 写着新版本而 /app/app.jar 是那份的字节
+#                             （实测：36 字节的假 jar 进得去，md5 从镜像里读回 = 假 jar 的 md5）
+#   通配 + 0 命中 / ≥2 命中 → rc=1（"no source files were specified" / "destination must be a directory"）
+#   通配 + 恰好 1 命中      → rc=0，且镜像里就是那一份
+# 也就是说通配把"静默错字节"那一格换成了"要么唯一、要么失败"。
 
 FROM eclipse-temurin:17-jre-jammy
 
-ARG JAR_FILE=z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar
+ARG JAR_FILE=z-schedule-admin/target/*-exec.jar
 ENV JAVA_OPTS="-Xms512m -Xmx1g"
 ENV SERVER_PORT=18086
 ENV SERVER_SERVLET_CONTEXT_PATH=/meta

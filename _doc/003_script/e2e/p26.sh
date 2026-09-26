@@ -231,6 +231,27 @@ PYENV
   chmod 600 "$DEPLOY/env/.env"
 }
 
+# B0 照 README 第 0 步（`cp env/.env.example env/.env`）起出来的那份 env，看 compose 把 JAR_FILE 渲染成
+#     什么。这一格要的不是"构建成功"，是**默认值本身**：静态臂 A6c 只钉"字面量不许回来"，而这里量的是
+#     真解析结果（字面量的两种形状：缺文件 rc=1 会响、同名留一份旧 jar 则 rc=0 而镜像里是旧字节；
+#     通配的三种形状：0 命中响、唯一命中过、多命中歧义响 —— 读数在 README §14）。阳性对照：
+#     显式给一个具体 jar，渲染必须跟着变，否则这条臂只是在读自己写的字符串。
+TPL="$WORK/env_from_template"
+sed -E -e 's|^DB_HOST=.*|DB_HOST=127.0.0.1|' -e 's|^DB_PORT=.*|DB_PORT=3306|' \
+       -e 's|^DB_NAME=.*|DB_NAME=p26b0|' -e 's|^DB_USER=.*|DB_USER=p26b0|' \
+    "$DEPLOY/env/.env.example" > "$TPL" || FATAL "B0 复制不出 env 模板"
+grep -q '^DB_NAME=p26b0$' "$TPL" || FATAL "B0 模板里没有 DB_NAME 这一行（形状变了，这条臂得跟着改）"
+B0DEF=$($CCLI --env-file "$TPL" -f "$DEPLOY/docker-compose.split.yml" config 2>/dev/null \
+        | grep -oE 'JAR_FILE: +[^ ]+\*-exec\.jar' | head -1)
+B0OVR=$(JAR_FILE=z-schedule-admin/target/whatever-exec.jar \
+        $CCLI --env-file "$TPL" -f "$DEPLOY/docker-compose.split.yml" config 2>/dev/null \
+        | grep -E 'JAR_FILE:' | head -1)
+if [ -n "$B0DEF" ] && ! echo "$B0OVR" | grep -q '\*-exec\.jar'; then
+  ok "B0 模板渲染出的 JAR_FILE 是通配（'${B0DEF#*:} '），显式指一份具体 jar 时渲染跟着换成 '$B0OVR' ⇒ 数的是插值结果，不是恒串"
+else
+  bad "B0 模板渲染不对：默认='${B0DEF:-无通配命中}' 覆盖='$B0OVR'（期望默认渲染出 target/*-exec.jar 且覆盖时改变）⇒ 照 README 第 0 步做的人拿不到一条唯一命中的路径"
+fi
+
 echo ""
 echo "=== B1 前端镜像：照清单的 build 真跑一次 ==="
 # 构件先就位（后端那一半的 COPY 目标；compose v5 的 build 就在这一遍发生）。
@@ -256,18 +277,6 @@ if [ "${NBUILD:-0}" -ge 2 ] && [ "${VCNT:-0}" -ge 1 ]; then
 else
   bad "B1b vite build=$NBUILD/组件层署名=$VCNT ⇒ 组件层没编进产物（App.jsx 从它 import）"
 fi
-# 尺的牙齿：同一条构建在**去掉组件层 COPY**的猎物上必须 rc≠0（只翻 S1 那一条，别的都不动）。
-# 不这么做的话，B1 的绿过一次构建就永远读不出了——构建产物会留在层缓存里。
-sed -E '/^COPY _frontend\/z-schedule-frontend-component\//d' "$DFE" > "$WORK/prey_dockerfile"
-( cd "$DEPLOY/.." && docker build --no-cache -f "$WORK/prey_dockerfile" -t local/z-schedule-frontend:p26teeth . \
-    > "$WORK/build_teeth.log" 2>&1 )
-TEETH=$?
-if [ "$TEETH" != "0" ] && grep -q "can't cd to ../z-schedule-frontend-component" "$WORK/build_teeth.log"; then
-  ok "B1c 猎物对照成立：删掉组件层那一行 COPY，构建当场退回 rc=$TEETH 并报 'can't cd to ../z-schedule-frontend-component'（这条修复是被实测钉住的，不是把错误信息抄进注释）"
-else
-  bad "B1c 猎物没退回（rc=$TEETH）⇒ B1 的绿说明不了什么，先怀疑尺"
-fi
-docker rmi -f local/z-schedule-frontend:p26teeth >/dev/null 2>&1
 
 echo ""
 echo "=== B2 镜像产物：base 必须落在根上 ==="
@@ -406,6 +415,37 @@ PY
       -f deploy/Dockerfile.frontend -t local/z-schedule-frontend:p26prey . ) \
       > "$WORK/build_prey.log" 2>&1
 PREYB=$?
+PREYRETRY=0
+# 猎物构建第一遍就红过：250 出网抖了一下，npm ci 拿不到包（`non-zero code: 146`），
+# 而我把那条读成"猎物没复现 ⇒ 尺没有牙"。构建失败不是测量结果 ⇒ 认出网络形状就重试一次，
+# 再失败就照"没量成"报，绝不报成"形状不对"。
+if [ "$PREYB" != "0" ] && grep -qE 'npm error|Client\.Timeout|registry-1|ETIMEDOUT|ECONNRESET|non-zero code: (137|143|146)' \
+     "$WORK/build_prey.log"; then
+  PREYRETRY=1
+  ( cd "$DEPLOY/.." && docker build --build-arg FRONTEND_BASE=/meta/ \
+        -f deploy/Dockerfile.frontend -t local/z-schedule-frontend:p26prey . ) \
+        > "$WORK/build_prey_retry.log" 2>&1
+  PREYB=$?
+fi
+# 这一臂的尺伤另有一处：猎物构建**不该**联网跑 npm ci（Dockerfile 里 ARG/ENV 必须在 npm ci 之后）。
+# 复用了 deps 层 ⇒ 只有 vite 重跑；没复用 ⇒ 这一臂又回到"形状读数受出网影响"，当场说清。
+# ⚠ 读数只能来自**产出这个镜像的那一遍**：早先的重试是 `>>` 追加进同一份日志的，两遍混成一个文件去数
+#   `Using cache` 就分不清"一遍冷构建"与"第一遍死在 npm ci、第二遍才建成"（run8/run9 的 `cache=0 vite=2`
+#   就是这两种叠在一起的样子）⇒ 现在两遍各写一份文件。断点也一起打出来：第一个未命中缓存的 Step
+#   才是这条链真正的分叉处（run10/run11 靠它把冷指到 Step 6 `RUN npm ci`，进而查到同档 B1c 那发
+#   `--no-cache` 是作废者；run12 也读到过命中，但那是位置运气——同样顺序的 run13 又冷在 Step 6，
+#   见 B1c 那段的两支探针）。
+prey_readings() {  # $1=最后一遍构建的日志
+  PREYDEP=$(grep -A1 'RUN cd z-schedule-frontend && npm ci' "$1" | grep -c 'Using cache' || true)
+  PREYVITE=$(grep -c 'building for production' "$1" || true)
+  PREYBREAK=$(awk '/^Step [0-9]+\//{s=$0} /---> Running in/{print s; exit}' "$1" | cut -c1-78)
+  echo "    构建臂：最后一遍=[$(basename "$1")] retry=$PREYRETRY deps 层 Using cache=$PREYDEP vite 重跑=$PREYVITE 首个未命中=[$PREYBREAK]"
+}
+if [ "$PREYRETRY" = "1" ]; then
+  prey_readings "$WORK/build_prey_retry.log"
+else
+  prey_readings "$WORK/build_prey.log"
+fi
 docker run -d --name "p26prey$W" --network "$NET" -p "$PPORT:80" \
        -e BACKEND_SERVICE=z-schedule-backend local/z-schedule-frontend:p26prey \
       > "$WORK/prey_run.log" 2>&1
@@ -421,14 +461,39 @@ PREYBODY=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PPORT
 PREYSTATE=$(docker inspect -f '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}nohc{{end}}' "p26prey$W" 2>/dev/null)
 docker rm -f "p26prey$W" >/dev/null 2>&1
 docker rmi -f local/z-schedule-frontend:p26prey >/dev/null 2>&1
-if [ -n "$PREYJS" ] && ! echo "$PREYCODE" | grep -qi 'javascript'; then
-  ok "B7c 猎物实测：base 退回 '/meta/' 那一份镜像里，页面要的是 $PREYJS，探它得到 '$PREYCODE'（http $PREYBODY）⇒ 拿不回 javascript。B7 那条绿是这个旋钮换来的，不是层缓存里的运气"
+if [ "$PREYB" != "0" ]; then
+  tail -6 "$WORK/build_prey$( [ "$PREYRETRY" = "1" ] && echo _retry ).log" 2>/dev/null | sed 's/^/    构建: /'
+  bad "B7c **没量成**：猎物镜像构建 rc=$PREYB（网络形状重试 $PREYRETRY 次之后仍失败）⇒ 这一格记环境的账，不能记成'形状没复现'更不能记成'尺没有牙'"
+elif [ -n "$PREYJS" ] && ! echo "$PREYCODE" | grep -qi 'javascript'; then
+  ok "B7c 猎物实测：base 退回 '/meta/' 那一份镜像里，页面要的是 $PREYJS，探它得到 '$PREYCODE'（http $PREYBODY）⇒ 拿不回 javascript。这一遍的构建：deps 层 Using cache=$PREYDEP、vite 重跑=$PREYVITE 次（flip 的只有 base）"
 else
-  echo "    build rc=$PREYB run rc=$PRER 容器状态=${PREYSTATE:-读不到}"
-  [ "$PREYB" != "0" ] && tail -5 "$WORK/build_prey.log" | sed 's/^/    构建: /'
+  echo "    build rc=$PREYB run rc=$PRER 容器状态=${PREYSTATE:-读不到} Using cache=$PREYDEP vite=$PREYVITE"
   [ "$PRER" != "0" ] && tail -5 "$WORK/prey_run.log" | sed 's/^/    启动: /'
   bad "B7c 猎物没能复现白屏形状（路径=[$PREYJS] 读数='$PREYCODE'）⇒ B7 的判据没有牙，先修尺再谈绿"
 fi
+
+# B1c 尺的牙齿：同一条构建在**去掉组件层 COPY**的猎物上必须 rc≠0（只翻 S1 那一条，别的都不动）。
+# ⚠ 这一臂**不带** `--no-cache`，这是实测出来的结论，不是省时间：
+#   · 牙齿不需要它——删掉 COPY 那一行本身就改了那条指令的缓存键，构建必然走到那一步才发现
+#     目录不在。取证（250，05:35:11，`~/.cache/nocache_probe/runner2.log` 第 ② 段）：不带
+#     `--no-cache` 建 teeth ⇒ rc=2 且报 `sh: cd: line 0: can't cd to ../z-schedule-frontend-component: No ...`。
+#   · 加上它反而伤人——`--no-cache` 会把整条链共享的那条 `RUN npm ci` 缓存记录顶掉。同一支探针
+#     三段时间线：① 05:34:49 基线（冷，Step 6 真跑 npm ci）⇒ ② 05:35:11 不带 `--no-cache` 的 teeth
+#     ⇒ ③ 05:35:13 同一条基线命令 `rc=0 Step6=CACHED 耗时=1s`，链是热的。而上一版探针
+#     （05:15:49/05:16:05，`runner.log`）里 ② 是**带** `--no-cache` 的 teeth ⇒ ③ 冷、npm ci 重跑 20 s。
+#   ⇒ 两遍只差那一个开关，作废者就是它。原先我写的"B1c 挪到 B7c 之后就好了"是 n=1 的归纳：
+#     run13 换了顺序仍在 Step 6 读到 `deps 层 Using cache=0 vite 重跑=2`，被这一对探针否掉了。
+#     顺序保留（teeth 放在 B7c 之后），但它不是修法，删掉 `--no-cache` 才是。
+sed -E '/^COPY _frontend\/z-schedule-frontend-component\//d' "$DFE" > "$WORK/prey_dockerfile"
+( cd "$DEPLOY/.." && docker build -f "$WORK/prey_dockerfile" -t local/z-schedule-frontend:p26teeth . \
+    > "$WORK/build_teeth.log" 2>&1 )
+TEETH=$?
+if [ "$TEETH" != "0" ] && grep -q "can't cd to ../z-schedule-frontend-component" "$WORK/build_teeth.log"; then
+  ok "B1c 猎物对照成立：删掉组件层那一行 COPY，构建当场退回 rc=$TEETH 并报 'can't cd to ../z-schedule-frontend-component'（这条修复是被实测钉住的，不是把错误信息抄进注释）"
+else
+  bad "B1c 猎物没退回（rc=$TEETH）⇒ B1 的绿说明不了什么，先怀疑尺"
+fi
+docker rmi -f local/z-schedule-frontend:p26teeth >/dev/null 2>&1
 
 # B7d 这一臂是给"nginx 什么时候解析 proxy_pass 里的名字"取证：给一个当下不存在的服务名，
 #     看它是**启动即退出**还是"先起着、等请求来了再报错"。答案决定 README 里那条注意怎么写

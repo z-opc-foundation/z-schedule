@@ -148,6 +148,38 @@ grep -q 'MATCH=yes' "$WORK/img.txt" \
 grep -q 'DEFAULTS_SAME=yes' "$WORK/img.txt" && ok "A6b 四处默认 registry/version（构建/k8s-apply/Makefile/.env.example）互相一致" \
   || bad "A6b 默认值漂了：$(sed -n 's/^ *DEFAULTS //p' "$WORK/img.txt")"
 
+# A6c exec jar 在哪一处都别写死版本号。为什么这一条值得占一格：字面量在抬版后的形状，250 上
+#     逐格量过（五种形状的原文读数与复跑命令见 README §14）——
+#       缺文件 → rc=1，COPY failed: … file does not exist（会响，算客气）
+#       同名位置放了一份别的 jar → **rc=0**，tag 是新版本而 /app/app.jar 是那份的字节（实测：36 字节的
+#       假 jar 进得去，镜像里读回的 md5 就是它的 md5）
+#       通配 0 命中 / ≥2 命中 → rc=1（no source files / destination must be a directory）
+#     也就是说只有通配那种"要么唯一、要么失败"，而字面量恰好喂"静默错字节"那一格——它不会红，
+#     只会交出去一个错镜像。
+#     bin/build-images.sh 从一开始就是 `ls target/*-exec.jar`，它是这份档里唯一一直对的那处。
+A6C_FILES="$DEPLOY/Dockerfile.backend $DEPLOY/docker-compose.yml $DEPLOY/docker-compose.split.yml \
+$DEPLOY/docker-compose.cluster.yml $DEPLOY/env/.env.example"
+a6c_scan() {   # $@=文件；打印 "<缺通配的文件名…>|<写死版本号的命中文件数>"
+  local miss="" lit f
+  for f in "$@"; do
+    grep -qE 'target/\*-exec\.jar' "$f" 2>/dev/null || miss="$miss $(basename "$f")"
+  done
+  lit=$(grep -rIlE 'z-schedule-admin-[0-9]+\.[0-9]+\.[0-9]+-exec\.jar' "$@" 2>/dev/null | wc -l | tr -d ' ')
+  echo "${miss# }|$lit"
+}
+A6C=$(a6c_scan $A6C_FILES)
+mkdir -p "$WORK/prey_a6c"
+for f in $A6C_FILES; do cp "$f" "$WORK/prey_a6c/"; done
+# 猎物：把其中一处退回"写死 z-schedule-admin-<ver>-exec.jar"的旧形状
+sed -i.bak 's|z-schedule-admin/target/\*-exec\.jar|z-schedule-admin/target/z-schedule-admin-1.0.4-exec.jar|' \
+    "$WORK/prey_a6c/docker-compose.cluster.yml" && rm -f "$WORK/prey_a6c/*.bak"
+A6CP=$(a6c_scan "$WORK/prey_a6c"/*)
+if [ "$A6C" = "|0" ] && [ "$A6CP" != "|0" ]; then
+  ok "A6c 五处 exec jar 面全走通配、零写死版本号；同一把尺在退回写死形状的那份猎物上点名 [${A6CP%|*}] 并数到 ${A6CP##*|} 处字面量 ⇒ 这一臂认得那种病"
+else
+  bad "A6c 尺或面不对：真值[$A6C] 猎物[$A6CP]（期望 真值=|0 且猎物非 |0）⇒ 要么还有写死的版本号，要么这把尺看不见它"
+fi
+
 # A7 两个池的坐标都必须在容器 env 里（ConfigMap data ∪ env 名）
 python3 - "$R/01-deployment-backend.yaml" <<'PY' > "$WORK/env.txt" || true
 import sys, yaml
