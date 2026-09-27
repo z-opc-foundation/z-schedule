@@ -1999,3 +1999,159 @@ $ cd z-schedule-spring-boot-starter/target/classes/com/zifang/z/schedule/web/ser
   `arguments` 逗号 **0**、`{@link #成员}` 30 个不变（守卫用例在 `src/test`，A15 只扫 `src/main`）。
 
 - 产品字节：只改了 `DefaultAlarmService` 的三行注释（无语句变化）。
+
+## 21. #44/#45/#46：换一台机器跑第一遍，跨机对账成立，同时暴露两条只有干净机器才看得见的断口
+
+250 这一轮全程不可达（TCP 22 握手即 `kex_exchange_identification: read: Connection reset by peer`，
+18098 的 `/actuator/health` 8 s `http_code=000`），所以按用户给的"250 或者 136"改到
+**136 = zifang002（192.168.31.136）** 上做跨机复验 + 干净机器部署彩排。250:18098 那个常驻实例
+（pid 30182）本轮一条请求都没打到 ⇒ 它不受影响，也不是本轮读数的来源。
+
+### 21.1 前置：这台机器上到底装了什么，以及为什么装完要逐个点名核对
+
+136 原本是**纯运行时机器**：`docker / podman / nerdctl / helm / mysql / mariadb / redis-server`
+六个 `command -v` 全部 MISSING，只有 `kubectl`（客户端）与 `java`；`~/.m2` 根本不存在
+（`ls: cannot access '/home/zifang/.m2'`）。为此装了 openjdk-8（`1.8.0_504`）与 maven（`3.8.7`），
+apt 一共动 88 个包 —— 装完必须逐条确认**没有** kernel / linux-image / systemd / initramfs / grub
+被卷进来：这台机器 09-25 那次 29 小时死机的根因就是内核包的 postinst 顺手生成了一段
+watchdog blacklist（见用户级记忆 `project-homelab-zifang002`）。"顺手 apt 一下"在这台机器上是
+有先例代价的动作，不是洁癖。
+
+克隆用 `git bundle` + `git clone -b main`：只 `git clone <bundle>` 会得到
+`warning: remote HEAD refers to nonexistent ref` + **0 文件的工作树**（bundle 不带 HEAD 符号），
+第一遍就这么浪费了一次克隆。
+
+### 21.2 跨机清单对账：成立，而且差值只有一条来历
+
+两机同一提交各跑一遍 `mvn -B test`（跑前 `rm -rf */target/surefire-reports`；各机内部串行，
+不并发），清单用 `tally_surefire.py` 出（每行 `模块 :: 类名 tests/failures/errors/skipped`，
+**不含任何耗时字段**——同一份代码两机耗时可差数倍，进了清单就比不出等号）：
+
+| | 本机（zifangs-Mac-mini） | 136（zifang002） |
+|---|---|---|
+| 构建 JDK / Maven | Java **25.0.2** + Maven **3.9.14**（`-source/-target 8`） | Java **1.8.0_504** + Maven **3.8.7** |
+| `mvn -B test`（097756c） | 08:48:19 → 08:48:50，`CLASSES=30 TOTAL=329` | 08:48:12 起跑，**BUILD FAILURE**，`CLASSES=29 TOTAL=323` |
+| 摘掉 SNAPSHOT 后（dcca49c） | 08:57:49 `RC=0`，`329` | 09:00:45 → 09:03:03，`RC=0`，`CLASSES=30 TOTAL=329` |
+| `TALLY_MD5` | `e112c91d96ba5fedc11d35cbeb4c85d3` | `e112c91d96ba5fedc11d35cbeb4c85d3` |
+
+⇒ **逐字节同**，构建 JDK 差 17 个大版本也没影响清单。首跑那条 29/323 的差值不是"某台机器少跑了几个用例"，
+而是整个 admin 模块没进去：`diff` 两边清单只有一行 ——
+`z-schedule-admin :: ManagementConfigBindingTest tests=6`。
+
+⚠ 顺带一条量具踩坑：**同一件事两台机打印格式不同**。本机 Maven 3.9 的日志是短名
+`--- surefire:3.5.4:test ---`，136 的 Maven 3.8.7 是全名 `--- maven-surefire-plugin:2.12.4:test ---`。
+我拿 `grep -o "surefire:[0-9.]*:test"` 去读 136 日志得到空集，差点记成"136 没跑 surefire"。
+跨机 grep 判据要么两种写法都试，要么用 `(maven-)?surefire[:-][0-9.]+:test`。
+
+### 21.3 #45：一条只有本机 `~/.m2` 供得上的 SNAPSHOT，把"从源码构建"整块打断
+
+136 首跑的失败点：`Failed to execute goal on project z-schedule-admin: Could not find artifact
+com.zifang:z-agent-llm-gateway-core:jar:1.0.0-SNAPSHOT`。前面 746 次下载（92 MB）全白跑，
+reactor 在 4/4 处死掉。为什么本机看不出来——三个独立读数：
+
+1. 全仓 `<repositories>` 命中 **0** ⇒ 这个坐标在任何联网机器上都无源可拉；
+2. 本机 `~/.m2/repository/com/zifang/z-agent-llm-gateway-core/1.0.0-SNAPSHOT/` 里躺着一份
+   **09-19 手工装进去的件**（`maven-metadata-local.xml` 时刻）；
+3. pom 注释点名的调用方 `TokenBurnJobHandler`：`grep -rln` 全仓命中数 **1 = pom 自己**；
+   admin 源码对 `commons-lang3 / okhttp3 / kotlin / com.zifang.z.agent` 四个命名空间的 import
+   各 **0** 命中（同一条命令里的阳性对照：`com.zifang.z.schedule` 在同口径下 **45** 个文件）。
+
+⇒ 依赖是死的，构建面是断的；本机那 6 例只是被一块陈年缓存托起来的。改法 = 摘掉这条 dependency。
+护栏是 `p44.sh` 的 C0：**任何 pom 的依赖坐标不许出现 `-SNAPSHOT`**，并且它自己带牙
+（`P44_INJECT=1 bash p44.sh` 临时塞一条 `9.9.9-SNAPSHOT` ⇒ C0 必须数到 ≥1，随后按 md5 对账还原；
+本机实测注入前后 pom md5 相同、`git status --porcelain` 空）。
+这一格是 [[project-l3-artifact-and-boot-traps]] 那条"真门禁 = 清空本机 m2 里那两棵子树再 build"
+的又一次现形：**绿过的次数不解释干净机器能不能构建**。
+
+### 21.4 #46：`p44.sh` 第一次跑就红了一格，红出来的是"运行时日志整条门面是空的"
+
+C3b 断言"日志里要有 `DevDataSourceConfig.dataSourceSchedule() creating H2` 那行"，本机首跑 **0 命中**。
+先怀疑尺，量完发现是产品面：
+
+- exec jar 里的绑定是 `log4j-slf4j2-impl-2.26.1.jar`（**SLF4J 2.x** 的 ServiceLoader 绑定），
+  而同一个 jar 里 `slf4j-api-1.7.36.jar`（Boot 2.7 管的版本）只会去找
+  `org.slf4j.impl.StaticLoggerBinder` ⇒ 两支互不相认；
+- 进程自己就把结论打在 stdout 上：`SLF4J: Failed to load class
+  "org.slf4j.impl.StaticLoggerBinder". SLF4J: Defaulting to no-operation (NOP) logger implementation`；
+- 对照组：同一进程里走 log4j2 **原生** Logger 的 `LeaderElector` WARN 照打
+  （09:06:55.537 那行），所以这不是"日志级别配高了"，是**凡走 SLF4J 的日志静默丢弃**。
+- 老注释写的是"排除 `log4j-slf4j-impl` 以避免双版本冲突 / MyBatis-Plus `NoSuchMethodError`"。
+  方向恰好反了：`log4j-slf4j2-impl:2.26.1` 要 log4j-api 2.20+，而本仓 `log4j-core` 是 **2.17.2**
+  ——它排除掉的那支（`log4j-slf4j-impl:2.17.2`，配 1.7.36）才是唯一接得上的，而它留下的那支正是
+  `NoSuchMethodError` 的来源。
+
+改法：`z-util-core` 上排除 `log4j-slf4j2-impl`（它是 2.x 绑定的唯一入口，
+`dependency:tree` 指到 `io.github.yuku123:z-util-core:jar:1.0.10 → log4j-slf4j2-impl:2.26.1`），
+并把两处 `log4j-slf4j-impl` 的 exclusion 撤掉 ⇒ 单绑定 2.17.2。双向证据：
+
+| | 修前 | 修后 |
+|---|---|---|
+| jar 内 log4j/slf4j 件 | 6 支，含 `log4j-slf4j2-impl-2.26.1` | 6 支，翻成 `log4j-slf4j-impl-2.17.2`，`slf4j2-impl` 0 |
+| stdout 里 NOP 那两行 | 命中 >0 | **0** |
+| `DevDataSourceConfig.dataSourceSchedule` | **0** | **1**（09:10:04.394） |
+| 全量清单 | `e112c91d…`（30/329） | 同一串，逐字节未动 |
+
+⚠ 记账一条不外推：这条 2.x 绑定是 `z-util-core` 带进来的，任何同样依赖它而 slf4j-api 被
+Boot 2.x 钉在 1.7 的宿主都可能同病。**本轮只在 z-schedule 这一格取证并修，别的仓没量过。**
+
+### 21.5 `p44.sh`：从"检出"走到"有进程在应答"，两机各 7/7
+
+| 格 | 判什么 | 本机 | 136 |
+|---|---|---|---|
+| C0 | 依赖坐标零 `-SNAPSHOT` | PASS | PASS |
+| C1 | `package -DskipTests -pl z-schedule-admin -am` 出 exec jar | PASS，5s，npm 段 5 行日志 | PASS，**65s**，npm 段 7 行日志（node 由插件自己下到 `target/frontend/node`，机器上本来没有） |
+| C2 | 已摘的 SNAPSHOT 不许回到交付物里 | PASS（`BOOT-INF/lib` 90 个 jar，h2 在其中） | PASS（同 90/1） |
+| C3 | 只给 `--spring.profiles.active=dev`、**不给** `--z.base.db.schedule.disabled=true` 也要起来 | PASS，第 4s 应答 200 | PASS，第 6s 应答 200 |
+| C3b | 引擎池确实是宿主那份 H2 替身 | PASS（见 21.4，这格先是红的） | PASS |
+| C4 | 无库时 `/meta/jobinfo/list` 必须 500 而不是假 200 | PASS | PASS |
+| C5 | 两个池的 URL 不相等，且引擎那份不来自任何 `spring.datasource.*` 键 | PASS | PASS |
+
+逐路径读数两机一致：`/meta/` 200 len=417、`/meta/actuator/health` 200 len=49、
+`/meta/jobinfo/list` 500 len=118、`/meta/dashboard/stats` 500 len=121。
+
+C5 读的是**交付物里的字节**，不是源码：
+`BOOT-INF/classes/application-dev.yml` → `jdbc:h2:mem:zschedule;MODE=MySQL;DB_CLOSE_DELAY=-1`，
+`BOOT-INF/classes/com/zifang/z/schedule/admin/DevDataSourceConfig.class` 常量池 → `jdbc:h2:mem:zschedule_dev`。
+两个**不同的内存库名**，且后者的 URL 在 class 里是编译期常量（同一次读取里 `spring.datasource` 命中 **0**，
+阳性对照 `jdbc:h2` 命中 1）。含义：dev profile 下"Spring 那口池"和"调度引擎那口池"根本不是同一个库，
+想靠 `--spring.datasource.url=...;INIT=RUNSCRIPT FROM '<仓内建表脚本>'` 把 schema 喂给引擎，
+**结构上做不到** ⇒ 干净机器（无 MySQL、无 docker）能到的天花板就是 C4 那一屏"进程活着、界面 200、数据接口 500"。
+这条正好是 #32（零依赖试用路径）的前置事实：要么让引擎池可配（读 URL 而不是拼常量），
+要么自带库；不存在"只改命令行"的第三条路。
+
+### 21.6 干净机器部署台账：仓里那三条部署路，在 136 上结构性地只剩一条
+
+| 路 | 需要 | 136 实况 | 结论 |
+|---|---|---|---|
+| `deploy/bin/build-images.sh` → k8s | docker（或 podman）+ 可建沙箱的集群 | 无 docker/podman/nerdctl/helm；`kubectl` 有但 250 侧集群建不出 pod 沙箱（§11） | 跑不了，且不是配一下就行 |
+| `make dev` / compose 三模式 | docker + compose + 一个 DB | 全缺 | 跑不了 |
+| 从源码起进程（本轮 p44） | JDK 8 + Maven + 一个能连的库 | JDK/Maven 现装，**没有任何库** | 起得来、服务不了数据；要真服务必须先有 MySQL（250 那条路已验，见 §10/§12） |
+
+首次联网构建的量级（`~/.m2` 从 0 起）：`mvn -B test` 一路 **746 次下载 / 92 MB**，
+08:48:12 → 08:53:48 = **5 分 36 秒**才撞到那个失败（链路只有 7—143 kB/s）；缓存热了以后同一台 `mvn -B test` 是 **250 次下载（补 surefire 3.5.4 那批）/ 138 s 全程**，
+`~/.m2` 到 175 MB。⇒ 部署手册里"clone 下来 mvn 一把就行"这句话，在没有内网镜像的机器上要按
+"多 6—8 分钟下载"来写。
+
+⚠ 一条**反直觉**的读数，别拿它当判据：两机各出的 `z-schedule-admin-1.0.0-exec.jar`
+**字节数不同**（本机 53,359,779 / 136 53,357,186）。构件不是逐字节可复现的（npm 产物那一段最容易差），
+所以跨机对账只比**清单**（`TALLY_MD5`）与**行为**（HTTP 码 + body 长度），不比 jar 哈希。
+这一条与 [[project-z-graph-mvcc-state]] 那套"发布件三方逐字节对账"不冲突：那边比的是同一个
+构建产物在不同副本之间，这边比的是两次独立构建。
+
+### 21.7 更正提交 `097756c` 里那串写坏的 md5
+
+那一格的提交信息里 `TALLY_MD5=` 后面跟的是 `e112c91d96ba5fd1c11d35cbeb4c85d3`，
+中间混进了非十六进制的字（`...5fd1c11...` 处，还带进了一段中文），是我手写进去的。
+正确值 **`e112c91d96ba5fedc11d35cbeb4c85d3`**，本轮由两台机器各自现算现比得出
+（本机 08:48 与 08:57、136 09:03 三份读数同串）。已推送的提交信息不改写，只在这里记正
+——见 [[feedback-numbers-outside-gauge-range]]：写进 message 的数字没有任何尺会回头读它。
+
+### 21.8 本轮基线与改动面
+
+- 全量：`CLASSES=30 TOTAL=329 FAIL_OR_ERR=0 SKIPPED=0 STALE_EXCLUDED=0`，
+  `TALLY_MD5=e112c91d96ba5fedc11d35cbeb4c85d3`（本机 Java 25 与 136 Java 8 各一份，同串）。
+- `bash p44.sh`：本机 `PASS=7 FAIL=0`；136 `PASS=7 FAIL=0`。`P44_INJECT=1` 那一支在本机红过（有牙）。
+- 产品字节改动：`z-schedule-admin/pom.xml`（摘 1 条死依赖、翻转 3 处绑定排除）、
+  顶层 `pom.xml`（钉 `maven-surefire-plugin:3.5.4`）。**core / starter 的 `src/main` 一行没动**
+  ⇒ 已发布的 1.0.4 字节不受这两次改动影响；要不要为它们抬 1.0.5 是另一笔账（发 Central 要单独点头）。
+
