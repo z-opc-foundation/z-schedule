@@ -11,9 +11,13 @@
 #   3) dev profile 下"引擎池"与"Spring 池"是两个不同的 H2 内存库，且引擎那一份的 URL 是
 #      DevDataSourceConfig 里的编译期常量 ⇒ 想靠 --spring.datasource.url 塞 INIT=RUNSCRIPT
 #      把建表脚本喂给调度引擎，结构上做不到（C5 只记读数不判红，等 #32 拍板）。
+#   4) 本机装好之后又发现的第二类"只有读交付物字节才看得见"的断口（#46）：admin 里留的是 SLF4J
+#      **2.x** 那一代绑定（log4j-slf4j2-impl），而 slf4j-api 是 Boot 2.7 管的 1.7.36 ⇒ 一支绑定都
+#      接不上，运行时日志静默 NOP。C6 就是把这条钉成结构判据：判据**不是**"绑定恰好一条"（坏件里
+#      恰好只有一条，那样会当场放行），而是"与 slf4j-api 同代的绑定恰好一条"。
 #
 # 用法：bash p44.sh                全跑（C1 会下 node 并跑 npm，首次可达数分钟）
-#       P44_SKIP_PACKAGE=1 bash p44.sh   复用 target 里现成的 exec jar（只跑 C0、C2—C5）
+#       P44_SKIP_PACKAGE=1 bash p44.sh   复用 target 里现成的 exec jar（只跑 C0、C2、C5、C6、C3—C4）
 #       P44_INJECT=1 bash p44.sh         自检：临时塞一条 SNAPSHOT 依赖，C0 必须变红
 # 退出码：0=断言全成立；1=有断言不成立；2=前置不满足（没量到，不等于通过）
 set -u
@@ -131,6 +135,122 @@ if [ "$SDBIND" -eq 0 ]; then
 else
   bad "C5 引擎池开始读 spring.datasource.*（命中 $SDBIND）⇒ 行为变了，README §21 要跟着改"
 fi
+
+# ---------- C6 SLF4J 绑定的"代"必须与被解析到的 slf4j-api 对得上 ----------
+# 为什么不能只数"有几条绑定"：#46 那一份坏件里 BOOT-INF/lib 恰好只有 **一条** 绑定
+# （log4j-slf4j2-impl-2.26.1），"恰好一条"这种判据会当场放行它——而 slf4j-api 是 1.7.36，
+# 1.7 只认 StaticLoggerBinder、不认 2.x 的 ServiceLoader Provider ⇒ 可用绑定数其实是 0，
+# 运行时静默 NOP。所以尺读的是"与 api 同代的绑定恰好一条"，而不是"绑定恰好一条"。
+# jul-to-slf4j / log4j-to-slf4j 是**路由器**不是绑定，混进来的话每支都会假红，故显式排掉。
+c6_scan() {
+  python3 - "$1" <<'PY'
+import sys, zipfile, re
+BIND_1X = {"log4j-slf4j-impl", "slf4j-simple", "slf4j-log4j12", "slf4j-nop",
+           "slf4j-jdk14", "slf4j-reload4j", "logback-classic"}
+BIND_2X = {"log4j-slf4j2-impl"}
+ROUTER  = {"jul-to-slf4j", "log4j-to-slf4j", "log4j-to-slf4j12"}
+
+def parts(name):
+    b = name.split("/")[-1][:-4]
+    m = re.match(r"^(.*?)-(\d[\w.\-]*)$", b)
+    return (m.group(1), m.group(2)) if m else (b, "")
+
+def vtuple(v):
+    out = []
+    for seg in re.split(r"[.\-]", v):
+        out.append(int(seg) if seg.isdigit() else 0)
+    return tuple(out) + (0,)
+
+def gen(art, ver):
+    # 代**先按构件名判**：log4j-slf4j-impl / log4j-slf4j2-impl 的版本号跟的是 log4j2 的版本
+    # （2.17.2、2.26.1），拿它跟 slf4j 的 2.0 比会把 1.x 的桥接件误判成 2.x —— 第一版就踩了，
+    # 是"应当判绿的那支猎物"当场把它红出来的（见下面 fixed-shape）。
+    if art == "log4j-slf4j-impl":
+        return 1
+    if art == "log4j-slf4j2-impl":
+        return 2
+    if art == "logback-classic":          # 1.3+ 才供 SLF4J 2.x Provider
+        return 2 if vtuple(ver) >= (1, 3) else 1
+    # slf4j-api / slf4j-simple / slf4j-nop / slf4j-jdk14 / slf4j-log4j12：版本跟 slf4j 自己走
+    return 2 if vtuple(ver) >= (2, 0) else 1
+
+api_ver, bindings, core_ver, api2_ver = "", [], "", ""
+for n in zipfile.ZipFile(sys.argv[1]).namelist():
+    if not re.match(r"BOOT-INF/lib/.*\.jar$", n):
+        continue
+    art, ver = parts(n)
+    if art == "slf4j-api":
+        api_ver = ver
+    elif art == "log4j-core":
+        core_ver = ver
+    elif art == "log4j-api":
+        api2_ver = ver
+    elif art in (BIND_1X | BIND_2X) and art not in ROUTER:
+        bindings.append((art, ver))
+
+print("API|%s|gen%s" % (api_ver or "ABSENT", gen("slf4j-api", api_ver) if api_ver else "?"))
+print("BIND|%d|%s" % (len(bindings), ",".join("%s-%s" % b for b in bindings) or "-"))
+if not api_ver:
+    print("VERDICT|bad|没有 slf4j-api ⇒ 尺读不到 api 的代，不能判绿")
+    sys.exit(0)
+g = gen("slf4j-api", api_ver)
+usable = [b for b in bindings if gen(*b) == g]
+print("USABLE|%d" % len(usable))
+if len(usable) == 0:
+    print("VERDICT|bad|slf4j-api %s 要 gen%d 绑定，可用 0 条（在场绑定 %s）⇒ 运行时静默 NOP"
+          % (api_ver, g, [("%s-%s" % b) for b in bindings] or "无"))
+elif len(usable) > 1:
+    print("VERDICT|bad|%d 条同代绑定 %s ⇒ SLF4J 任取一支，谁赢由 classpath 顺序决定"
+          % (len(usable), [("%s-%s" % b) for b in usable]))
+elif usable[0][0].startswith("log4j-slf4j") and core_ver and vtuple(usable[0][1])[:2] != vtuple(core_ver)[:2]:
+    print("VERDICT|bad|绑定 %s-%s 与被解析到的 log4j-core %s 不同代（NoSuchMethodError 那一档）"
+          % (usable[0][0], usable[0][1], core_ver))
+else:
+    print("VERDICT|ok|api %s + 绑定 %s-%s 同代%s" % (
+        api_ver, usable[0][0], usable[0][1],
+        "，log4j-core 同代 " + core_ver if usable[0][0].startswith("log4j-slf4j") and core_ver else ""))
+PY
+}
+c6_make_prey() {  # c6_make_prey <名> <jar1> <jar2> ... —— 只装 BOOT-INF/lib 条目，C6 读的就是条目名
+  python3 - "$@" <<'PY'
+import sys, zipfile
+out = sys.argv[1]
+with zipfile.ZipFile(out, "w") as z:
+    z.writestr("BOOT-INF/lib/", "")
+    for j in sys.argv[2:]:
+        z.writestr("BOOT-INF/lib/" + j, b"")
+PY
+}
+WORK44="/tmp/p44_work_$$"; mkdir -p "$WORK44" || FATAL "C6 建不了工作目录"
+C6=$(c6_scan "$JAR" 2>/dev/null) || FATAL "C6 扫描器在真件上没跑起来（python3 或 zip 形状坏了）"
+C6_API=$(printf '%s\n' "$C6" | grep '^API|' | head -1)
+C6_BIND=$(printf '%s\n' "$C6" | grep '^BIND|' | head -1)
+C6_USE=$(printf '%s\n' "$C6" | grep '^USABLE|' | head -1)
+C6_V=$(printf '%s\n' "$C6" | grep '^VERDICT|' | head -1)
+C6_KIND=$(printf '%s' "$C6_V" | cut -d'|' -f2)
+echo "         $C6_API  $C6_BIND  $C6_USE"
+if [ "$C6_KIND" = ok ]; then
+  ok "C6 真件交付物：与 slf4j-api 同代的绑定恰好一条（$(printf '%s' "$C6_V" | cut -d'|' -f3)）"
+else
+  bad "C6 真件交付物绑定不成立：$(printf '%s' "$C6_V" | cut -d'|' -f3-)"
+fi
+# 五支猎物：三支必须点名（含 #46 那一支"只有一条绑定但代不对"），两支必须不误伤
+c6_prey() {  # c6_prey <期望 ok|bad> <标签> <prey jars...>
+  local want="$1" name="$2"; shift 2
+  local f="$WORK44/$name.jar"
+  c6_make_prey "$f" "$@" || { bad "C6 猎物 $name 造不出来"; return; }
+  local v; v=$(c6_scan "$f" | grep '^VERDICT|' | head -1)
+  local k; k=$(printf '%s' "$v" | cut -d'|' -f2)
+  if [ "$k" = "$want" ]; then ok "C6 猎物 $name 判为 $want（与预期同）：$(printf '%s' "$v" | cut -d'|' -f3-)"; else
+    bad "C6 猎物 $name 期望 $want，实际 $k ⇒ 尺判据坏了：$(printf '%s' "$v" | cut -d'|' -f3-)"; fi
+}
+c6_prey bad gen-mismatch-46-shape        slf4j-api-1.7.36.jar log4j-slf4j2-impl-2.26.1.jar log4j-core-2.17.2.jar log4j-api-2.17.2.jar jul-to-slf4j-1.7.36.jar
+c6_prey bad two-usable                   slf4j-api-1.7.36.jar log4j-slf4j-impl-2.17.2.jar logback-classic-1.2.11.jar log4j-core-2.17.2.jar
+c6_prey bad core-generation-skew         slf4j-api-1.7.36.jar log4j-slf4j-impl-2.26.1.jar log4j-core-2.17.2.jar
+c6_prey bad api2-with-only-1x-binding    slf4j-api-2.0.13.jar log4j-slf4j-impl-2.17.2.jar log4j-core-2.17.2.jar
+c6_prey ok fixed-shape                   slf4j-api-1.7.36.jar log4j-slf4j-impl-2.17.2.jar log4j-core-2.17.2.jar log4j-api-2.17.2.jar jul-to-slf4j-1.7.36.jar
+c6_prey ok api2-with-2x-binding          slf4j-api-2.0.13.jar log4j-slf4j2-impl-2.26.1.jar log4j-core-2.26.1.jar log4j-api-2.26.1.jar
+rm -rf "$WORK44"
 
 # ---------- C3/C4 起进程并逐路径量码：整条命令里不给 disabled=true ----------
 free_port() { python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()'; }
