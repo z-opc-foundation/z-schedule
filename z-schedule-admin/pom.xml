@@ -69,29 +69,35 @@
             <version>${z-boot.version}</version>
         </dependency>
         <!--
-            解决 log4j-slf4j-impl 双版本冲突:
-            z-boot-datasource-starter 会 transitive 拉 log4j-slf4j-impl 2.17.x (跟 log4j-core 2.17.x 配套),
-            spring-boot-starter-log4j2 拉 log4j-slf4j2-impl 2.26.x (跟 log4j-core 2.20+ 配套).
-            两者共存导致 MyBatis-Plus 启动时 NoSuchMethodError: Log4jLoggerFactory.<init>().
-            显式排除 z-boot-datasource-starter 拉来的老版本, 只保留新的.
+            SLF4J 绑定只留一条，且必须留 **1.7 那一代**（log4j-slf4j-impl，配 slf4j-api 1.7.36）。
+            原先这里排除的是 log4j-slf4j-impl、留下 z-util-core 带的 log4j-slf4j2-impl 2.26.1
+            （SLF4J **2.x** 的 Provider 绑定）——而本仓解析到的 slf4j-api 是 Boot 2.7 管的 1.7.36，
+            它只认 StaticLoggerBinder，不认 ServiceLoader ⇒ 结果是**一支绑定都没接上**：
+            admin 起来时 stdout 打 "SLF4J: Failed to load class org.slf4j.impl.StaticLoggerBinder /
+            Defaulting to no-operation (NOP) logger implementation"，凡走 SLF4J 的日志静默丢弃。
+            实测受影响的这一格：本模块 DevDataSourceConfig 那行 INFO 在 stdout 里 0 命中，
+            而同一进程里走 log4j2 原生 Logger 的 LeaderElector WARN 照打（两套门面只差在这条绑定上）。
+            判据与复现见 _doc/003_script/e2e/p44.sh 的 C3b 与 _doc/003_script/e2e/README.md §21。
+            两条同时成立才叫"一套绑定"：2.26.1 的绑定还依赖 log4j-api 2.20+，而本仓 log4j-core 是 2.17.2
+            （这正是老注释说的 NoSuchMethodError 出处）⇒ 摘掉 2.x 绑定同时也消掉那个冲突。
         -->
         <dependency>
             <groupId>io.github.yuku123</groupId>
             <artifactId>z-boot-datasource-starter</artifactId>
             <version>${z-boot.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.apache.logging.log4j</groupId>
-                    <artifactId>log4j-slf4j-impl</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
-        <!-- 工具 -->
+        <!-- 工具（排除它带的 SLF4J 2.x 绑定，理由见上面那段） -->
         <dependency>
             <groupId>io.github.yuku123</groupId>
             <artifactId>z-util-core</artifactId>
             <version>${z-util.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-slf4j2-impl</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!-- Actuator (健康检查) -->
@@ -114,18 +120,6 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-log4j2</artifactId>
-            <exclusions>
-                <!--
-                    spring-boot-starter-log4j2 2.7.12 自带 log4j-slf4j-impl 2.17.2 (SLF4J 1.x bridge),
-                    与 z-util-core 1.0.10 拉的 log4j-slf4j2-impl 2.26.1 (SLF4J 2.x bridge) 冲突.
-                    后者配 log4j-core 2.20+ / SLF4J 2.x, MyBatis-Plus 启动需要后者.
-                    排除老的, 让 z-util-core 提供的 2.26.1 唯一存在.
-                -->
-                <exclusion>
-                    <groupId>org.apache.logging.log4j</groupId>
-                    <artifactId>log4j-slf4j-impl</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
         <!-- H2 Database (本地测试用, 生产换 MySQL) -->
