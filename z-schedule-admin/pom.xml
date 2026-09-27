@@ -94,26 +94,6 @@
             <version>${z-util.version}</version>
         </dependency>
 
-        <!--
-            z-agent-llm-gateway: TokenBurnJobHandler 调用 LLM 接口 (本地 monorepo 内部, 不在中央)
-            groupId 保留 com.zifang, version 是 monorepo 内部 SNAPSHOT
-        -->
-        <dependency>
-            <groupId>com.zifang</groupId>
-            <artifactId>z-agent-llm-gateway-core</artifactId>
-            <version>1.0.0-SNAPSHOT</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>com.baomidou</groupId>
-                    <artifactId>mybatis-plus-boot-starter</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>com.mysql</groupId>
-                    <artifactId>mysql-connector-j</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
         <!-- Actuator (健康检查) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
