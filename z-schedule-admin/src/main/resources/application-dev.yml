@@ -1,9 +1,11 @@
 # dev profile: H2 内存数据库
 # 用法: mvn -B spring-boot:run -Dspring-boot.run.profiles=dev \
 #         -Dspring-boot.run.arguments=--z.base.db.schedule.disabled=true
-# 两支同名 @Bean（starter 的 dataSourceSchedule / admin 的 DevDataSourceConfig）要靠
-# disabled=true 让 starter 那两支不注册，否则 Boot 默认禁止同名覆盖 ⇒ 起不来。
-# 且这份 H2 是空库（无 schema.sql）：外壳起得来，数据接口 500。
+# 上面那条命令里的 disabled=true 目前摘不掉：在 admin 目录单跑 mvn（不带 -am）时，starter
+# 是从 ~/.m2 解析的**已发布件**，它那两支同名 @Bean 还没按名退让 ⇒ 不给就撞 DevDataSourceConfig。
+# 本树已改成按名退让（@ConditionalOnMissingBean(name = …)），所以用 -am 从源码 package 出的
+# exec jar 不给这一句也起得来（实测见 _doc/003_script/e2e/README.md §19）。
+# 无论哪条路，这份 H2 都是空库（无 schema.sql）：外壳起得来，数据接口 500。
 spring:
   datasource:
     driver-class-name: org.h2.Driver

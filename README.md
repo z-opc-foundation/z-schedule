@@ -47,7 +47,7 @@
 |---|---|---|
 | 容器（Mode 1 合体 / Mode 2 前后端分体 / Mode 3 集群） | [`deploy/README.md`](deploy/README.md) | 三种模式在 250 真机各起过，`/api/` 反代与探针路径逐条验过（`_doc/003_script/e2e/p24.sh` 臂 B、`p25.sh`） |
 | 真机 E2E 量具（自建 MySQL + 逐个接口打） | [`_doc/003_script/e2e/README.md`](_doc/003_script/e2e/README.md) 顶部 quick-start | 250 在跑；静态臂 `P24_A_ONLY=1 bash p24.sh` 不碰 docker，任何机器都能跑 |
-| 本机直跑（`mvn spring-boot:run` 或 `java -jar`） | [`_doc/001_arch/z-schedule-admin.md`](_doc/001_arch/z-schedule-admin.md)「本地启动」 | ⚠ **两条独立的前置**：① 要显式给 `--z.base.db.schedule.disabled=true` 才起得来，而那份 H2 是空库 ⇒ 数据接口 500（**不是零依赖可玩**）；② 要看界面还得给 `--server.servlet.context-path=/meta` —— 前端资源基路径 `/meta/` 是构建时烤进 jar 的，不给就是**白屏**（页面 200、它自己声明的两条资源 404，实测见 `_doc/003_script/e2e/README.md` §18）。四条命令逐条实测的读数在那一节 |
+| 本机直跑（`mvn spring-boot:run` 或 `java -jar`） | [`_doc/001_arch/z-schedule-admin.md`](_doc/001_arch/z-schedule-admin.md)「本地启动」 | ⚠ **两条独立的前置**，其中第一条现在**分版本**：① 要起得来，`cd z-schedule-admin && mvn spring-boot:run` 那条**仍要**显式给 `--z.base.db.schedule.disabled=true`（不带 `-am` ⇒ 依赖由 `~/.m2` 解析，跑的是已发布那份字节，它的两支同名 `@Bean` 还没按名退让）；而用本树 `package` 出的 exec jar **不必给**（#41：`@ConditionalOnMissingBean(name=…)`，实测 08:28:47 `Tomcat started on port(s): 50974 (http) with context path '/meta'`，前后读数成对记在 `_doc/003_script/e2e/README.md` §19）。两条路给的 H2 都是空库 ⇒ 数据接口 500（**不是零依赖可玩**）；② 要看界面还得给 `--server.servlet.context-path=/meta` —— 前端资源基路径 `/meta/` 是构建时烤进 jar 的，不给就是**白屏**（页面 200、它自己声明的两条资源 404，实测见 §18）。四条命令逐条实测的读数在 §17.1 |
 
 ## 文档目录
 

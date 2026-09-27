@@ -48,14 +48,31 @@
 > 的 ConfigMap 和三份 compose 的 env 里 ⇒ **照文档在本机 `mvn` 起的人拿不到那个地址**，而
 > `deploy/docker-compose.yml` 的 healthcheck 却写死了 `http://127.0.0.1:18086/meta/...`
 > （那条在容器里成立，因为 env 给过）。这几处抄件现在由 `p24.sh` 的 A16 逐字比着，漂一处即红一处。
+>
+> ⚠ 上面那四格的**字节**都是 `~/.m2` 里解析到的已发布件（表头那条命令没带 `-am`，见
+> `_doc/003_script/e2e/README.md` §17.1 末尾的边界说明）。第三格那条"同名 bean 必崩"在 #41
+> 之后**只对这已发布件成立**：换成 `mvn -pl z-schedule-admin -am package` 出的 jar，不给旗也起得来
+> （实测 08:28:47 `Tomcat started on port(s): 50974 (http) with context path '/meta'`）。
+> 成对的前/后读数与为什么修完还有第三条死路，记在 §19。
 
 ### dev profile 的两条前置（缺一条就起不来）
 
-1. **`z.base.db.schedule.disabled=true` 必须显式给。** `DevDataSourceConfig`（`@Profile("dev")`）
-   与 starter 的 `ZScheduleAutoConfiguration` 注册**同名** bean（`dataSourceSchedule`
-   / `sqlSessionFactorySchedule`），而 starter 那两支只带 `@ConditionalOnProperty(z.base.db.schedule.disabled)`、
-   **没有** `@ConditionalOnMissingBean` ⇒ Boot 2.1 起默认禁止同名覆盖 ⇒ 当场崩。
-   给齐 `disabled=true` 才是 starter 注释里说的"由 admin 端提供同名 @Bean"那条路。
+1. **`z.base.db.schedule.disabled=true` 要不要给，取决于你跑的是哪份字节。**
+   `DevDataSourceConfig`（`@Profile("dev")`）与 starter 的 `ZScheduleAutoConfiguration` 注册**同名**
+   bean（`dataSourceSchedule` / `sqlSessionFactorySchedule`），而 Boot 2.1+ 默认禁止同名覆盖：
+
+   | 你跑的 starter 字节 | 不给旗 | 依据 |
+   |---|---|---|
+   | 已发布的 1.0.4（= 在 `z-schedule-admin/` 里单跑 `mvn spring-boot:run`，依赖由 `~/.m2` 解析） | **崩**：`The bean 'dataSourceSchedule', defined in class path resource […], could not be registered` | §17.1 m3（06:42:54） |
+   | 本树（`mvn -B -pl z-schedule-admin -am package` 出的 exec jar） | **起得来**，starter 那两支按名退让给 admin 的 H2 | §19.1 B3、§19.3 A 组、上面方式 B 的 08:28:47 |
+
+   也就是说 admin 的 dev 路现在**两条都通**：给旗（走"starter 不注册"）或不给（走"starter 按名退让"）。
+   旗**不是**万能钥匙：它一次摘掉两支 `@Bean`，而类上那句
+   `@MapperScan(sqlSessionFactoryRef = "sqlSessionFactorySchedule")` 是无条件的 ⇒
+   "设了 `disabled=true` 但宿主只补一支 `DataSource`" 这一格两版字节下都起不来
+   （`NoSuchBeanDefinitionException: No bean named 'sqlSessionFactorySchedule' available`，§19.4-②）。
+   另一格修不掉的残余：宿主用 `@Import(ZScheduleAutoConfiguration.class)` 当 `spring.factories`
+   的备胎时，条件判定早于宿主自己的 `@Bean`，被拒的反而是宿主那一条（§19.4-①，已写成用例）。
 2. **H2 里没有表。** dev profile 的 URL 是 `jdbc:h2:mem:zschedule_dev`，而本模块没有任何
    `schema.sql` / 建表初始化 ⇒ 外壳起得来（`/` 200、`/actuator/health` 200）但**每个数据接口 500**：
    实测 `/jobinfo/list`、`/dashboard/stats` 均 500，日志里 65 条 table-not-found。
@@ -86,6 +103,11 @@ mvn -B spring-boot:run \
 #   Tomcat started on port(s): 62442 (http) with context path '/meta'
 # 路径级读数在下面「方式 B」那条测量里给（同一个 jar、同一个前缀 ⇒ 挂出来的路径一样）。
 # 不带 server.port 时就是上面 m4 那格量到的 8080（那一格只差 context-path）。
+#
+# ⚠ 这一条里的 disabled=true 现在**摘不掉**，而且摘的原因跟 starter 有没有修没关系：
+# 命令是在 admin 模块目录里单跑的，依赖由 ~/.m2 解析 ⇒ 跑的是已发布那份 starter 字节，
+# 它没有 @ConditionalOnMissingBean(name=…)。#41 修的是本树，所以"不给旗也能起"目前
+# 只在下面方式 B 那条（-am 从源码 package）成立。发布 + 抬版之后这一格可以重写。
 ```
 
 给 Maven 传应用参数只能走 `-Dspring-boot.run.*`；把 `--server.port=…` 直接跟在 `mvn` 后面
@@ -109,14 +131,26 @@ mvn -B -pl z-schedule-admin -am package -DskipTests
 # 见 #38；所以这里让 shell 去匹配，命中 0 个或多于 1 个都会响）
 java -jar "$(ls z-schedule-admin/target/*-exec.jar)" \
   --spring.profiles.active=dev \
-  --z.base.db.schedule.disabled=true \
   --server.servlet.context-path=/meta
-# 实测（端口由 bind(("127.0.0.1",0)) 现取）：`Tomcat started on port(s): 58255 (http) with
-# context path '/meta'`，逐路径读 HTTP 码：`/meta/` 200 len=417、`/meta/actuator/health` 200
-# len=49、`/meta/assets/index-*.js|css` 200；**剥掉前缀的那几条全 404**（`/`、`/actuator/health`），
-# 数据接口 `/meta/jobinfo/list` 与 `/meta/dashboard/stats` 都 500（就是下面这条缺口）。
+# 实测（端口由 bind(("127.0.0.1",0)) 现取，08:28:47）：**没给 disabled=true** 也起得来 ——
+# `Tomcat started on port(s): 50974 (http) with context path '/meta'` +
+# `Started ZScheduleAdminApplication in 2.208 seconds`；逐路径：`/meta/` 200 len=417、
+# `/meta/actuator/health` 200 len=49、`/meta/jobinfo/list` 500 len=118、
+# `/meta/dashboard/stats` 500 len=121、`/` 404。
+# 路径面在 #41 之前那次量的（07:43:01，端口 58255，同样的前置**多带** disabled=true）：
+# `/meta/` 200 len=417、`/meta/actuator/health` 200 len=49、两条 `/meta/assets/*` 200、
+# `/meta/jobinfo/list` 500 len=118、`/meta/dashboard/stats` 500 len=121，
+# **剥掉前缀的那几条全 404**（`/`、`/actuator/health`）—— 与上面这一跑逐格相同 ⇒ 旗给不给
+# 不影响路径面（§18.2 有全表）。
+
+# 反过来，把 `-cp` 里的本树 starter 换成 ~/.m2 那份已发布件、同样不给旗 ⇒
+# `APPLICATION FAILED TO START / The bean 'dataSourceSchedule', … could not be registered`
+# （§19.3 的 A/B 两组）。所以这一格"不用给旗"的**唯一**依据是那行 `Tomcat started …`，
+# 别拿"进程没报错"当证据。
 # 可复跑的形态在 `_doc/003_script/e2e/ui_base_probe.sh`（两臂各 5 格、PASS=10 FAIL=0，
 # 含"同一个文件在剥掉前缀的路径上 200 vs 404"这对反向对照），逐格读数在 §18.2。
+# ⚠ 那个脚本自己**仍带着** disabled=true —— 它量的是路径面，带着旗对两份字节都成立，
+# 这样它在"jar 来自 m2"的机器上也不会误红。
 # 这条的缺口与方式 A 相同（H2 无表）。要真跑调度链路，得先有一个建好 6 张表的库，
 # 键给 z.base.db.schedule.*（不是 spring.datasource.*，那是另一个池），见 deploy/README.md「数据库」一节
 ```

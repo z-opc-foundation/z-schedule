@@ -25,12 +25,16 @@ import javax.sql.DataSource;
  *       SqlSessionFactory，否则 starter 注册的 mapper Bean 找不到依赖</li>
  * </ol>
  *
- * <p>启动方式：{@code java -jar xxx.jar --spring.profiles.active=dev
- * --z.base.db.schedule.disabled=true}。那个 {@code disabled=true} <b>不是可选的优化，是前置条件</b>：
- * starter 的两支同名 @Bean 只带 {@code @ConditionalOnProperty(z.base.db.schedule.disabled)}、
- * 没有 {@code @ConditionalOnMissingBean}，而 Boot 2.1+ 默认禁止同名 bean 覆盖 ⇒ 不给这一支
- * 就是 {@code APPLICATION FAILED TO START}（2026-09-27 四条命令逐条实测，读数在
- * {@code _doc/003_script/e2e/README.md} §17.2）。本类的旧 javadoc 还列过一个
+ * <p>启动方式：{@code java -jar xxx.jar --spring.profiles.active=dev}（不需要再给
+ * {@code --z.base.db.schedule.disabled=true}）。这条"不用给"是本树的行为：starter 的两支同名
+ * {@code @Bean} 带 {@code @ConditionalOnMissingBean(name = …)}，按名退让给本类。
+ * 仍要给它的是两条旧路——已发布的 1.0.4 字节没有按名退让，而 {@code cd z-schedule-admin && mvn
+ * spring-boot:run} 的依赖正由 {@code ~/.m2} 解析（2026-09-27 四条命令逐条实测，读数在
+ * {@code _doc/003_script/e2e/README.md} §17.1，修复前后的成对读数在 §19）。
+ * 反过来，{@code disabled=true} 也不是"少给一支 bean"的开关：它把两支一起摘掉，而类上那句
+ * {@code @MapperScan} 引用 {@code sqlSessionFactorySchedule} 是无条件的 ⇒ 设了旗却只补
+ * {@code DataSource} 这一格两版字节都起不来。
+ * 本类的旧 javadoc 还列过一个
  * {@code removeStarterDataSourceBean()}（说它用 BeanDefinitionRegistryPostProcessor 提前摘掉
  * starter 的定义）—— 那个方法<b>从来没被写进过这个文件</b>（{@code git log -S} 追到建文件那一版
  * c8e3a8f 也只有 javadoc 里这一处），连带四个 import 一起是空口机制，已删。

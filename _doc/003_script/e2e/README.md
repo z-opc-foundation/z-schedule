@@ -1774,3 +1774,137 @@ compose 后端 service 块的容器侧端口、集群版 healthcheck URL、k8s `
 - **没做的**：pom 不传 `VITE_BASE` 这件事本身没改——对**容器部署**它是对的（`SERVER_SERVLET_CONTEXT_PATH=/meta`
   与之一致），本机那条路要不要做成"零配置也看得见"属于 #32（等点头）。
   A16 只保证"改任何一格都会在 CI 里红"，不替谁决定那个值该是多少。
+
+---
+
+## 19 #41 落地：starter 那两支同名 `@Bean` 改成「按名退让」
+
+§17.1 的 m3 那一格（当时登记为「#41 待裁定」）在这一节闭掉。产品字节只加了两个注解，
+但"改 starter"意味着本树与**已发布的 1.0.4 同坐标不同字节** ⇒ 前/后读数必须成对留档，
+否则下一个人分不清他跑的是哪份字节。探针与日志都在 `~/.cache/zs41/`（不在仓里）：
+`Probe41.java` + `run_probe.py`（每形状单独一个 JVM，否则一个卡住会遮住后面所有读数）、
+`boot_admin.py`（真应用两组的对照）。
+
+### 19.1 形状 × 前后
+
+| 形状 | 修复前 | 修复后 |
+|---|---|---|
+| B1 真 `SpringApplicationBuilder` + `@ImportAutoConfiguration`，宿主只给同名 `dataSourceSchedule`，**不设旗** | `THREW BeanDefinitionOverrideException :: Invalid bean definition with name 'dataSourceSchedule' defined in class path resource [com/zifang/z/schedule/web/config/ZScheduleAutoConfiguration.class]` ⇒ 被拒的是 **starter 自己那支** | `STARTED overriding=false dsNames=[dataSourceSchedule] dsImpl=org.h2.jdbcx.JdbcDataSource sfCount=1 mapperCount=1` |
+| B3 同上，但宿主两支同名都给（= admin 的 dev 形状），不设旗 | 同 B1 红 | `STARTED … dsImpl=org.h2.jdbcx.JdbcDataSource sfCount=1` |
+| R3 starter 先注册、宿主后注册（`@Import(ZScheduleAutoConfiguration.class)` 那条路） | 红，被拒的是 `Probe41$Host` 那一条 | **不变**（19.4-①） |
+| R2/B2 设 `disabled=true`、宿主只给一支 DataSource | `NoSuchBeanDefinitionException: No bean named 'sqlSessionFactorySchedule' available`（挂在 `jobLeaderMapper`） | **不变**（19.4-②） |
+| E1 Boot 的 `allowBeanDefinitionOverriding` 到底默认是什么 | `false` —— 真起一次容器读出来的，不是查文档 | 同 |
+
+### 19.2 交付的尺：`z-schedule-spring-boot-starter/src/test/java/com/zifang/z/schedule/wiring/ZScheduleDataSourceOverrideTest.java`（8 例）
+
+**牙在哪**：`cp` 出副本 → 把两支 `@ConditionalOnMissingBean(name = …)` 摘掉 → 重量 → `cp` 还原 →
+`md5 bb2efd6ebbe17df3ff3431b287fca05a` 对账。摘掉之后（08:16:31）**恰好 3 例红**：
+
+- `宿主同名替身不必再设_disabled_就能起` → `BeanDefinitionOverride`（缺陷本身）
+- `宿主给了同名替身时_留下的定义必须是宿主那一支` → 同一件事的定义级断言
+- `两支条件必须是按名而不是按类型` → 注解整条不见了
+
+另外 5 例在两版字节下都是绿的，因为它们钉的是这次改动**不该动**的东西：Boot 默认旗、
+"宿主只有异名 DataSource 时 starter 必须自建"、`disabled=true` 那一格的现状、
+`@Import` 顺序的残余缺口、以及"同类里 `sessionStore` 是按类型的"这根阳性对照。
+
+两个值得留下来的写法：
+
+- **只看 bean 定义、不实例化**：注册一支不带 `PriorityOrdered` 的 `BeanFactoryPostProcessor`，
+  它在 `ConfigurationClassPostProcessor`（定义全部登记完）之后、任何单例实例化之前抛哨兵异常。
+  哨兵自带反证 —— 容器若一路实例化到底，直接 `AssertionError("哨兵没生效…定义集合不可信")`，
+  否则"定义不存在"可能只是停得太早。
+- **为什么必须按名而不是按类型**：写成 `@ConditionalOnMissingBean(DataSource.class)` 时
+  第一例照样绿（宿主那支确实是 DataSource），但宿主一旦自带主库，调度库就被**静默**摘掉 ——
+  症状从"起不来"退化成"起来了但没有调度域"，比原缺陷难查得多。所以结构守卫直读注解：
+  `name = {<bean 名>}` 且 `value().length + type().length == 0`。
+
+### 19.3 真应用那一半：同一个 admin 主类，两条 classpath 对照
+
+`java -cp` 跑 `com.zifang.z.schedule.admin.ZScheduleAdminApplication`，参数只有
+`--spring.profiles.active=dev` 与一个 `bind(0)` 量来的空闲 `--server.port`，**不给**旗，
+开 `-verbose:class` 做归属：
+
+| 组 | 本树 starter 在不在 `-cp` 里 | 读数 |
+|---|---|---|
+| A | 在（`z-schedule-spring-boot-starter/target/classes` 排在 m2 之前） | `08:19:57.862 … Tomcat started on port(s): 61263 (http) with context path ''`，且 `-verbose:class` 印出 `…ZScheduleAutoConfiguration source: file:/…/z-schedule-spring-boot-starter/target/classes/` |
+| B | 不在（把那两个 reactor 目录换成不存在的目录 ⇒ 只剩 m2 里那份 1.0.4 jar） | `APPLICATION FAILED TO START` / `The bean 'dataSourceSchedule', defined in class path resource [com/zifang/z/schedule/web/config/ZScheduleAutoConfiguration.class], could not be registered. A bean with that name has already been defined in class path resource […]` |
+
+⇒ 修的是**本树**。`cd z-schedule-admin && mvn spring-boot:run`（不带 `-am`，依赖由 `~/.m2` 解析）
+跑的仍是旧字节，那面旗在那条路上**照旧是前置条件**；抬版 1.0.5 + 发布要单独点头（#13 同口径）。
+⚠ 顺带一条 m2 现状：`~/.m2/repository/io/github/yuku123/z-schedule-{core,spring-boot-starter}/1.0.4/`
+（09-26 14:02 那份）现在比本树**旧**，同坐标不同字节 —— 这正是 L3 那条"真门禁要先删 m2 子树再 build"的成因。
+
+### 19.4 顺手抓到的四格
+
+① **`@Import` 顺序救不了**：被 `@Import` 的配置按普通配置**先**解析，于是条件判定早于宿主自己的
+`@Bean`，条件注解无从退让，被拒的反而是宿主那一条（R3 前后都红）。这一格已经写成用例
+`starter_先注册时条件注解救不了这一格`，是残余缺口的机器可读记录 —— z-opc 的 main-starter 真的在拿
+`@Import` 当 `spring.factories` 的安全网，那条路要么改 `@EnableAutoConfiguration`，要么继续给旗。
+
+② **`disabled=true` 从来不是"少给一支 bean"的开关**：两条 `@ConditionalOnProperty` 一起把
+`sqlSessionFactorySchedule` 也摘掉，而类上那句 `@MapperScan(sqlSessionFactoryRef = "sqlSessionFactorySchedule")`
+是**无条件**的 ⇒ 五个 mapper 引用一个不存在的 bean。所以旗 + 只给 DataSource = 起不来（前后一样）。
+旗真正省不掉的是"宿主两支同名 bean 全补齐"这个要求；本次改完之后，**给旗这条路反而不再是唯一路**。
+
+③ **测试夹具不许住在被扫描的包里**（这次三例假红/假错的根因）：`ZScheduleAlarmServiceWiringTest`
+（#22）的嵌套 `@Configuration` / `@Component` 被 starter 的 `@ComponentScan("com.zifang.z.schedule.web")`
+从 `target/test-classes` 里捡进了**别的**用例 —— 原样报错：
+`NoUniqueBeanDefinitionException: No qualifying bean of type 'AlarmService' available: expected single matching bean but found 2: hostAlarm,lateHostAlarm`
+与 `Error creating bean with name 'ZScheduleAlarmServiceWiringTest.InjectPoint'`。
+两个装配测试因此移到 `com.zifang.z.schedule.wiring`（扫描面之外），移动前后 `ZScheduleAlarmServiceWiringTest`
+都是 4 例绿。⇒ 同一条对下游宿主成立：谁把带组件注解的类放进 `com.zifang.z.schedule.web.*` 之下，
+starter 就会把它扫进容器。
+
+④ **陈旧 surefire XML 抬分母**：换包名之后 `target/surefire-reports/` 里留着两份永远不会再被覆写的
+`TEST-com.zifang.z.schedule.web.config.*`，直接聚合得 **340 例 / 3 红**，而构建日志真值是
+`45 + 277 + 6 = 328 / 0`；差的 12 例、3 红正好对应那两份（mtime `08:14:24` 的变异跑 + `05:57:35` 的旧包名跑）。
+⇒ 聚合脚本改成按 mtime 卡本次运行起点，并把 fresh / raw 两列一起印出来，别再让陈旧文件冒充读数。
+
+### 19.5 基线与改动面
+
+全量 reactor（同机串行；跑前 `ps` 确认没有别的会话的 maven/surefire）：
+`mvn -B -o test` 08:17:22 → 08:17:52，**328 例 / 0 失败**（core 45 + starter 277 + admin 6）。
+本次新增 8 例 ⇒ 改动前那版树是 320 例（这句是算术，不是另一次实测）。
+
+- **产品字节**：`ZScheduleAutoConfiguration` 两支 `@Bean` 各加 `@ConditionalOnMissingBean(name = …)` 与注释（+5 行）。
+- **测试**：新增 `ZScheduleDataSourceOverrideTest`（8 例）；`ZScheduleAlarmServiceWiringTest` 换包（仍 4 例）。
+- **文档面**：根 `README.md`「三条跑起来的路」第三行、`_doc/001_arch/z-schedule-admin.md`「本地启动」
+  （含「dev profile 的两条前置」第 1 条整段重写）、`application-dev.yml` 头注释、
+  `DevDataSourceConfig` 与 `ZScheduleAutoConfiguration` 的类 javadoc 里那句"必须给旗"改成**分版本口径**
+  （本树不用给；用已发布 1.0.4 仍要给；只给一支 DataSource 时两版都不行）。改完的复跑见 19.6。
+- **没做的**：`@MapperScan` 仍无条件（把它挂到旗下面，admin 的 dev 路会整片丢 mapper）；
+  `disabled=true` 那一格保持现状并被用例钉住；没抬 `<revision>`、没发 Central、没动 m2。
+
+### 19.6 文档面落地后的三条复验（2026-09-27 08:28–08:33，本机）
+
+改文档不许只靠"我看着对"——这一节那四格读数就是文档现在写出去的话，得重新量一遍：
+
+1. **`-am` 出的 exec jar 真的带着修复字节**（不是"我以为 fat jar 里是新的"）：
+   `mvn -B -o -pl z-schedule-admin -am package -DskipTests` 后，从 fat jar 里剥出
+   `BOOT-INF/lib/z-schedule-spring-boot-starter-1.0.4.jar`、`javap -v` 读那两支方法的注解，
+   得到 `ConditionalOnMissingBean(name=["dataSourceSchedule"])` 与
+   `ConditionalOnMissingBean(name=["sqlSessionFactorySchedule"])`。
+   ⚠ 光看条目时间会被骗：reproducible build 把 nested jar 的 entry 时间归一成了 `09-27 00:36`
+   （比这次构建还早），所以归属只能按注解字节读，不能按 mtime。
+2. **方式 B 那条命令，不给旗**（`java -jar *-exec.jar --spring.profiles.active=dev
+   --server.port=<bind(0) 现取> --server.servlet.context-path=/meta`）：
+   `08:28:47.213 … Tomcat started on port(s): 50974 (http) with context path '/meta'` +
+   `Started ZScheduleAdminApplication in 2.208 seconds`；逐路径 `/meta/` 200 len=417、
+   `/meta/actuator/health` 200 len=49、`/meta/jobinfo/list` 500 len=118、
+   `/meta/dashboard/stats` 500 len=121、`/` 404，日志里 table-not-found 命中 17 行
+   ⇒ **H2 空库那一格没被这次改动修掉**（它是 #32，等拍板）。驱动在
+   `~/.cache/zs41/boot_b_noflag.py`（不在仓里），跑完 killpg 并 `lsof` 复扫确认端口已释放。
+3. **尺与被测面一起重量**：`P24_A_ONLY=1 bash p24.sh` → `PASS=23 FAIL=0`（08:31:50，
+   A14/A15/A16 三支都在里面）。这一跑 A15 的三根分母与判红数是：**扫到 21 条** `mvn` 逻辑行、
+   含点长选项 **0**；**3 处** `-Dspring-boot.run.arguments=` 取值段、用逗号的 **0**；
+   **30 个** `{@link #成员}`、幽灵 **0**（分母 21 与 §18.5 那一格相同 ⇒ 这次改文档没把
+   命令行数堆上去，也没往围栏里塞坏形状）；
+全量 reactor `mvn -B -o test` 08:32:56 → 08:33:26 = **328 例 / 0 失败**
+   （core 45 + starter 277 + admin 6，先 `rm -rf */target/surefire-reports` 再跑 ⇒ 陈旧 XML 0 份，
+   19.4-④ 那条不再有机会）。
+   ⚠ 中途一次假绿：`-Dtest='A+B'` 的 `+` 分隔符不被 surefire 认，配
+   `-Dsurefire.failIfNoSpecifiedTests=false` 就是 **BUILD SUCCESS 而零条测试**（Total time 2 s）。
+   换成逗号后同一支命令才真跑出 `Tests run: 12`（8 + 4）。凡是"指定测试"的复跑，判据是
+   `Tests run:` 那一行，不是 rc。
+

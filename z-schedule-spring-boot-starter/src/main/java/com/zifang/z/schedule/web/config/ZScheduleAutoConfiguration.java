@@ -45,8 +45,11 @@ import java.util.Map;
  *   <li>依赖 {@code z-boot-datasource-starter} + Druid 数据源</li>
  * </ul>
  *
- * <p><b>Dev profile 支持</b>：当 {@code z.base.db.schedule.disabled=true} 时，
- * {@link #dataSourceSchedule} Bean 不创建，由 admin 端提供 H2 等替代 DataSource（同名 @Bean）。
+ * <p><b>Dev profile 支持</b>：宿主可以只提供替身、不必再关本模块。{@code dataSourceSchedule} 与
+ * {@code sqlSessionFactorySchedule} 各带一支 {@code @ConditionalOnMissingBean(name = …)}，
+ * 按 <b>bean 名</b>退让（admin 的 {@code DevDataSourceConfig} 就是靠这两支同名 @Bean 换 H2）。
+ * 仍保留 {@code z.base.db.schedule.disabled=true}：它是"宿主只补齐两支同名 bean 里的一支"时唯一
+ * 能让 starter 整段不注册的路，也是已发布 1.0.4 那条路（见 {@code _doc/003_script/e2e/README.md} §19）。
  *
  * <p><b>为什么自带 {@code @EnableScheduling}</b>：Leader 续约（{@code LeaderElector.elect}）与
  * 周期 reconcile（{@code JobTriggerServiceImpl.reloadRunningJobs}）都挂在 {@code @Scheduled} 上，
@@ -132,9 +135,13 @@ public class ZScheduleAutoConfiguration extends ModuleDataSourceTemplate {
     /**
      * 生产 / 默认环境：starter 自建 Druid + MySQL DataSource。
      * 用 {@code z.base.db.schedule.disabled=false}（或不设）启用。
+     *
+     * <p>{@code @ConditionalOnMissingBean(name = ...)} 是按 <b>bean 名</b> 退让，不是按类型：
+     * 宿主往往自己就有主 {@code DataSource}，按类型退让会让本模块永远建不出调度库。
      */
     @Bean(name = "dataSourceSchedule")
     @ConditionalOnProperty(name = "z.base.db.schedule.disabled", havingValue = "false", matchIfMissing = true)
+    @ConditionalOnMissingBean(name = "dataSourceSchedule")
     public DataSource dataSourceSchedule(Environment env) {
         applySchedulePoolDefaults(env);
         return buildDataSource(env, "schedule");
@@ -172,6 +179,7 @@ public class ZScheduleAutoConfiguration extends ModuleDataSourceTemplate {
 
     @Bean(name = "sqlSessionFactorySchedule")
     @ConditionalOnProperty(name = "z.base.db.schedule.disabled", havingValue = "false", matchIfMissing = true)
+    @ConditionalOnMissingBean(name = "sqlSessionFactorySchedule")
     public SqlSessionFactory sqlSessionFactorySchedule(
             @org.springframework.beans.factory.annotation.Qualifier("dataSourceSchedule")
             DataSource dataSourceSchedule) throws Exception {

@@ -1,5 +1,10 @@
-package com.zifang.z.schedule.web.config;
+package com.zifang.z.schedule.wiring;
 
+// 夹具必须留在这个包里：ZScheduleAutoConfiguration 的 @ComponentScan 覆盖
+// com.zifang.z.schedule.web 整个命名空间，宿主（以及本模块 target/test-classes）里
+// 该包下任何带组件注解的类都会被扫成 bean。见 README §19。
+
+import com.zifang.z.schedule.web.config.ZScheduleAutoConfiguration;
 import com.zifang.z.schedule.core.model.JobInfo;
 import com.zifang.z.schedule.core.model.JobLog;
 import com.zifang.z.schedule.web.service.AlarmService;
