@@ -1,5 +1,6 @@
 package com.zifang.z.schedule.web.config;
 
+import com.alibaba.druid.pool.DruidDataSource;
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import com.zifang.z.boot.datasource.starter.ModuleDataSourceTemplate;
 import com.zifang.z.schedule.core.config.ScheduleProperties;
@@ -12,6 +13,7 @@ import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
@@ -26,6 +28,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import javax.sql.DataSource;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Properties;
 
 /**
  * z-schedule-web AutoConfiguration (供 main-starter embed).
@@ -144,7 +147,78 @@ public class ZScheduleAutoConfiguration extends ModuleDataSourceTemplate {
     @ConditionalOnMissingBean(name = "dataSourceSchedule")
     public DataSource dataSourceSchedule(Environment env) {
         applySchedulePoolDefaults(env);
-        return buildDataSource(env, "schedule");
+        DataSource ds = buildDataSource(env, "schedule");
+        applyDriverConnectTimeouts(ds, env);
+        return ds;
+    }
+
+    /**
+     * 物理连接的默认时间界。<b>两个都给</b>，但一个的量在 5 s、一个的量在 60 s，理由见
+     * {@link #applyDriverConnectTimeouts}。
+     */
+    static final int DEFAULT_SCHEDULE_CONNECT_TIMEOUT_MILLIS = 5000;
+
+    /**
+     * 读超时默认 60 s —— 不是"关"。依据与代价都写在该方法的注释里；设 0 = 显式退回"读无限等"。
+     */
+    static final int DEFAULT_SCHEDULE_SOCKET_TIMEOUT_MILLIS = 60000;
+
+    /**
+     * 给调度池的 JDBC 驱动补上 {@code connectTimeout} / {@code socketTimeout}。
+     *
+     * <p><b>两种"连不上库"的形状，界在不同的地方</b>（这一句是 2026-09-27 被自己的测例纠正过来的，
+     * 原先这里写的是错的机制）：
+     * <ul>
+     *   <li><b>池空、要新建物理连接</b>：Druid 的调用线程等 {@code maxWait}，到点抛错。
+     *       实测（{@code ZSchedulePoolConnectTimeoutTest#池空形状下maxWait就是那道界}）：
+     *       {@code max-wait=1000} + 黑洞端口 ⇒ 1024 ms 抛。这一形状<b>不</b>需要本节的旋钮。</li>
+     *   <li><b>借到一条对端已经不回包的老连接</b>：{@code test-on-borrow} 是关的（刻意的，
+     *       见 {@code ModuleDataSourceTemplate} 那段保活注释），借出<em>瞬间成功</em>，
+     *       没有任何 {@code maxWait} 在前面 —— 查询的第一个读包就是无界的。
+     *       线上量到的正是这一档：{@code /jobinfo/list} 连续 30 s、75 s、90 s 三次都无应答，
+     *       而两个池的 {@code max-wait} 都是 60 s（读数与复跑见
+     *       {@code _doc/003_script/e2e/README.md} §23）。<b>{@code maxWait} 解释不了它，
+     *       {@code socketTimeout} 能。</b></li>
+     * </ul>
+     *
+     * <p><b>为什么默认 60 s 而不是"开着怕砍查询"</b>：250 真机基线里最慢的合法落库语句是
+     * 十几到几十毫秒量级（见 §4.2 那组 17–50 ms），60 s 是三个数量级的余量；而"不设"的代价就是
+     * 上面那一档：一个请求线程 + 一条连接永久悬住，来一个悬一对，最后整张管理面跟着死。
+     * 嫌它长的部署按 {@code z.base.db.schedule.socket-timeout-millis} 调，设 0 退回旧行为。
+     *
+     * <p>⚠ 诚实记账：<b>第二种形状本机没能复现</b> —— 它要一个真会讲 MySQL 协议、又能"中途变哑"的
+     * 服务端，测例里造不出来（测例只量到了第一种形状 + {@code max-wait=-1} 时无限等这一对）。
+     * 所以 60 s 这个数是<b>按已知最慢合法语句留余量定的，不是量出来的</b>。
+     *
+     * <p>两个键都走和池参数<b>同一套</b>优先级链：模块键 {@code z.base.db.schedule.*} &gt;
+     * 全局兜底 {@code z.base.db.default.*} &gt; 本模块默认值。非 Druid 的替身原样放过。
+     */
+    void applyDriverConnectTimeouts(DataSource ds, Environment env) {
+        if (!(ds instanceof DruidDataSource)) {
+            return;
+        }
+        Binder binder = Binder.get(env);
+        int connectMillis = getOrDefault(binder,
+                "z.base.db.schedule.connect-timeout-millis",
+                "z.base.db.default.connect-timeout-millis",
+                DEFAULT_SCHEDULE_CONNECT_TIMEOUT_MILLIS);
+        int socketMillis = getOrDefault(binder,
+                "z.base.db.schedule.socket-timeout-millis",
+                "z.base.db.default.socket-timeout-millis",
+                DEFAULT_SCHEDULE_SOCKET_TIMEOUT_MILLIS);
+
+        DruidDataSource dd = (DruidDataSource) ds;
+        Properties merged = new Properties();
+        if (dd.getConnectProperties() != null) {
+            merged.putAll(dd.getConnectProperties());
+        }
+        if (connectMillis > 0) {
+            merged.setProperty("connectTimeout", String.valueOf(connectMillis));
+        }
+        if (socketMillis > 0) {
+            merged.setProperty("socketTimeout", String.valueOf(socketMillis));
+        }
+        dd.setConnectProperties(merged);
     }
 
     /**
