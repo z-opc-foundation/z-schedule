@@ -61,9 +61,10 @@ public class DefaultAlarmService implements AlarmService {
         // 本类没有任何邮件通道：历史上这里是一句 TODO 却把 alarm_status 置成 2（DDL 注释里
         // 2 = 告警成功），于是管理台会把一条从未发出的告警显示成"成功"。改成 3（告警失败）,
         // 因为站在运维的视角，"配了邮箱却没人发"就是一次失败的告警。
-        // 注意：本类是裸 @Service 由组件扫描装配的，自动装配里没有 @ConditionalOnMissingBean，
-        // 所以宿主自己再注册一个 AlarmService 并不会"覆盖"它——两个同类型候选会让
-        // JobTriggerServiceImpl 的按类型注入直接启动失败。想真接邮件得先补那个扩展点。
+        // 装配面（本类刻意<b>不</b>挂 @Service，见类 javadoc）：由
+        // {@code ZScheduleAutoConfiguration.AlarmServiceConfiguration} 以 bean 名 {@code alarmService}
+        // + {@code @ConditionalOnMissingBean(AlarmService.class)} 注册 ⇒ 宿主自己注册实现时这一支退让。
+        // 想真接邮件通道：注册自己的 AlarmService 实现即可，不必改本仓源码。
         alarmLog.setAlarmStatus(3);
         log.warn("[z-schedule] job={} 配置了告警邮箱 {}，但内置实现未接入邮件通道，"
                 + "告警未发出（alarm_status=3 告警失败）", jobId, emailList);

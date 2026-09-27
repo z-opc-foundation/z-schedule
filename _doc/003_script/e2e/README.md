@@ -1908,3 +1908,94 @@ starter 就会把它扫进容器。
    换成逗号后同一支命令才真跑出 `Tests run: 12`（8 + 4）。凡是"指定测试"的复跑，判据是
    `Tests run:` 那一行，不是 rc。
 
+
+---
+
+## 20. #43：19.4-③ 那一格从"文档记一句"升级成尺
+
+挪包名只是把病治好了，没有任何机械的东西拦着下一个人把带组件注解的夹具放回
+`com.zifang.z.schedule.web.*` 之下 —— 而放回去的症状（别的用例莫名其妙红、宿主起不来）
+看起来跟"夹具放在哪"毫无关系。所以补一层结构守卫：
+`z-schedule-spring-boot-starter/src/test/java/com/zifang/z/schedule/wiring/ZScheduleScannedNamespaceTest.java`。
+
+### 20.1 判据与两把对照
+
+- **判据**：`PathMatchingResourcePatternResolver` 取 `classpath*:com/zifang/z/schedule/web/**/*.class`，
+  只留 URL 里含 `/target/test-classes/` 的那些，逐个用 `CachingMetadataReaderFactory` **读字节码**
+  问 `hasAnnotation(Component)` 或 `hasMetaAnnotation(Component)`。
+  与 Spring 自己扫描时同一套做法（`AnnotationTypeFilter` 也算元注解），且不把类加载进这个 JVM
+  —— 夹具的静态初始化有副作用，"量它的尺把它跑起来"是另一回事。
+- **对照一（分母）**：`test-classes` 下一个 `.class` 都没找到就当场 `assertTrue` 响。
+  这一句挡的是"整棵测试树被挪空 / 包名一改 pattern 对不上"这两种会让判据**恒真**的形状。
+  两个分母由用例自己打成一读数行（绿跑里没有别的东西会印它）：
+  `NSPROBE fixtureClasses=80 prodViaMeta=7 prodDirect=0 offenders=0`（08:41:02），
+  其中 `fixtureClasses` 拿 `find z-schedule-spring-boot-starter/target/test-classes/com/zifang/z/schedule/web -name '*.class' | wc -l`
+  独立对过 = **80**（两把尺同数才算数，只有用例自己印的话，"扫到 0"与"扫到 80"都可能只是 pattern 的事）。
+  实测扫到 **164** 个夹具 `.class`（08:39:08 那一跑），判红 0。
+- **对照二（元注解这条路真的有样本）**：同一份尺去读 `web/service/impl/` 下的**生产**类，
+  要求"经元注解命中 @Component"的个数 > 0 —— 真样本是那 7 支 `@Service`
+  （`DefaultAlarmService` 刻意不挂，见 #22）。少了这一支，判据可能只对直挂 `@Component` 的
+  夹具有效，而生产侧全是 `@Service` / `@RestController` 这种元注解形状。
+
+### 20.2 一次猎物自证（这支尺到底认不认得出病）
+
+临时写下述文件到 `src/test/java/com/zifang/z/schedule/web/service/impl/PreyScannedFixture.java`
+（两支类，一支直挂 `@Component`、一支 `@Service`），只跑这一支用例：
+
+```
+$ mvn -B -o -pl z-schedule-spring-boot-starter -am test \
+      -Dtest='ZScheduleScannedNamespaceTest' -Dsurefire.failIfNoSpecifiedTests=false   # 08:39:26，rc=1
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0 <<< FAILURE! -- in com.zifang.z.schedule.wiring.ZScheduleScannedNamespaceTest
+这些测试夹具带着组件注解，会被 starter 的 @ComponentScan("com.zifang.z.schedule.web") 扫进真实容器（含宿主）：
+  com.zifang.z.schedule.web.service.impl.PreyScannedComponentFixture  (file:/…/target/test-classes/…/PreyScannedComponentFixture.class)
+  com.zifang.z.schedule.web.service.impl.PreyScannedServiceFixture  (file:/…/target/test-classes/…/PreyScannedServiceFixture.class)
+```
+
+两种形状各点名一次 —— 元注解那支被抓到，说明**判红那一条 `if`** 也认元注解，不只是对照二里
+读生产类的那一步。删掉源文件与它的 `.class`（`find z-schedule-spring-boot-starter -name 'PreyScanned*'` → **0**）后复跑 08:39:38 → 绿。
+猎物只活在 `target/` 与这段记录里，没进过 git。
+
+### 20.2b 元注解这条路本身先被独立验过一次（不靠猎物）
+
+对照二读的是真生产类，但"读得动"与"读得出形状"是两件事 —— 后者单独量了一遍：`javap -v`
+`target/classes/com/zifang/z/schedule/web/service/impl/` 下 8 个类，看类级注解是
+`RuntimeVisibleAnnotations` 里的 `Lorg/springframework/stereotype/Service;` 还是
+`Lorg/springframework/stereotype/Component;`：
+
+```
+$ cd z-schedule-spring-boot-starter/target/classes/com/zifang/z/schedule/web/service/impl && javap -v *.class
+@org.springframework.stereotype.Service : 7      ← 全部是"元注解 @Component"那一类
+直挂 @Component                        : 0
+裸类（无类级注解）                      : 1  → DefaultAlarmService.class
+```
+
+⇒ 尺读出的 `prodViaMeta=7 / prodDirect=0` 与这份字节码清单逐项相同，`DefaultAlarmService`
+那一支"刻意不挂"也在数里（它要是哪天被挂回 `@Service`，`prodViaMeta` 会变 8，而 #22 的
+`兜底实现不得被组件扫描捡起` 那一例同时会红 —— 两把尺各看一侧）。
+⚠ 第一次跑这条对照时我在 z-schedule **仓根**敲的相对路径，`*.class` 没展开 ⇒ 打印出 0/0/无，
+看着像"注解根本读不出来"。判"读不到"之前先确认 glob 真的有匹配（`ls` 同一条路径）。
+
+
+### 20.3 顺手抓到的一格：`DefaultAlarmService` 里那句装配注释在骗人
+
+`sendAlarm` 内部第 64 行原本写着"本类是裸 `@Service` 由组件扫描装配的，自动装配里**没有**
+`@ConditionalOnMissingBean`……想真接邮件得先补那个扩展点"。两句都不成立：类 javadoc 第 16 行
+自己就说"**故意不带** `@Service`"，而 #22 已经把扩展点补在 `AlarmServiceConfiguration` 上
+（`@ConditionalOnMissingBean(AlarmService.class)`）。这是 #22 改了装配、没回头改注释留下的
+一段"广告旧缺陷"——读注释的人会以为扩展点还不存在，从而去改本仓源码。改成指向真实装配面。
+
+⚠ 这一格的性质与 §17/§18 那几格相同：**注释与 javadoc 也是广告面**。javac 不读注释，
+所以它不会因为说错话而归零，只有人（或 A15 那类扫注释的尺）能抓。A15 现在管 `{@link #成员}`
+的幽灵引用，管不了这种"句子描述错了机制"的 —— 那条要真做得先有"注释承诺 == 代码事实"的判据，
+本档没做，记账在这里。
+
+### 20.4 基线与改动面
+
+- 全量 reactor（跑前 `rm -rf */target/surefire-reports`，同机串行）：`mvn -B -o test`
+  08:41:59 → 08:42:30 = **329 例 / 0 失败 / 陈旧 XML 0 份**
+  （core 45 + starter 278 + admin 6；比 §19.6 那次多 1 例，多的就是本节的守卫）。
+- `P24_A_ONLY=1 bash p24.sh`：`PASS=23 FAIL=0`（08:42:38）。A15 的 `mvn` 逻辑行分母
+  21 → **22**（本节那条复跑命令写在围栏里，是被正确扫到的那一种），含点长选项仍 **0**、
+  `arguments` 逗号 **0**、`{@link #成员}` 30 个不变（守卫用例在 `src/test`，A15 只扫 `src/main`）。
+
+- 产品字节：只改了 `DefaultAlarmService` 的三行注释（无语句变化）。
