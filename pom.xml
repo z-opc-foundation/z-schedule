@@ -260,6 +260,10 @@
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>central</publishingServerId>
+                            <!-- 本插件不认 maven.deploy.skip，admin 仍会进 bundle，必须显式排除 -->
+                            <excludeArtifacts>
+                                <excludeArtifact>z-schedule-admin</excludeArtifact>
+                            </excludeArtifacts>
                             <tokenAuth>true</tokenAuth>
                             <autoPublish>true</autoPublish>
                             <waitUntil>uploaded</waitUntil>
