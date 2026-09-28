@@ -42,7 +42,7 @@
             发版前同步更新本字段（或改用 ${revision} 显式注入，见 V1 验证记录）。
         -->
         <z-schedule.version>1.0.4</z-schedule.version>
-        <z-boot.version>1.0.16</z-boot.version>
+        <z-boot.version>1.0.17</z-boot.version>
         <z-util.version>1.0.10</z-util.version>
 
         <!--

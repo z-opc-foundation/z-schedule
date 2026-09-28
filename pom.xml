@@ -84,7 +84,7 @@
         <mybatis-plus.version>3.5.7</mybatis-plus.version>
 
         <!-- 内部依赖 -->
-        <z-boot.version>1.0.16</z-boot.version>
+        <z-boot.version>1.0.17</z-boot.version>
         <z-util.version>1.0.10</z-util.version>
 
         <!-- Maven 插件版本 -->
