@@ -84,7 +84,7 @@
 
     <properties>
         <!-- CI-friendly 版本根 (发版改这一处即可) -->
-        <revision>1.0.5</revision>
+        <revision>1.0.6</revision>
 
         <!-- 版本口径由 parent 链下发。删掉的每一格都连带删掉了它在 4 个 pom 里的全部引用
              （引用没删干净会在子 pom 上炸成 "'dependencies.dependency.version' … must be a valid version"）：

@@ -41,7 +41,7 @@
             必须与 z-schedule 顶层 pom 的 <revision> 保持一致（V1 留 reactor 后会参与 reactor 解析）。
             发版前同步更新本字段（或改用 ${revision} 显式注入，见 V1 验证记录）。
         -->
-        <z-schedule.version>1.0.5</z-schedule.version>
+        <z-schedule.version>1.0.6</z-schedule.version>
         <z-boot.version>1.0.17</z-boot.version>
         <z-util.version>1.0.13</z-util.version>
 
