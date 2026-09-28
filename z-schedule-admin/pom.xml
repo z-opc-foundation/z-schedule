@@ -43,7 +43,7 @@
         -->
         <z-schedule.version>1.0.5</z-schedule.version>
         <z-boot.version>1.0.17</z-boot.version>
-        <z-util.version>1.0.10</z-util.version>
+        <z-util.version>1.0.13</z-util.version>
 
         <!--
             admin 是 standalone demo + docker 镜像源，永远不上 Maven Central。
