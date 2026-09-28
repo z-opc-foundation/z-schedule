@@ -76,7 +76,9 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- 第三方版本 -->
-        <spring-boot.version>2.7.12</spring-boot.version>
+        <!-- 2026-09-28「同坐标单版本」：2.7.12 → 2.7.18（2.7 线最后一版，Java 8 可用），
+             与 z-boot-dependencies 1.0.18 / z-opc 根 pom 同一口径；12→18 含 CVE 修复，纯上行。 -->
+        <spring-boot.version>2.7.18</spring-boot.version>
         <druid.version>1.2.18</druid.version>
         <mysql.version>8.0.33</mysql.version>
         <log4j2.version>2.20.0</log4j2.version>
