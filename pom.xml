@@ -5,9 +5,17 @@
     <modelVersion>4.0.0</modelVersion>
 
     <!--
-        z-schedule 自包含 parent — 不依赖 monorepo 内部 parent,
-        改造为 io.github.yuku123 namespace (Maven Central 命名空间).
-        使用 ${revision} (CI-friendly versions) + flatten-maven-plugin 发版自动替换.
+        z-schedule 根 pom：消费入口统一走 io.github.yuku123:z-boot-parent:1.0.19（1.0.19 起全组织口径）。
+        一条 parent 白拿 ① 第三方地板 z-boot-dependencies:1.0.19 ② 兄弟仓权威 z-boot-fleet:1.0.0
+        ③ Java 8 的 pluginManagement（compiler source/target 8、surefire/jar/resources 兜版本）。
+        迁移前这里**没有** <parent>（根 pom 自包含，11 个版本键自己摊），所以"换台机器能不能构建"
+        一直靠 ~/.m2 的巧合；对外发出去的件是 flatten oss 的自包含 pom（现读 repo1：
+        z-schedule / z-schedule-core / z-schedule-spring-boot-starter 的 1.0.4 与 1.0.5 六份 pom
+        的 <parent> 计数全为 0、com.zifang 计数全为 0、无悬空 ${...}）⇒ 加了 parent 之后
+        必须由本仓自己常开 flatten(oss) 才保得住那个形状（见下面 build/plugins 那段）。
+        relativePath 必须留空：parent 不在磁盘上，在 repo1。
+        ⚠ 本仓的 Maven 坐标从来是 io.github.yuku123:*（不是 com.zifang:*）；
+          Java 包名 com.zifang.z.schedule.* 是**改名后的合法包名**，与 pom 的 parent 形状无关，不要"顺手修"。
 
         模块结构:
           - z-schedule-core                     : 底层 entity/router/util
@@ -16,8 +24,15 @@
             的注释就是这件事；本行旧措辞写的是"不在 reactor"，与 <modules> 自相矛盾，已改口。
             要复核：mvn -B test 的 reactor 列表里 admin 是第 [4/4] 个模块）；
             它同时 maven.deploy.skip=true、且 parent 是 spring-boot-starter-parent（不继承本 pom 的
-            central profile）⇒ 产物只作 docker 镜像源 / 本地 java -jar 演示，永不上 Maven Central。
+            central profile，也不继承本 pom 新加的 z-boot-parent）⇒ 产物只作 docker 镜像源 / 本地 java -jar 演示，永不上 Maven Central。
     -->
+    <parent>
+        <groupId>io.github.yuku123</groupId>
+        <artifactId>z-boot-parent</artifactId>
+        <version>1.0.19</version>
+        <relativePath/>
+    </parent>
+
     <groupId>io.github.yuku123</groupId>
     <artifactId>z-schedule</artifactId>
     <version>${revision}</version>
@@ -71,41 +86,45 @@
         <!-- CI-friendly 版本根 (发版改这一处即可) -->
         <revision>1.0.5</revision>
 
-        <maven.compiler.source>8</maven.compiler.source>
-        <maven.compiler.target>8</maven.compiler.target>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-
-        <!-- 第三方版本 -->
-        <!-- 2026-09-28「同坐标单版本」：2.7.12 → 2.7.18（2.7 线最后一版，Java 8 可用），
-             与 z-boot-dependencies 1.0.18 / z-opc 根 pom 同一口径；12→18 含 CVE 修复，纯上行。 -->
-        <spring-boot.version>2.7.18</spring-boot.version>
-        <druid.version>1.2.18</druid.version>
+        <!-- 版本口径由 parent 链下发。删掉的每一格都连带删掉了它在 4 个 pom 里的全部引用
+             （引用没删干净会在子 pom 上炸成 "'dependencies.dependency.version' … must be a valid version"）：
+             · maven.compiler.source / maven.compiler.target / project.build.sourceEncoding：父链面值同为
+               8 / 8 / UTF-8（父链的 pluginManagement 里 compiler 的 <source>/<target> 用的就是这两个键），
+               本仓两处 compiler 插件声明一并删掉，口径完全交给父链（class-file major 52 已复验）。
+             · spring-boot.version=2.7.18：地板 import 的是同一格 spring-boot-dependencies:2.7.18
+               （z-boot-dependencies/pom.xml:42）⇒ 键与那条 import 一起删，重复 import 只是 dm 打架的来源。
+             · mybatis-plus.version=3.5.7：fleet 面值同为 3.5.7，且全仓 0 处引用这个键 ⇒ 删。
+             · z-util.version=1.0.13：fleet 按坐标管着 z-util-core/aop/dsl/parser-json 且面值同为 1.0.13 ⇒ 删
+               （键名父链没有不代表坐标没管，判据按坐标，见 README 步骤 3 的 z-vector 那段）。
+             · z-boot.version=1.0.17：z-boot 自家 starter 的版本权威在 z-boot-parent 的 <z-boot.version>
+               =1.0.19（"BEGIN z-boot-self" 那批**直接**条目）⇒ 删键，本仓改吃 1.0.19。
+               这是本次迁移**明确决定要改**的一格（八支已迁仓 z-kb/z-graph/z-cache/z-rpc/z-mq/z-config/
+               z-vector/z-skill 全是这么收的），tree 里 z-boot-web-starter / z-boot-datasource-starter
+               1.0.17 → 1.0.19 及其携带的传递格随之走。
+             · flatten-maven-plugin.version=1.7.3：父链 pluginManagement 供同一格 1.7.3（键名也在父链）
+               ⇒ 删键，下面插件声明里那条 ${flatten-maven-plugin.version} 引用留着、由父链解析。
+             · druid.version=1.2.18：全仓 0 处引用（死键），而迁移前实测有效值本来就是地板的 1.2.23
+               （starter 树里 com.alibaba:druid:1.2.23）⇒ 删键，tree 不动。 -->
         <mysql.version>8.0.33</mysql.version>
         <log4j2.version>2.20.0</log4j2.version>
-        <slf4j.version>1.7.36</slf4j.version>
-        <mybatis-plus.version>3.5.7</mybatis-plus.version>
-
-        <!-- 内部依赖 -->
-        <z-boot.version>1.0.17</z-boot.version>
-        <z-util.version>1.0.13</z-util.version>
-
-        <!-- Maven 插件版本 -->
-        <flatten-maven-plugin.version>1.7.3</flatten-maven-plugin.version>
         <central-publishing-maven-plugin.version>0.7.0</central-publishing-maven-plugin.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
-            <!-- Spring Boot BOM -->
+            <!-- ===== 自家 reactor 坐标逐条钉 ${project.version}（README 步骤 4）=====
+                 不是装饰：继承来的 fleet 把 io.github.yuku123:z-schedule-core /
+                 -spring-boot-starter 钉在 repo1 的发布件（现值 1.0.5，与本仓 <revision> 同格
+                 ⇒ 今天量出来是 no-op），一旦仓内领先于发布件，继承来的 DM 会改写**传递依赖**的版本，
+                 把旧兄弟字节码打进新包里（z-cache 试点实测过 1.3.4/1.3.5 那两种错形状）。
+                 z-schedule-admin 不在这里：它的 <parent> 是 spring-boot-starter-parent，
+                 既不吃本 pom 的 DM，也从没有被任何消费者依赖。 -->
             <dependency>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-dependencies</artifactId>
-                <version>${spring-boot.version}</version>
+                <groupId>io.github.yuku123</groupId>
+                <artifactId>z-schedule</artifactId>
+                <version>${project.version}</version>
                 <type>pom</type>
-                <scope>import</scope>
             </dependency>
-
-            <!-- 内部 module -->
             <dependency>
                 <groupId>io.github.yuku123</groupId>
                 <artifactId>z-schedule-core</artifactId>
@@ -117,25 +136,57 @@
                 <version>${project.version}</version>
             </dependency>
 
-            <!-- 第三方 BOM -->
+            <!-- ===== 本仓面值与父链刻意不同的格：只能写成**直接** DM 条目 =====
+                 （import 进来的 BOM 顶不过继承来的直接 DM，README 步骤 5，z-cache 试点实测）。
+                 留这两格的目的是"零漂移"：下面写的都是迁移前 dependency:tree 的**实测有效值**。 -->
+
+            <!-- MySQL 驱动 8.0.33，地板 1.0.19 那格是 8.4.0（8.4 换了 driver 行为，
+                 不在迁移这一刀里顺手做，同 z-kb 的 mysql 那格）。 -->
+            <dependency>
+                <groupId>com.mysql</groupId>
+                <artifactId>mysql-connector-j</artifactId>
+                <version>${mysql.version}</version>
+            </dependency>
+
+            <!-- log4j2：本仓迁移前**分裂**，两代同时在跑——
+                 log4j-api / -core / -jul / -slf4j-impl = 2.17.2（spring-boot-dependencies 2.7.18 所管的那格，
+                 因为它在本 pom 的 DM 里排在 log4j-bom 之前），
+                 log4j-slf4j2-impl = 2.20.0（Boot 2.7 不管这格，由下面的 log4j-bom 命中）。
+                 地板 1.0.19 把前面四条按坐标**直接**钉在 2.25.4 ⇒ 不逐坐标写直接条目就会静默漂 4 格。
+                 这里按实测有效值钉住（2.17.2），整族抬到地板口径是另一个决定 → 待裁（同 z-kb 的 log4j2 那格）。
+                 ⚠ 别照抄本仓旧的 ${log4j2.version}=2.20.0 来钉这四条：那会把 2.17.2 → 2.20.0，
+                   是"顺手换实现"，不是零漂移。 -->
+            <dependency>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-api</artifactId>
+                <version>2.17.2</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-core</artifactId>
+                <version>2.17.2</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-jul</artifactId>
+                <version>2.17.2</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-slf4j-impl</artifactId>
+                <version>2.17.2</version>
+            </dependency>
+
+            <!-- 第三方 BOM：log4j-bom 留着，它管的是地板不管的那几格（log4j-slf4j2-impl 实测 2.20.0）。
+                 spring-boot-dependencies 与 z-boot-dependencies 两条 import 已删：
+                 前者与地板 import 的是同一格 2.7.18（重复 import 只是 dm 打架的来源），
+                 后者本来就被 parent 链顶替（1.0.17 → 1.0.19，改由 z-boot-parent 的 <parent> 供）。 -->
             <dependency>
                 <groupId>org.apache.logging.log4j</groupId>
                 <artifactId>log4j-bom</artifactId>
                 <version>${log4j2.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>io.github.yuku123</groupId>
-                <artifactId>z-boot-dependencies</artifactId>
-                <version>${z-boot.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>io.github.yuku123</groupId>
-                <artifactId>z-util-core</artifactId>
-                <version>${z-util.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -146,11 +197,16 @@
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>flatten-maven-plugin</artifactId>
                 <version>${flatten-maven-plugin.version}</version>
+                <inherited>true</inherited>
                 <configuration>
                     <updatePomFile>true</updatePomFile>
                     <!-- oss 模式: 子 POM 完全 self-contained,
                          自定义 ${xxx} 属性也会解析, url/licenses/developers/scm 元数据保留.
-                         详见 lead/005_技术架构/004_flatten_maven_plugin_模式选择.md -->
+                         详见 lead/005_技术架构/004_flatten_maven_plugin_模式选择.md
+                         ⚠ 这条必须**常开**在 <build><plugins> 里（不能挂 central profile）：
+                         z-boot-parent 自己那条 flatten 声明是 inherited=false，不会下发；
+                         而本仓在中央上的既有形状就是"parent 计数 0 的自包含 pom"（现读 1.0.5 复核过），
+                         不带 -P central 的 mvn install 若不发扁平 pom，就会把带 parent 的废 pom 装进仓里。 -->
                     <flattenMode>oss</flattenMode>
                 </configuration>
                 <executions>
@@ -166,20 +222,17 @@
                     </execution>
                 </executions>
             </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.11.0</version>
-                <configuration>
-                    <source>${maven.compiler.source}</source>
-                        <target>${maven.compiler.target}</target>
-                        <encoding>${project.build.sourceEncoding}</encoding>
-                </configuration>
-            </plugin>
+            <!-- maven-compiler-plugin 的声明删掉了：父链 pluginManagement 供 3.11.0 +
+                 source/target ${maven.compiler.source}/${maven.compiler.target}=8 + UTF-8，
+                 与本仓原来手抄的那三条配置逐字同值（本仓根 pom 那侧本来就是 3.11.0，
+                 只有 z-schedule-core 手钉 3.8.1，收口后一起走 3.11.0）。
+                 复验：迁移后 target/classes 的 class 字节 6-7 = 0 52（major 52 = Java 8）。 -->
             <!-- 不钉版本时"哪些测试会跑"是由构建机的 Maven 决定的：Maven 3.8.7 默认 surefire
                  2.12.4 没有 JUnit-Platform provider，admin 那 6 例 jupiter 用例会被静默跳过
                  （不红、不报，只是计数少一截）；本机 3.9.14 默认 3.5.4 才跑它们。
-                 2026-09-27 两机实测：同一提交 323 vs 329。 -->
+                 2026-09-27 两机实测：同一提交 323 vs 329。
+                 ⚠ 这一格是**刻意的本地覆盖**：父链 pluginManagement 下发的是 surefire 2.22.2，
+                 字面版本优先级高于任何 DM/pluginManagement，所以本仓继续吃 3.5.4（零漂移）。 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>

@@ -46,43 +46,38 @@
         <tag>HEAD</tag>
     </scm>
 
-    <properties>
-        <!-- 子 pom 自包含 properties, 顶层 flatten 后 z-boot.version 会通过父继承 -->
-        <z-boot.version>1.0.17</z-boot.version>
-        <z-util.version>1.0.13</z-util.version>
-    </properties>
+    <!-- 本模块不再自摊版本键：z-boot 自家 starter 走 z-boot-parent 的 z-boot-self 直接条目（1.0.19），
+         z-util-core 走 z-boot-fleet（1.0.13，与本仓迁移前的格子面值相同），
+         mybatis-plus-extension / spring-boot-autoconfigure / h2 由第三方地板下发，
+         log4j-api 由本仓根 pom 的**直接** DM 条目钉在迁移前实测的 2.17.2。
+         原来躺在这里的 z-boot.version / z-util.version 两格已删（引用一并删）。 -->
 
     <dependencies>
-        <!-- z-schedule-core: 业务 entity/router/util -->
+        <!-- z-schedule-core: 业务 entity/router/util（版本由本仓根 pom 的 ${project.version} 下发） -->
         <dependency>
             <groupId>io.github.yuku123</groupId>
             <artifactId>z-schedule-core</artifactId>
         </dependency>
 
-        <!-- z-boot: BOM 锁版本, starter 提供默认配置 -->
-        <dependency>
-            <groupId>io.github.yuku123</groupId>
-            <artifactId>z-boot-dependencies</artifactId>
-            <version>${z-boot.version}</version>
-            <type>pom</type>
-            <scope>import</scope>
-        </dependency>
+        <!-- z-boot: 版本与口径都由 parent 链下发（迁移前这里还写了一条
+             io.github.yuku123:z-boot-dependencies:1.0.17 的 <scope>import</scope>，
+             但它站在 <dependencies> 里 —— 只有 <dependencyManagement> 里的 import 才生效，
+             在 <dependencies> 里它只是"依赖一个 pom 类型的件"，实测在消费者树里留下
+             z-boot-dependencies:pom:1.0.17:import 这一行（admin 树可见），对版本解析 0 贡献。
+             删掉它 = 清掉一处假 import，本模块的 DM 一律从 z-boot-parent 走。 -->
         <dependency>
             <groupId>io.github.yuku123</groupId>
             <artifactId>z-boot-web-starter</artifactId>
-            <version>${z-boot.version}</version>
         </dependency>
         <dependency>
             <groupId>io.github.yuku123</groupId>
             <artifactId>z-boot-datasource-starter</artifactId>
-            <version>${z-boot.version}</version>
         </dependency>
 
         <!-- 工具 -->
         <dependency>
             <groupId>io.github.yuku123</groupId>
             <artifactId>z-util-core</artifactId>
-            <version>${z-util.version}</version>
         </dependency>
 
         <!-- MyBatis-Plus -->

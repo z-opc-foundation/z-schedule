@@ -45,9 +45,12 @@
     </scm>
 
     <properties>
-        <maven.compiler.source>8</maven.compiler.source>
-        <maven.compiler.target>8</maven.compiler.target>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- maven.compiler.source/target 与 project.build.sourceEncoding 由 z-boot-parent 下发
+             （面值 8 / 8 / UTF-8，与本模块迁移前手抄的三条同值；产物仍是 class-file major 52）。
+             slf4j.version 这一格**留着**：父链没有按坐标直接管 org.slf4j:slf4j-api
+             （只有地板 import 的 spring-boot-dependencies 把它展成 1.7.36，而 import 顶不过
+             继承来的直接 DM ⇒ 判"供不供"要按坐标判，见 README 步骤 3），删键即当场悬空。
+             面值 1.7.36 与迁移前实测一致（tree：org.slf4j:slf4j-api:jar:1.7.36:compile）。 -->
         <slf4j.version>1.7.36</slf4j.version>
     </properties>
 
@@ -67,19 +70,4 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.8.1</version>
-                <configuration>
-                    <source>${maven.compiler.source}</source>
-                    <target>${maven.compiler.target}</target>
-                    <encoding>${project.build.sourceEncoding}</encoding>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
 </project>
