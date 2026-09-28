@@ -141,11 +141,21 @@
                  留这两格的目的是"零漂移"：下面写的都是迁移前 dependency:tree 的**实测有效值**。 -->
 
             <!-- MySQL 驱动 8.0.33，地板 1.0.19 那格是 8.4.0（8.4 换了 driver 行为，
-                 不在迁移这一刀里顺手做，同 z-kb 的 mysql 那格）。 -->
+                 不在迁移这一刀里顺手做，同 z-kb 的 mysql 那格）。
+                 ⚠ 那条 exclusion 是照抄 spring-boot-dependencies 的受管项：Boot 对本坐标排掉了
+                 protobuf-java，迁移删掉 Boot 的 BOM import 会连带把它删掉 ⇒ 只写版本的直接条目
+                 会让 protobuf-java:3.25.5 从 mysql 底下冒进树（基线里它不在，实测本仓迁移那一遍就进了）。
+                 同 z-mist / z-qa / z-kb 的写法。 -->
             <dependency>
                 <groupId>com.mysql</groupId>
                 <artifactId>mysql-connector-j</artifactId>
                 <version>${mysql.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>com.google.protobuf</groupId>
+                        <artifactId>protobuf-java</artifactId>
+                    </exclusion>
+                </exclusions>
             </dependency>
 
             <!-- log4j2：本仓迁移前**分裂**，两代同时在跑——
