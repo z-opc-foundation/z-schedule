@@ -49,7 +49,11 @@
              是为了让 admin 与 reactor 其余部分吃同一份 z-boot starter（地板 1.0.20 已删 simpleclient=0.8.1、
              8 个聚合件不再转 log4j-slf4j2-impl）。 -->
         <z-boot.version>1.0.21</z-boot.version>
-        <z-util.version>1.0.13</z-util.version>
+        <!-- 2026-09-29 消费者轮收尾：1.0.13 → 1.0.14。同一 reactor 里其余模块的 z-util-core 由
+             继承来的 fleet 供 1.0.14（z-boot-fleet 里 z-util.version 那一格），
+             这一格留 1.0.13 就是仓内一条半新半旧的线；且 z-util 1.0.14 是 2026-09-29 那批已发布的
+             新号，1.0.13 只是它的上一版 ⇒ admin 打的镜像吃的是旧字节码。键必须留（同上：不继承父链 DM）。 -->
+        <z-util.version>1.0.14</z-util.version>
 
         <!--
             admin 是 standalone demo + docker 镜像源，永远不上 Maven Central。
