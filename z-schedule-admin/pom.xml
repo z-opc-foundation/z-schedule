@@ -42,7 +42,13 @@
             发版前同步更新本字段（或改用 ${revision} 显式注入，见 V1 验证记录）。
         -->
         <z-schedule.version>1.0.6</z-schedule.version>
-        <z-boot.version>1.0.17</z-boot.version>
+        <!-- 2026-09-29 消费者轮：1.0.17 → 1.0.21。本模块的 <parent> 是 spring-boot-starter-parent
+             （建仓就有的独立应用形状，maven.deploy.skip=true、永不上 Central），**不继承**顶层
+             z-boot-parent 的直接 DM ⇒ 这里的版本必须自己写，删掉就是 "dependencies.dependency.version
+             ... is missing" 硬失败（实测）。本仓其它模块由 z-boot-parent:1.0.21 供面值，这一格抬到同号
+             是为了让 admin 与 reactor 其余部分吃同一份 z-boot starter（地板 1.0.20 已删 simpleclient=0.8.1、
+             8 个聚合件不再转 log4j-slf4j2-impl）。 -->
+        <z-boot.version>1.0.21</z-boot.version>
         <z-util.version>1.0.13</z-util.version>
 
         <!--
@@ -62,7 +68,9 @@
             <version>${z-schedule.version}</version>
         </dependency>
 
-        <!-- z-boot: 默认配置 -->
+        <!-- z-boot: 默认配置。⚠ 本模块的 <parent> 是 spring-boot-starter-parent:2.7.12，
+             不是 z-boot-parent ⇒ 父链那条直接 DM 在这里**不生效**，版本必须自己写面值
+             （删掉就是 'dependencies.dependency.version ... is missing' 硬失败，2026-09-29 实测）。 -->
         <dependency>
             <groupId>io.github.yuku123</groupId>
             <artifactId>z-boot-web-starter</artifactId>
