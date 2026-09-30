@@ -181,7 +181,7 @@ curl -s -X POST "http://127.0.0.1:$PORT/user/add?accessToken=$SECRET" \
   Spring 的 relaxed binding 把 `Z_BASE_DB_SCHEDULE_*` 映射到 `z.base.db.schedule.*`
   （starter 自建 Druid 走这套），`Z_SCHEDULE_ACCESSTOKEN` 映射到 `z.schedule.accessToken`。
 * 端口只绑 `127.0.0.1`：`-p 127.0.0.1:33060:3306`。
-* 建表只用仓内 `_doc/004_sql/z-schedule.sql`（6 CREATE + 1 种子，**零 DROP**）。
+* 建表只用仓内 `_doc/002_deploy/init/z-schedule.sql`（6 CREATE + 1 种子，**零 DROP**）。
   `bootstrap_mysql.sh` 在真跑之前会先数一遍 DROP 条数，非 0 直接拒绝——
   历史脚本（含 z-opc 的 `init.sql`）里有 15 条 DROP，照跑会删库。
 
@@ -712,7 +712,7 @@ FAIL 消息把两侧原样贴出来 + 改完复跑立刻归零（下一段记的
    换 bcrypt/argon2 会改动已发布的 `UserService` 语义与既有账号行，是独立的一格。
 6. 铸权闸只管 `role=ADMIN` 这一个值（`N4` 钉住"只有真的 ADMIN 才算提权"）。
    `VIEWER` 之类的自定义角色仍然没有语义（`permission` 现在有了，见上面第 1 条；它只被 `/jobinfo/*` 读）。
-7. **这一列在有这张表的库里要靠 `ALTER`，而仓库里没有任何脚本做这件事**：`_doc/004_sql/z-schedule.sql:120`
+7. **这一列在有这张表的库里要靠 `ALTER`，而仓库里没有任何脚本做这件事**：`_doc/002_deploy/init/z-schedule.sql:120`
    把 `permission` 写在 `z_schedule_user` 的**建表语句**里（`varchar(512) NOT NULL DEFAULT ''`），
    所以新建库天然就有（250 那台 E2E 库就是 `bootstrap_mysql.sh` 新建的，`D` 段的读数走的是这一条）；
    而**已经建过这张表的库**（比如线上 `oc`）不会自动多出一列，`bootstrap_mysql.sh` 只做"DROP 条数必须为 0"
@@ -858,7 +858,7 @@ health 会把数据源信息吐给匿名访问者"。前半是错的（那段配
 §10.6 的第 1、2 条当时记的是"下一格"。这一格把它做完了，结论是**那一半也不能算"知道"**：
 `deploy/` 下的入口脚本、清单、compose、nginx 模板、README 一起数下来有**五条能让部署直接失败**的缺陷，
 全部在提交树里躺了两周到一个月，而且**每一条都能被一条不起集群的机械判据抓到**——之前没人写而已。
-尺在 `_doc/003_script/e2e/p24.sh`（臂 A 静态 16 项 + 臂 B 真容器 23 项，跑法见档头）。
+尺在 `_doc/005_testing/e2e/p24.sh`（臂 A 静态 16 项 + 臂 B 真容器 23 项，跑法见档头）。
 250 上 09-27 02:05:42 的收口读数（时刻取自日志 mtime，`stat -c %y`，不是推的）：
 **`总判：PASS=39 FAIL=0`**，臂 A 那 16 项在这遍里于 250 同跑也全绿；此前臂 A 在 macOS 单跑也是 16/0，
 静态那半不挑机器。
@@ -970,7 +970,7 @@ B13 两边都测：不给 `DB_HOST` ⇒ compose `config` 非 0 且消息点名�
 在老一点的管理机上 `make dev` 会死在命令行本身"，并且**没有为它加兼容分支**。这一格把那句话兑现成读数：
 `deploy/README.md` 让人敲的 `make dev` / `bin/start-mode1.sh` 在这台机器上**从来没执行过**——
 p24 的臂 B 走的是 `docker run` + 渲染出来的 ConfigMap env，那是**清单**那条路，不是**入口**那条路。
-尺在 `_doc/003_script/e2e/p25.sh`（静态 5 项 + 运行时 24 项，跑法见档头）。
+尺在 `_doc/005_testing/e2e/p25.sh`（静态 5 项 + 运行时 24 项，跑法见档头）。
 
 250 上 09-27 03:26:04 的收口读数（时刻取自日志 mtime，`stat -c %y`）：**`总判：PASS=29 FAIL=0`**，
 另有 1 项 `[SKIP]`（P2c，这台没有 make，见 12.5）。中间那一遍 run8 是 `PASS=28 FAIL=1`，
@@ -1565,7 +1565,7 @@ README 只数围栏内：`./run.sh` 也出现在讲坑的正文里（"以前裸�
 A14 量根 README 的第一屏，六项全对实物：标题含根 pom 的 `artifactId`、`<modules>` 里三个模块名逐个在场、
 `_doc/` 下每个一级目录都以**索引项形状**（`](_doc/<d>/)`）出现、每个相对链接都解析、
 版本字面量只有 `<revision>` 那一个（与 #38 同源：抄死的版本号在抬版那天必坏；revision 形状一旦不再
-是 `1.0.N`，那一支自己报"尺不适用"而不是静默放行）、建表张数与表名对 `_doc/004_sql/z-schedule.sql`
+是 `1.0.N`，那一支自己报"尺不适用"而不是静默放行）、建表张数与表名对 `_doc/002_deploy/init/z-schedule.sql`
 的**非注释语句行**（这份脚本第 7 行的注释里就写着 `CREATE TABLE`/`不含任何 DROP`，
 不剥注释会数到 **7** 而真表是 **6**）。
 
@@ -1585,7 +1585,7 @@ A15 两支：MVNOPT 抓"把应用参数递给 Maven"那种写法（只认长选�
    这一条被 `bad` 消息原样打出来才一眼看见。
 2. **`DOCIDX` 的"提到 ≠ 索引了"**：第一版判据是"`_doc/<d>` 这个串在不在正文里"，
    我把索引行改成 `_doc/00X/` 注进猎物后，尺**仍报绿** —— 因为正文另一处
-   `](_doc/004_sql/z-schedule.sql)` 也算"提到"。这是**注入的缺陷尺看不见**那一型
+   `](_doc/002_deploy/init/z-schedule.sql)` 也算"提到"。这是**注入的缺陷尺看不见**那一型
    （与 §13 那批"glob 悄悄少了一批文件"同族，但方向相反：这次是猎物证伪了尺）。
    收紧成只认 `](_doc/<d>/)` 之后，猎物上点名 `004_sql`、绿侧仍 `-`。
 3. **A14 的 ok 消息第一版写的是"注入的字符串"而不是"尺点名的字符串"**
@@ -1656,7 +1656,7 @@ port=58705 ctx='/meta' 首次应答=404
 PASS=10 FAIL=0
 ```
 
-`bash _doc/003_script/e2e/ui_base_probe.sh`，rc 语义 0=两条路各五格全对 / 1=有格不对 / 2=前置不满足
+`bash _doc/005_testing/e2e/ui_base_probe.sh`，rc 语义 0=两条路各五格全对 / 1=有格不对 / 2=前置不满足
 （`*-exec.jar` 份数≠1 之类）。两臂各起各的 JVM，端口由 `bind(("127.0.0.1",0))` 现取 ⇒ 不碰 250:18098 那台常驻、
 也不碰本机别人的端口；就绪判据是"任一应答码非 000"而不是 `/actuator/health` UP —— dev 那份 H2 是空库，
 health 是 503，拿它当就绪条件会永远等不到（§17 第 4 条的连带后果）。
@@ -1765,7 +1765,7 @@ compose 后端 service 块的容器侧端口、集群版 healthcheck URL、k8s `
   方式 A 的命令改成空格分隔带引号那串并附实测行，方式 B 补 `context-path` 且纠正"jar 名跟着
   admin 模块自己的 `<version>`（当前字面 `1.0.0`，**不是**根 pom 的 `<revision>` 1.0.4）"（#38 同源）；
   `application.yml` / `application-dev.yml` 头部注释同步改口。
-- **量具**：新增 `_doc/003_script/e2e/ui_base_probe.sh`（跟踪，运行时那一半）；
+- **量具**：新增 `_doc/005_testing/e2e/ui_base_probe.sh`（跟踪，运行时那一半）；
   `p24.sh` 内嵌的 `a14_docface.py` 加 `ARGCOMMA` 一支、A15 的 fixture 从两形状扩成三形状，
   新增 `a16_mirror.py` 与 A16 臂。`p24.sh` 字节 `md5 44bdd2c9131047a8820235d81a32abd7`、
   `ui_base_probe.sh` `md5 3678709f5ad8522b00e27293e0241eb0`。

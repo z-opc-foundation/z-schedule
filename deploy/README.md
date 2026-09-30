@@ -45,12 +45,12 @@ Mode 2/3 的前端把宿主 **80** 映射到容器内 80；宿主 80 已被占�
 三种模式**都需要一个可达的 MySQL**，且必须先把 `DB_*` 五个键给全（见"数据库"一节）。
 `make dev` 不会自带数据库：Mode 1 只有一个容器，库得在外面。
 如果库也跑在容器里：**必须与 app 在同一张 compose 网络上**，`DB_HOST` 用服务名/网络别名而不是裸 IP
-（跨 bridge 的 IP 静默不可达，取证见 `_doc/003_script/e2e/README.md` §12.2 的 P8f）。
+（跨 bridge 的 IP 静默不可达，取证见 `_doc/005_testing/e2e/README.md` §12.2 的 P8f）。
 
 ## 快速上手
 
 ```bash
-# 0. 先备库：建库 + 跑建表脚本（脚本本身不含 DROP，见 _doc/004_sql/z-schedule.sql）
+# 0. 先备库：建库 + 跑建表脚本（脚本本身不含 DROP，见 _doc/002_deploy/init/z-schedule.sql）
 #    然后把坐标写进 deploy/env/.env（从 .env.example 复制，别提交）
 cd deploy
 cp env/.env.example env/.env && vi env/.env
@@ -85,7 +85,7 @@ docker-compose --env-file env/.env -f docker-compose.yml down
 
 新版是 `docker compose`（插件）、老版只有 `docker-compose`（二进制，Docker 20.10.x 就是这一种）都行：
 `Makefile` 与三个 `bin/start-mode*.sh` 都会先探一次 `docker compose version` 再落地，
-判据在 `_doc/003_script/e2e/p25.sh` 的 P1/P2/P2c。compose 只会自动读 `deploy/.env`，
+判据在 `_doc/005_testing/e2e/p25.sh` 的 P1/P2/P2c。compose 只会自动读 `deploy/.env`，
 **不会**自动读 `deploy/env/.env`（本仓模板在后者），这就是上面那句 `--env-file` 的由来。
 
 ## 构建 + 推送镜像
@@ -108,9 +108,9 @@ make k8s-apply INGRESS_DOMAIN=schedule.example.com
 前置：
 - 已有 k8s/k3s 集群 + kubectl 已配置
 - 镜像已 push 到 OCI_REGISTRY（默认 ghcr.io/yuku123）
-- 一个集群内可达的 MySQL，库已建好表（`_doc/004_sql/z-schedule.sql`）
+- 一个集群内可达的 MySQL，库已建好表（`_doc/002_deploy/init/z-schedule.sql`）
 - 占位符（默认值与 `Makefile`、`bin/k8s-apply.sh`、`env/.env.example` 三处逐字一致，
-  由 `_doc/003_script/e2e/p24.sh` 的 A6b 判据钉住）：
+  由 `_doc/005_testing/e2e/p24.sh` 的 A6b 判据钉住）：
   - `NAMESPACE`：默认 `z-schedule`
   - `INGRESS_DOMAIN`：必填（如 `schedule.example.com`）
   - `IMAGE_VERSION`：默认 `1.0.4`
@@ -151,7 +151,7 @@ envsubst '$NAMESPACE $INGRESS_DOMAIN $TLS_SECRET_NAME $OCI_REGISTRY $IMAGE_VERSI
   | `DB_POOL_MAX_ACTIVE` | `${DB_POOL_MAX_ACTIVE:-40}` | 唯一允许静默默认的一个：40 是量过吞吐之后的合理值，漏配不影响可用性 |
 
   三个 compose 文件（Mode 1/2/3）形状必须逐条一致，且这一组守卫是在 compose **v5.0.2** 上逐变量双向量过的
-  （删掉必须拒、给了必须让**两个池**渲染出同一组坐标）：判据 `_doc/003_script/e2e/p25.sh` 的 P2d + P18。
+  （删掉必须拒、给了必须让**两个池**渲染出同一组坐标）：判据 `_doc/005_testing/e2e/p25.sh` 的 P2d + P18。
 
 - **两个池都要喂**：调度引擎跑在 starter 自建的 `dataSourceSchedule` 上，键是
   `Z_BASE_DB_SCHEDULE_{HOST,PORT,DATABASE,USERNAME,PASSWORD}`；`SPRING_DATASOURCE_*` 建的是
@@ -161,11 +161,11 @@ envsubst '$NAMESPACE $INGRESS_DOMAIN $TLS_SECRET_NAME $OCI_REGISTRY $IMAGE_VERSI
 - **库与 app 必须同网**：库也跑容器时，`DB_HOST` 用同一张 compose 网络上的服务名/别名。
   实测把它放到另一张网上，`mysqladmin` 只读到 `You can check this by doing 'telnet 172.26.0.2 3306'`，
   而 IP 本身是"能 ping 到的形状"——跨 bridge 静默不可达（取证：`p25.sh` 的 P8d/P8f）。
-- **建库用哪份脚本**：`_doc/004_sql/z-schedule.sql`（提交树那份，**不含任何 DROP**）。
+- **建库用哪份脚本**：`_doc/002_deploy/init/z-schedule.sql`（提交树那份，**不含任何 DROP**）。
   历史 `init.sql` 那类脚本里有 15 条 DROP，**不许照跑**；`bootstrap_mysql.sh` 与 e2e 的 P6/B4
   都带"非注释行 DROP 计数必须为 0"的前置。
 - **没有 H2 这条路**：镜像里 h2 依赖虽然在 classpath 上，但仓库里没有 `schema.sql` /
-  `data.sql`，建表脚本只在 `_doc/004_sql/` 下面向 MySQL；`dev` profile 的
+  `data.sql`，建表脚本只在 `_doc/002_deploy/init/` 下面向 MySQL；`dev` profile 的
   `DevDataSourceConfig` 是给 IDE 里跑 admin 用的，不覆盖容器入口。所以"零依赖试用"这句话
   从来兑现不了，别再照它部署。
 - **生产 / K8s**：密码通过 Secret 注入

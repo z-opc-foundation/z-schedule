@@ -32,7 +32,7 @@
 
 > ⚠ 本节 2026-09-27 之前写的是"方式 A 最快，默认端口 18086，context-path /meta"。
 > 那两句**都是假的**，四条命令逐条实测过（读数是 `bash p24.sh` 静态臂之外的手工跑，
-> 复跑命令与原文输出见 `_doc/003_script/e2e/README.md` §17.2）：
+> 复跑命令与原文输出见 `_doc/005_testing/e2e/README.md` §17.2）：
 >
 > | 命令 | 实测结果 |
 > |---|---|
@@ -50,7 +50,7 @@
 > （那条在容器里成立，因为 env 给过）。这几处抄件现在由 `p24.sh` 的 A16 逐字比着，漂一处即红一处。
 >
 > ⚠ 上面那四格的**字节**都是 `~/.m2` 里解析到的已发布件（表头那条命令没带 `-am`，见
-> `_doc/003_script/e2e/README.md` §17.1 末尾的边界说明）。第三格那条"同名 bean 必崩"在 #41
+> `_doc/005_testing/e2e/README.md` §17.1 末尾的边界说明）。第三格那条"同名 bean 必崩"在 #41
 > 之后**只对这已发布件成立**：换成 `mvn -pl z-schedule-admin -am package` 出的 jar，不给旗也起得来
 > （实测 08:28:47 `Tomcat started on port(s): 50974 (http) with context path '/meta'`）。
 > 成对的前/后读数与为什么修完还有第三条死路，记在 §19。
@@ -87,8 +87,8 @@
 所以每次 `package` 都把这个前缀烤进 jar。进程挂在 `/` 上时，页面本身 200、它自己声明的两条资源 404
 ⇒ **浏览器里就是一片白**，而这两个文件在 `/assets/...` 上是 200（东西在，前缀不对）。
 
-`bash _doc/003_script/e2e/ui_base_probe.sh` 一次跑两条路、10 条断言（八条"该 404/200"配上"同一个文件
-在剥掉前缀的路径上是 200"这一对反向对照），逐格读数与复跑命令见 `_doc/003_script/e2e/README.md` §18。
+`bash _doc/005_testing/e2e/ui_base_probe.sh` 一次跑两条路、10 条断言（八条"该 404/200"配上"同一个文件
+在剥掉前缀的路径上是 200"这一对反向对照），逐格读数与复跑命令见 `_doc/005_testing/e2e/README.md` §18。
 所以本地要看界面就得把它钉成同一个前缀：`--server.servlet.context-path=/meta`（下面方式 A/B 都这么写了）。
 反过来，`base` 想改，就得连 `deploy/` 那几处 `SERVER_SERVLET_CONTEXT_PATH` 一起改 —— A16 那把尺会点名。
 
@@ -147,7 +147,7 @@ java -jar "$(ls z-schedule-admin/target/*-exec.jar)" \
 # `APPLICATION FAILED TO START / The bean 'dataSourceSchedule', … could not be registered`
 # （§19.3 的 A/B 两组）。所以这一格"不用给旗"的**唯一**依据是那行 `Tomcat started …`，
 # 别拿"进程没报错"当证据。
-# 可复跑的形态在 `_doc/003_script/e2e/ui_base_probe.sh`（两臂各 5 格、PASS=10 FAIL=0，
+# 可复跑的形态在 `_doc/005_testing/e2e/ui_base_probe.sh`（两臂各 5 格、PASS=10 FAIL=0，
 # 含"同一个文件在剥掉前缀的路径上 200 vs 404"这对反向对照），逐格读数在 §18.2。
 # ⚠ 那个脚本自己**仍带着** disabled=true —— 它量的是路径面，带着旗对两份字节都成立，
 # 这样它在"jar 来自 m2"的机器上也不会误红。
@@ -192,7 +192,7 @@ cd z-schedule/deploy && docker compose up
 `/actuator/health/{liveness,readiness}`。这两条路径在 2026-09-26 之前的构件上**根本不存在**（404），
 因为 Boot 只在检测到 Kubernetes 平台时才自动建这两个组，而块内的 `include` 又因上面那个缩进错而没生效
 ⇒ 部署文件承诺的探测在离集群的任何场合（本机、250、docker-compose）一次都没被验过。
-现在 `management.endpoint.health.probes.enabled=true` 让它在任何平台都存在，`_doc/003_script/e2e/p23.sh`
+现在 `management.endpoint.health.probes.enabled=true` 让它在任何平台都存在，`_doc/005_testing/e2e/p23.sh`
 就是在真机上验这两条的档。
 
 第二个缺陷是这次真跑出来的：**Boot 自动建的 `readiness` 组不含数据源**。把这台实例的
@@ -200,7 +200,7 @@ cd z-schedule/deploy && docker compose up
 而 `/actuator/health/readiness` 仍回 **200 UP** ⇒ 照 manifest 部署时库死了 pod 依然"就绪"、继续接流量。
 现在 `readiness` 显式含 `readinessState,db`、`liveness` 显式只含 `ping,livenessState`：
 库抖动不该把进程重启掉（重启只会让 reconcile 更糟）。`z-schedule-admin` 里那条 yml 键位守卫
-（`ManagementConfigBindingTest`）钉的就是这个分工，5 支变异自证见 `_doc/003_script/e2e/README.md`。
+（`ManagementConfigBindingTest`）钉的就是这个分工，5 支变异自证见 `_doc/005_testing/e2e/README.md`。
 
 没配它则整面敞开（自带的演示 UI 才能直接用），但启动时会打一条 warn 把这件事说出来，
 不再当成静默默认。

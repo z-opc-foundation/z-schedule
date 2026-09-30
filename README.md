@@ -29,7 +29,7 @@
 ⚠ 关于"版本单一来源"：根 `<revision>` 只管聚合/core/starter 三件。`z-schedule-admin` 有自己的
 `<version>1.0.0</version>`（**不跟 revision 走**），产物是 `z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar`；
 它另用一条 `<z-schedule.version>` 属性（现值 `1.0.6`）来消费本仓 starter —— 抬版时这两处都得对上，
-抄死版本号会怎么坏，五种形状实测见 [`_doc/003_script/e2e/README.md`](_doc/003_script/e2e/README.md) §14。
+抄死版本号会怎么坏，五种形状实测见 [`_doc/005_testing/e2e/README.md`](_doc/005_testing/e2e/README.md) §14。
 
 ---
 
@@ -70,7 +70,7 @@
 （外部应用 POST `/executor/beat` 注册进 `z_schedule_job_registry`）；缺的是出站那一半。
 配 `SHARDING_BROADCAST` 的任务当前**只执行 1 次**且 `broadcastTotal=1 / broadcastIndex=0`
 （`JobTriggerServiceImplBehaviorTest` 钉着；此前 `broadcastTotal` 是默认值 0，按分片写的 handler 会一行都不做）。
-取证与三处联动改造点记在 [`_doc/003_script/e2e/README.md`](_doc/003_script/e2e/README.md) §7。
+取证与三处联动改造点记在 [`_doc/005_testing/e2e/README.md`](_doc/005_testing/e2e/README.md) §7。
 
 ---
 
@@ -167,10 +167,10 @@ mvn clean install -DskipTests
 
 ### 库要先有
 
-建表脚本 [`_doc/004_sql/z-schedule.sql`](_doc/004_sql/z-schedule.sql)：6 张表
+建表脚本 [`_doc/002_deploy/init/z-schedule.sql`](_doc/002_deploy/init/z-schedule.sql)：6 张表
 `z_schedule_job_info` / `_job_log` / `_job_group` / `_job_registry` / `_job_leader` / `_user`，
 全部 `CREATE TABLE IF NOT EXISTS` + `INSERT IGNORE`；实测非注释行里 **0 条 DROP**，
-[`_doc/003_script/e2e/bootstrap_mysql.sh`](_doc/003_script/e2e/bootstrap_mysql.sh) 建库前会先数这一条，不为 0 直接拒。
+[`_doc/005_testing/e2e/bootstrap_mysql.sh`](_doc/005_testing/e2e/bootstrap_mysql.sh) 建库前会先数这一条，不为 0 直接拒。
 
 ### 本地跑起 admin（三条路，实测状态各不相同）
 
@@ -186,7 +186,7 @@ mvn -B spring-boot:run -Dspring-boot.run.profiles=dev \
 
 ⚠ 给 Maven 传应用参数只能走 `-Dspring-boot.run.*`；把 `--server.port=18086`、`--server.servlet.context-path=/meta`
 直接跟在 `mvn` 后面会被 Maven 当场拒（`Unrecognized option`，rc=1，应用一次都没起来）—— 实测见
-[`_doc/003_script/e2e/README.md`](_doc/003_script/e2e/README.md) §17。
+[`_doc/005_testing/e2e/README.md`](_doc/005_testing/e2e/README.md) §17。
 
 ```bash
 # 路 2：用本树 package 出的 exec jar —— 不必再给 disabled=true
@@ -265,9 +265,9 @@ surefire 实跑数以现跑为准，计数只吃 `*/target/surefire-reports/*.xm
 1. **surefire 版本决定"哪些测试会跑"**。不钉版本时 Maven 3.8.7 默认 surefire 2.12.4 没有 JUnit-Platform provider，
    admin 那 6 例 jupiter 用例会被**静默跳过**（不红、不报，只是计数少一截）；本机 3.9.14 默认 3.5.4 才跑。
    2026-09-27 两机实测：同一提交 **323 vs 329**。根 POM 因此**刻意本地覆盖**成 `3.5.4`（父链下发的是 2.22.2）。
-   跨机对账量具是 [`_doc/003_script/e2e/tally_surefire.py`](_doc/003_script/e2e/tally_surefire.py)。
+   跨机对账量具是 [`_doc/005_testing/e2e/tally_surefire.py`](_doc/005_testing/e2e/tally_surefire.py)。
 2. 绝大多数用例走 H2，**不需要外部 MySQL**；真机 E2E（自建 MySQL + 逐个接口打）是另一套量具，
-   静态臂 `P24_A_ONLY=1 bash _doc/003_script/e2e/p24.sh` 不碰 docker、任何机器都能跑。
+   静态臂 `P24_A_ONLY=1 bash _doc/005_testing/e2e/p24.sh` 不碰 docker、任何机器都能跑。
 
 ---
 
@@ -318,30 +318,30 @@ MIT，见根 [`LICENSE`](LICENSE)（`Copyright (c) 2026 z-opc-foundation`）；�
 - [`_doc/003_script/`](_doc/003_script/) — 运维脚本：
   - [`deploy_maven_center.sh`](_doc/003_script/deploy_maven_center.sh) — 发 Central（不可逆，需单独授权）
   - [`install-settings.sh`](_doc/003_script/install-settings.sh) — 本机 Maven settings/凭证骨架
-  - [`e2e/`](_doc/003_script/e2e/) — 端到端量具与验收档，`README.md` 是台账、`pNN.sh` 是分档的臂：
-    - [`README.md`](_doc/003_script/e2e/README.md) — 250 演练记录（可在新机重放）；§7 路由策略兑现差、§8 测试基线、
+  - [`e2e/`](_doc/005_testing/e2e/) — 端到端量具与验收档，`README.md` 是台账、`pNN.sh` 是分档的臂：
+    - [`README.md`](_doc/005_testing/e2e/README.md) — 250 演练记录（可在新机重放）；§7 路由策略兑现差、§8 测试基线、
       §10 探针面、§11–§13 三种模式彩排、§14 抄死版本号、§17–§19 本地启动、§21–§22 跨机对账
-    - 环境准备与跑法：[`bootstrap_mysql.sh`](_doc/003_script/e2e/bootstrap_mysql.sh)、
-      [`mysql.example.env`](_doc/003_script/e2e/mysql.example.env)、
-      [`run.sh`](_doc/003_script/e2e/run.sh)、[`e2e.sh`](_doc/003_script/e2e/e2e.sh)、
-      [`svc_smoke.sh`](_doc/003_script/e2e/svc_smoke.sh)、
-      [`run_p20_and_restore.sh`](_doc/003_script/e2e/run_p20_and_restore.sh)
-    - 分档臂：[`p6.sh`](_doc/003_script/e2e/p6.sh)、[`p10.sh`](_doc/003_script/e2e/p10.sh)、
-      [`p11.sh`](_doc/003_script/e2e/p11.sh)、[`p12.sh`](_doc/003_script/e2e/p12.sh)、
-      [`p13.sh`](_doc/003_script/e2e/p13.sh)、[`p14.sh`](_doc/003_script/e2e/p14.sh)、
-      [`p15.sh`](_doc/003_script/e2e/p15.sh)、[`p16.sh`](_doc/003_script/e2e/p16.sh)、
-      [`p17.sh`](_doc/003_script/e2e/p17.sh)、[`p18.sh`](_doc/003_script/e2e/p18.sh)、
-      [`p19.sh`](_doc/003_script/e2e/p19.sh)、[`p20.sh`](_doc/003_script/e2e/p20.sh)、
-      [`p21.sh`](_doc/003_script/e2e/p21.sh)、[`p22.sh`](_doc/003_script/e2e/p22.sh)、
-      [`p23.sh`](_doc/003_script/e2e/p23.sh)、[`p24.sh`](_doc/003_script/e2e/p24.sh)、
-      [`p25.sh`](_doc/003_script/e2e/p25.sh)、[`p26.sh`](_doc/003_script/e2e/p26.sh)、
-      [`p38_shapes.sh`](_doc/003_script/e2e/p38_shapes.sh)、[`p44.sh`](_doc/003_script/e2e/p44.sh)
-    - 辅助尺与量具：[`q.sh`](_doc/003_script/e2e/q.sh)、[`_q_digest.sql`](_doc/003_script/e2e/_q_digest.sql)、
-      [`ui_base_probe.sh`](_doc/003_script/e2e/ui_base_probe.sh)、
-      [`tally_surefire.py`](_doc/003_script/e2e/tally_surefire.py)
-- [`_doc/004_skill/`](_doc/004_skill/) — AI skill 定义（目前为空目录，暂无 skill）
-- [`_doc/004_sql/`](_doc/004_sql/) — 建表（**本仓用的是这个非标准槽位，SQL 不在 `002_deploy/` 里**）：
-  - [`z-schedule.sql`](_doc/004_sql/z-schedule.sql) — 全量建表脚本（6 张表，不含 DROP）
+    - 环境准备与跑法：[`bootstrap_mysql.sh`](_doc/005_testing/e2e/bootstrap_mysql.sh)、
+      [`mysql.example.env`](_doc/005_testing/e2e/mysql.example.env)、
+      [`run.sh`](_doc/005_testing/e2e/run.sh)、[`e2e.sh`](_doc/005_testing/e2e/e2e.sh)、
+      [`svc_smoke.sh`](_doc/005_testing/e2e/svc_smoke.sh)、
+      [`run_p20_and_restore.sh`](_doc/005_testing/e2e/run_p20_and_restore.sh)
+    - 分档臂：[`p6.sh`](_doc/005_testing/e2e/p6.sh)、[`p10.sh`](_doc/005_testing/e2e/p10.sh)、
+      [`p11.sh`](_doc/005_testing/e2e/p11.sh)、[`p12.sh`](_doc/005_testing/e2e/p12.sh)、
+      [`p13.sh`](_doc/005_testing/e2e/p13.sh)、[`p14.sh`](_doc/005_testing/e2e/p14.sh)、
+      [`p15.sh`](_doc/005_testing/e2e/p15.sh)、[`p16.sh`](_doc/005_testing/e2e/p16.sh)、
+      [`p17.sh`](_doc/005_testing/e2e/p17.sh)、[`p18.sh`](_doc/005_testing/e2e/p18.sh)、
+      [`p19.sh`](_doc/005_testing/e2e/p19.sh)、[`p20.sh`](_doc/005_testing/e2e/p20.sh)、
+      [`p21.sh`](_doc/005_testing/e2e/p21.sh)、[`p22.sh`](_doc/005_testing/e2e/p22.sh)、
+      [`p23.sh`](_doc/005_testing/e2e/p23.sh)、[`p24.sh`](_doc/005_testing/e2e/p24.sh)、
+      [`p25.sh`](_doc/005_testing/e2e/p25.sh)、[`p26.sh`](_doc/005_testing/e2e/p26.sh)、
+      [`p38_shapes.sh`](_doc/005_testing/e2e/p38_shapes.sh)、[`p44.sh`](_doc/005_testing/e2e/p44.sh)
+    - 辅助尺与量具：[`q.sh`](_doc/005_testing/e2e/q.sh)、[`_q_digest.sql`](_doc/005_testing/e2e/_q_digest.sql)、
+      [`ui_base_probe.sh`](_doc/005_testing/e2e/ui_base_probe.sh)、
+      [`tally_surefire.py`](_doc/005_testing/e2e/tally_surefire.py)
+- `_doc/004_skill/` — AI skill 定义（目前为空目录，暂无 skill）
+- [`_doc/002_deploy/init/`](_doc/002_deploy/init/) — 建表（**本仓用的是这个非标准槽位，SQL 不在 `002_deploy/` 里**）：
+  - [`z-schedule.sql`](_doc/002_deploy/init/z-schedule.sql) — 全量建表脚本（6 张表，不含 DROP）
 
 部署面另在 [`deploy/`](deploy/)（compose / k8s / `bin/start-mode*.sh` / `Makefile`，
 说明文档 [`deploy/README.md`](deploy/README.md)），前端工程在 [`_frontend/`](_frontend/)
