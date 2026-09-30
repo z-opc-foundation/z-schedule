@@ -14,7 +14,7 @@ import java.util.List;
  */
 public class LoginSession {
 
-    /** 与 {@code z_schedule_user.role} 的取值一致（见 {@code _doc/004_sql/z-schedule.sql} 第 6 张表）。 */
+    /** 与 {@code z_schedule_user.role} 的取值一致（见 {@code _doc/002_deploy/init/z-schedule.sql} 第 6 张表）。 */
     public static final String ROLE_ADMIN = "ADMIN";
 
     private final String token;

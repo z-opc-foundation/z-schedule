@@ -539,7 +539,7 @@ REPO="$(dirname "$DEPLOY")"
 cat > "$WORK/a14_docface.py" <<'PY'
 #!/usr/bin/env python3
 """A14/A15：根 README 的广告面（a14）+ 文档里"递给 Maven 的写法"与 javadoc 幽灵链接（a15）。
-p24.sh 内嵌本文件并逐臂调用；两串形状与逐格读数见 _doc/003_script/e2e/README.md §18。"""
+p24.sh 内嵌本文件并逐臂调用；两串形状与逐格读数见 _doc/005_testing/e2e/README.md §18。"""
 import os
 import re
 import sys
@@ -566,7 +566,7 @@ if mode == 'a14':
     docdirs = sorted(d for d in os.listdir(os.path.join(root, '_doc'))
                      if os.path.isdir(os.path.join(root, '_doc', d)))
     # "提到"不等于"索引了"：只认 ](_doc/<d>/) 这一种形状（目录链接带尾斜杠且紧跟右括号），
-    # 否则正文里一句 `](_doc/004_sql/z-schedule.sql)` 就能冒充整条目录索引项。
+    # 否则正文里一句 `](_doc/002_deploy/init/z-schedule.sql)` 就能冒充整条目录索引项。
     missd = [d for d in docdirs if ('](_doc/' + d + '/)') not in txt]
     print('DOCIDX|%d|%s' % (len(docdirs), ' '.join(missd) or '-'))
 
@@ -588,7 +588,7 @@ if mode == 'a14':
         stale = [v for v in lits if v != rev]
         print('VER|%d|%s|cur=%s want=%s' % (len(lits), ' '.join(stale) or '-', ','.join(lits), rev))
 
-    sq = os.path.join(root, '_doc/004_sql/z-schedule.sql')
+    sq = os.path.join(root, '_doc/002_deploy/init/z-schedule.sql')
     # 只数"语句起始行"：这份 DDL 第 7 行的注释里就写着"不含任何 DROP"，同理 CREATE TABLE 也会
     # 在注释里出现 ⇒ 不剥注释就数会得到 7（真表 6），这一格本来就是给"抄来的张数"设的闸。
     body = [ln for ln in open(sq, encoding='utf-8') if not ln.lstrip().startswith('--')]
@@ -648,7 +648,7 @@ for dirpath, dirnames, filenames in os.walk(root):
             mvn_n += 1
             # arguments= 的取值段：多个应用参数只能用**空格**分隔。逗号那串会被整个当成一个 argv
             # ⇒ 三条一句都不生效，而进程照起、一句错都不报（2026-09-27 抓到子进程 argv 原文，
-            #   见 _doc/003_script/e2e/README.md §18）⇒ 这一格必须单独判，MVNOPT 那一条抓不到它。
+            #   见 _doc/005_testing/e2e/README.md §18）⇒ 这一格必须单独判，MVNOPT 那一条抓不到它。
             am = re.search(r'-Dspring-boot\.run\.arguments=("([^"]*)"|\'([^\']*)\'|\S+)', s)
             if am:
                 argcomma_n += 1
@@ -710,8 +710,8 @@ t = open(sys.argv[1], encoding='utf-8').read()
 t = t.replace('# z-schedule\n', '# z-camuda\n', 1)                      # 标题退回模板遗留
 t = t.replace('<version>1.0.4</version>', '<version>1.0.0</version>', 1)  # 抄死一个旧版本
 t = t.replace('[`LICENSE`](LICENSE)', '[`LICENSE`](LICENSE-typo)', 1)      # 死链
-t = t.replace('- [`_doc/004_sql/`](_doc/004_sql/) — 建表:',
-              '- [`_doc/00X/`](_doc/00X/) — 建表:')                 # 索引漏一个真实目录
+t = t.replace('- [`_doc/002_deploy/`](_doc/002_deploy/) — 建表 SQL：',
+              '- [`_doc/00X/`](_doc/00X/) — 建表 SQL：')             # 索引漏一个真实目录
 t = t.replace('6 张表', '7 张表', 1)                                # 抄来的数（不剥注释正好数到 7）
 t = t.replace('z-schedule-core', 'z-schedule-gone')                 # 模块名对不上 <modules>
 for k in ('z-camuda', '1.0.0', 'LICENSE-typo', '00X', '7 张表', 'z-schedule-gone'):
@@ -1051,7 +1051,7 @@ def prey(root, out, relp, old, new):
     """把闭合清单里的文件拷到 <out>，对 <rel> 做**一处**替换，再扫那份树。
 
     替换必须成立：'old' 不在原文里就返回 SETUP 而不是"绿"——
-    注入不出的猎物等于没测，那一格要记账（见 _doc/003_script/e2e/README.md §18）。
+    注入不出的猎物等于没测，那一格要记账（见 _doc/005_testing/e2e/README.md §18）。
     """
     if os.path.isdir(out):
         shutil.rmtree(out)

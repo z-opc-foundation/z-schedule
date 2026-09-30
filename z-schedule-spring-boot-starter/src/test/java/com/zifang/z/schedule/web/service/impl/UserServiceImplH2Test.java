@@ -45,7 +45,7 @@ import static org.junit.Assert.fail;
 /**
  * 用户读写链路，跑在真实 H2 上。
  * <p>
- * 建表照 z-schedule 唯一的用户表脚本（z-opc {@code _doc/006_troubleshooting/z-schedule-schema-migration.sql}）：
+ * 建表照 z-schedule 唯一的用户表脚本（z-opc {@code z-opc/_doc/006_troubleshooting/z-schedule-schema-migration.sql}）：
  * {@code username} 上有 {@code UNIQUE KEY uk_username}。这条唯一键是本层语义的一部分——
  * 服务里"先查再插"的检查只是快路径，真正裁决重名的是数据库，所以假 mapper 记不出这里的差异。
  * <p>

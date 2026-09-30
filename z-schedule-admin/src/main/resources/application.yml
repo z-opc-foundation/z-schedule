@@ -1,5 +1,5 @@
 # z-schedule-admin 演示应用配置
-# 本地启动（两条都实测过，原文读数见 _doc/003_script/e2e/README.md §17.2）：
+# 本地启动（两条都实测过，原文读数见 _doc/005_testing/e2e/README.md §17.2）：
 #   mvn -B spring-boot:run \
 #     -Dspring-boot.run.profiles=dev \
 #     -Dspring-boot.run.arguments=--z.base.db.schedule.disabled=true

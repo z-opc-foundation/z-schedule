@@ -10,7 +10,7 @@
 #
 # 前缀是从 **jar 里读回来的**，不是从 vite.config.ts 猜的：源码可以改，交付物才是事实。
 #
-# 用法（无参数）：bash _doc/003_script/e2e/ui_base_probe.sh
+# 用法（无参数）：bash _doc/005_testing/e2e/ui_base_probe.sh
 # 前置：target 里恰好一个 *-exec.jar（没有就先 `mvn -B -pl z-schedule-admin -am package -DskipTests`）
 # 退出码：0=全部断言成立；1=有断言不成立（耦合的形状变了）；2=前置不满足（没量到，不是通过）
 set -uo pipefail

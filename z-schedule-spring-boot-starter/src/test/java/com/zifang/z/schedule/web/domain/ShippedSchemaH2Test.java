@@ -50,7 +50,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
- * 建表脚本门禁：{@code _doc/004_sql/z-schedule.sql} 必须能真跑通，并且覆盖六个 DO 的每一列。
+ * 建表脚本门禁：{@code _doc/002_deploy/init/z-schedule.sql} 必须能真跑通，并且覆盖六个 DO 的每一列。
  * <p>
  * z-schedule 此前不附带任何建表脚本，唯一在用的参照在 z-opc 仓的文档目录里，而那份脚本比实体少
  * {@code fix_interval} 等四列、还整个缺 {@code z_schedule_user} 表——列对不上时症状是首次访问

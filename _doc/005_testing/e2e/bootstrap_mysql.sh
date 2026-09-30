@@ -5,7 +5,7 @@
 #   1) 口令只放在 $E2E_HOME/mysql.env（600 权限，仓库外），经 --env-file 交给 docker，
 #      绝不出现在 argv / shell history / ps 里；
 #   2) 3306 只绑 127.0.0.1 —— 测试库不许对网口开放；
-#   3) 建表只用仓内 _doc/004_sql/z-schedule.sql（6 CREATE + 1 种子，零 DROP）。
+#   3) 建表只用仓内 _doc/002_deploy/init/z-schedule.sql（6 CREATE + 1 种子，零 DROP）。
 #      任何带 DROP 的历史脚本都不许照跑，本脚本会在真跑之前先数一遍 DROP 条数。
 #
 # 用法:  E2E_HOME=~/z-schedule-e2e ./bootstrap_mysql.sh
@@ -21,7 +21,7 @@ IMAGE="${IMAGE:-mysql:8.0.26}"
 HOST_PORT="${HOST_PORT:-33060}"
 # 仓内建表脚本；默认按本脚本的位置反推，换机器不用改
 REPO="${REPO:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
-DDL="$REPO/_doc/004_sql/z-schedule.sql"
+DDL="$REPO/_doc/002_deploy/init/z-schedule.sql"
 
 [ -f "$DDL" ] || { echo "FATAL: 找不到建表脚本 $DDL"; exit 1; }
 

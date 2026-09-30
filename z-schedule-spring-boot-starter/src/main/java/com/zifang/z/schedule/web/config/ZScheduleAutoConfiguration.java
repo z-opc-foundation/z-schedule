@@ -52,7 +52,7 @@ import java.util.Properties;
  * {@code sqlSessionFactorySchedule} 各带一支 {@code @ConditionalOnMissingBean(name = …)}，
  * 按 <b>bean 名</b>退让（admin 的 {@code DevDataSourceConfig} 就是靠这两支同名 @Bean 换 H2）。
  * 仍保留 {@code z.base.db.schedule.disabled=true}：它是"宿主只补齐两支同名 bean 里的一支"时唯一
- * 能让 starter 整段不注册的路，也是已发布 1.0.4 那条路（见 {@code _doc/003_script/e2e/README.md} §19）。
+ * 能让 starter 整段不注册的路，也是已发布 1.0.4 那条路（见 {@code _doc/005_testing/e2e/README.md} §19）。
  *
  * <p><b>为什么自带 {@code @EnableScheduling}</b>：Leader 续约（{@code LeaderElector.elect}）与
  * 周期 reconcile（{@code JobTriggerServiceImpl.reloadRunningJobs}）都挂在 {@code @Scheduled} 上，
@@ -181,7 +181,7 @@ public class ZScheduleAutoConfiguration extends ModuleDataSourceTemplate {
      *       没有任何 {@code maxWait} 在前面 —— 查询的第一个读包就是无界的。
      *       线上量到的正是这一档：{@code /jobinfo/list} 连续 30 s、75 s、90 s 三次都无应答，
      *       而两个池的 {@code max-wait} 都是 60 s（读数与复跑见
-     *       {@code _doc/003_script/e2e/README.md} §23）。<b>{@code maxWait} 解释不了它，
+     *       {@code _doc/005_testing/e2e/README.md} §23）。<b>{@code maxWait} 解释不了它，
      *       {@code socketTimeout} 能。</b></li>
      * </ul>
      *

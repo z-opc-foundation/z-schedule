@@ -30,7 +30,7 @@ import javax.sql.DataSource;
  * {@code @Bean} 带 {@code @ConditionalOnMissingBean(name = …)}，按名退让给本类。
  * 仍要给它的是两条旧路——已发布的 1.0.4 字节没有按名退让，而 {@code cd z-schedule-admin && mvn
  * spring-boot:run} 的依赖正由 {@code ~/.m2} 解析（2026-09-27 四条命令逐条实测，读数在
- * {@code _doc/003_script/e2e/README.md} §17.1，修复前后的成对读数在 §19）。
+ * {@code _doc/005_testing/e2e/README.md} §17.1，修复前后的成对读数在 §19）。
  * 反过来，{@code disabled=true} 也不是"少给一支 bean"的开关：它把两支一起摘掉，而类上那句
  * {@code @MapperScan} 引用 {@code sqlSessionFactorySchedule} 是无条件的 ⇒ 设了旗却只补
  * {@code DataSource} 这一格两版字节都起不来。

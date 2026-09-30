@@ -38,7 +38,7 @@ import static org.junit.Assert.fail;
  * 任务生命周期的数据库层验证：{@code add/update/start/stop/delete} 到底往表里写了什么，
  * 以及"报成功"是不是真的能被引擎兑现。
  * <p>
- * 表结构来自随包的 {@code _doc/004_sql/z-schedule.sql}（{@link ShippedSqlScript}），不是这里另抄的
+ * 表结构来自随包的 {@code _doc/002_deploy/init/z-schedule.sql}（{@link ShippedSqlScript}），不是这里另抄的
  * 简化 DDL——抄出来的建表语句会跟着作者记忆漂，而"列对不上"在构建期完全不红。
  * <p>
  * 断言一律走独立的裸 JDBC 读（{@link #row(int)}）：被服务的 mapper 同时当写入方和取证方时，

@@ -14,7 +14,7 @@ services:
       dockerfile: deploy/Dockerfile.backend
       args:
         # 通配而不是抄死的 z-schedule-admin-<ver>-exec.jar（抬版后字面量各格形状都在 250 上量过，
-        # 含一种"rc=0、tag 是新版本、里面是 target/ 那份别的 jar"，见 _doc/003_script/e2e/README.md §14）
+        # 含一种"rc=0、tag 是新版本、里面是 target/ 那份别的 jar"，见 _doc/005_testing/e2e/README.md §14）
         JAR_FILE: "${JAR_FILE:-z-schedule-admin/target/*-exec.jar}"
     restart: unless-stopped
     expose:

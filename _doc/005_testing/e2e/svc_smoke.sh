@@ -22,7 +22,7 @@ WINDOW="${WINDOW:-25}"
 # 日志路径不硬编码、也不从命名约定推，而是问进程本身：`/proc/<pid>/fd/1` 指向哪份就数哪份。
 # 原先写作 LOG=logs/service_${PORT}.out，而这一轮起日志改成一构件一文件 ⇒ 默认路径指向的是
 # **上一个构件**的日志：09-27 换构件后首次实跑，库侧 21 条 handle_code=200（真执行了）而 handler 侧证 0 行，
-# 冒烟把自己的量具判成红。见 _doc/003_script/e2e/README.md §10。
+# 冒烟把自己的量具判成红。见 _doc/005_testing/e2e/README.md §10。
 LOG="${LOG:-}"
 
 q() { ./q.sh -N -B --skip-column-names "$@" 2>&1; }

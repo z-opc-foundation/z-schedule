@@ -94,7 +94,7 @@
             Defaulting to no-operation (NOP) logger implementation"，凡走 SLF4J 的日志静默丢弃。
             实测受影响的这一格：本模块 DevDataSourceConfig 那行 INFO 在 stdout 里 0 命中，
             而同一进程里走 log4j2 原生 Logger 的 LeaderElector WARN 照打（两套门面只差在这条绑定上）。
-            判据与复现见 _doc/003_script/e2e/p44.sh 的 C3b 与 _doc/003_script/e2e/README.md §21。
+            判据与复现见 _doc/005_testing/e2e/p44.sh 的 C3b 与 _doc/005_testing/e2e/README.md §21。
             两条同时成立才叫"一套绑定"：2.26.1 的绑定还依赖 log4j-api 2.20+，而本仓 log4j-core 是 2.17.2
             （这正是老注释说的 NoSuchMethodError 出处）⇒ 摘掉 2.x 绑定同时也消掉那个冲突。
         -->

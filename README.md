@@ -336,34 +336,37 @@ MIT，见根 [`LICENSE`](LICENSE)（`Copyright (c) 2026 z-opc-foundation`）；�
 
 - [`_doc/001_arch/`](_doc/001_arch/) — 架构与模块说明：
   - [`z-schedule-admin.md`](_doc/001_arch/z-schedule-admin.md) — 演示应用的定位、本地启动的真实前置、鉴权面、探针面
-- [`_doc/002_deploy/`](_doc/002_deploy/) — 目前为空目录（部署 SQL 走的是下面的 `004_sql/`，部署资产在仓根 `deploy/`）
+- [`_doc/002_deploy/`](_doc/002_deploy/) — 建表 SQL：
+  - [`init/z-schedule.sql`](_doc/002_deploy/init/z-schedule.sql) — 全量建表脚本（6 张表，不含 DROP）。
+    部署资产（compose / k8s / `bin/*.sh` / `Makefile`）在仓根 [`deploy/`](deploy/)，不在这里
 - [`_doc/003_script/`](_doc/003_script/) — 运维脚本：
   - [`deploy_maven_center.sh`](_doc/003_script/deploy_maven_center.sh) — 发 Central（不可逆，需单独授权）
   - [`install-settings.sh`](_doc/003_script/install-settings.sh) — 本机 Maven settings/凭证骨架
-  - [`e2e/`](_doc/005_testing/e2e/) — 端到端量具与验收档，`README.md` 是台账、`pNN.sh` 是分档的臂：
-    - [`README.md`](_doc/005_testing/e2e/README.md) — 250 演练记录（可在新机重放）；§7 路由策略兑现差、§8 测试基线、
-      §10 探针面、§11–§13 三种模式彩排、§14 抄死版本号、§17–§19 本地启动、§21–§22 跨机对账
-    - 环境准备与跑法：[`bootstrap_mysql.sh`](_doc/005_testing/e2e/bootstrap_mysql.sh)、
-      [`mysql.example.env`](_doc/005_testing/e2e/mysql.example.env)、
-      [`run.sh`](_doc/005_testing/e2e/run.sh)、[`e2e.sh`](_doc/005_testing/e2e/e2e.sh)、
-      [`svc_smoke.sh`](_doc/005_testing/e2e/svc_smoke.sh)、
-      [`run_p20_and_restore.sh`](_doc/005_testing/e2e/run_p20_and_restore.sh)
-    - 分档臂：[`p6.sh`](_doc/005_testing/e2e/p6.sh)、[`p10.sh`](_doc/005_testing/e2e/p10.sh)、
-      [`p11.sh`](_doc/005_testing/e2e/p11.sh)、[`p12.sh`](_doc/005_testing/e2e/p12.sh)、
-      [`p13.sh`](_doc/005_testing/e2e/p13.sh)、[`p14.sh`](_doc/005_testing/e2e/p14.sh)、
-      [`p15.sh`](_doc/005_testing/e2e/p15.sh)、[`p16.sh`](_doc/005_testing/e2e/p16.sh)、
-      [`p17.sh`](_doc/005_testing/e2e/p17.sh)、[`p18.sh`](_doc/005_testing/e2e/p18.sh)、
-      [`p19.sh`](_doc/005_testing/e2e/p19.sh)、[`p20.sh`](_doc/005_testing/e2e/p20.sh)、
-      [`p21.sh`](_doc/005_testing/e2e/p21.sh)、[`p22.sh`](_doc/005_testing/e2e/p22.sh)、
-      [`p23.sh`](_doc/005_testing/e2e/p23.sh)、[`p24.sh`](_doc/005_testing/e2e/p24.sh)、
-      [`p25.sh`](_doc/005_testing/e2e/p25.sh)、[`p26.sh`](_doc/005_testing/e2e/p26.sh)、
-      [`p38_shapes.sh`](_doc/005_testing/e2e/p38_shapes.sh)、[`p44.sh`](_doc/005_testing/e2e/p44.sh)
-    - 辅助尺与量具：[`q.sh`](_doc/005_testing/e2e/q.sh)、[`_q_digest.sql`](_doc/005_testing/e2e/_q_digest.sql)、
-      [`ui_base_probe.sh`](_doc/005_testing/e2e/ui_base_probe.sh)、
-      [`tally_surefire.py`](_doc/005_testing/e2e/tally_surefire.py)
-- `_doc/004_skill/` — AI skill 定义（目前为空目录，暂无 skill）
-- [`_doc/002_deploy/init/`](_doc/002_deploy/init/) — 建表（**本仓用的是这个非标准槽位，SQL 不在 `002_deploy/` 里**）：
-  - [`z-schedule.sql`](_doc/002_deploy/init/z-schedule.sql) — 全量建表脚本（6 张表，不含 DROP）
+- [`_doc/005_testing/`](_doc/005_testing/) — 端到端量具与验收档，`e2e/README.md` 是台账、`pNN.sh` 是分档的臂：
+  - [`README.md`](_doc/005_testing/e2e/README.md) — 250 演练记录（可在新机重放）；§7 路由策略兑现差、§8 测试基线、
+    §10 探针面、§11–§13 三种模式彩排、§14 抄死版本号、§17–§19 本地启动、§21–§22 跨机对账
+  - 环境准备与跑法：[`bootstrap_mysql.sh`](_doc/005_testing/e2e/bootstrap_mysql.sh)、
+    [`mysql.example.env`](_doc/005_testing/e2e/mysql.example.env)、
+    [`run.sh`](_doc/005_testing/e2e/run.sh)、[`e2e.sh`](_doc/005_testing/e2e/e2e.sh)、
+    [`svc_smoke.sh`](_doc/005_testing/e2e/svc_smoke.sh)、
+    [`run_p20_and_restore.sh`](_doc/005_testing/e2e/run_p20_and_restore.sh)
+  - 分档臂：[`p6.sh`](_doc/005_testing/e2e/p6.sh)、[`p10.sh`](_doc/005_testing/e2e/p10.sh)、
+    [`p11.sh`](_doc/005_testing/e2e/p11.sh)、[`p12.sh`](_doc/005_testing/e2e/p12.sh)、
+    [`p13.sh`](_doc/005_testing/e2e/p13.sh)、[`p14.sh`](_doc/005_testing/e2e/p14.sh)、
+    [`p15.sh`](_doc/005_testing/e2e/p15.sh)、[`p16.sh`](_doc/005_testing/e2e/p16.sh)、
+    [`p17.sh`](_doc/005_testing/e2e/p17.sh)、[`p18.sh`](_doc/005_testing/e2e/p18.sh)、
+    [`p19.sh`](_doc/005_testing/e2e/p19.sh)、[`p20.sh`](_doc/005_testing/e2e/p20.sh)、
+    [`p21.sh`](_doc/005_testing/e2e/p21.sh)、[`p22.sh`](_doc/005_testing/e2e/p22.sh)、
+    [`p23.sh`](_doc/005_testing/e2e/p23.sh)、[`p24.sh`](_doc/005_testing/e2e/p24.sh)、
+    [`p25.sh`](_doc/005_testing/e2e/p25.sh)、[`p26.sh`](_doc/005_testing/e2e/p26.sh)、
+    [`p38_shapes.sh`](_doc/005_testing/e2e/p38_shapes.sh)、[`p44.sh`](_doc/005_testing/e2e/p44.sh)
+  - 辅助尺与量具：[`q.sh`](_doc/005_testing/e2e/q.sh)、[`_q_digest.sql`](_doc/005_testing/e2e/_q_digest.sql)、
+    [`ui_base_probe.sh`](_doc/005_testing/e2e/ui_base_probe.sh)、
+    [`tally_surefire.py`](_doc/005_testing/e2e/tally_surefire.py)
+
+`_doc` 的桶按需存在：本仓没有 `004_skill`（无已提交的 SKILL 定义），也没有 `006_release` /
+`007_backlog` / `008_troubleshooting`（发布档在 lead 仓的 `006_发布与集成/`，坑记在
+`_doc/005_testing/e2e/README.md` 里逐档记）。
 
 部署面另在 [`deploy/`](deploy/)（compose / k8s / `bin/start-mode*.sh` / `Makefile`，
 说明文档 [`deploy/README.md`](deploy/README.md)），前端工程在 [`_frontend/`](_frontend/)
