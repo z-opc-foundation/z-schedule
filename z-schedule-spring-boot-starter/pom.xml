@@ -98,12 +98,6 @@
             <artifactId>log4j-api</artifactId>
         </dependency>
 
-        <dependency>
-            <groupId>junit</groupId>
-            <artifactId>junit</artifactId>
-            <version>4.13.2</version>
-            <scope>test</scope>
-        </dependency>
 
         <!--
             仅测试用: JobLogMapperH2Test 要在真实数据库上跑聚合 SQL
