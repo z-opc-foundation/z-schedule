@@ -8,14 +8,12 @@ import org.springframework.core.env.StandardEnvironment;
 import javax.sql.DataSource;
 import java.net.InetAddress;
 import java.net.ServerSocket;
-import java.net.Socket;
 import java.sql.Connection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -24,19 +22,44 @@ import static org.junit.Assert.fail;
 /**
  * 调度池<b>物理连接</b>的时间界。
  *
- * <p>要钉住的机制不是"配了个参数"，而是"<b>{@code maxWait} 管不到新建物理连接那一段</b>"：
- * 池空时 Druid 在调用线程里同步 connect，那一段既不受 {@code maxWait} 约束，也没人给它设驱动超时。
- * 所以两支计时测试都把 {@code max-wait} 压到 1000 ms —— 如果 {@code maxWait} 真能定界，
- * 控制支会在 1 s 就抛；它偏不，一直卡到我们把 {@code socketTimeout} 设进去为止。
- * 这两支互为对照，缺任何一支都分不开"旋钮生效"和"其实是 maxWait 放手"。
+ * <p><b>2026-10-04 实测订正：原注释「{@code maxWait} 管不到新建物理连接那一段」是错的。</b>
+ * 原文拿"控制支 1 s 都没抛、它偏不"当证成，实测<b>它就在 1.007 s 抛了</b> ——
+ * 控制支反过来证明了被它否掉的那个解释。
  *
- * <p>形状是"接得下 TCP 但一个字节都不回"（{@link ServerSocket} 绑上后从不 {@code accept}，
- * 握手由内核完成，驱动的读就永远等不到 MySQL 的第一个包）。它量的正是线上那一档
- * （{@code _doc/003_script/e2e/README.md} §23：{@code /actuator/health} 75 s 无应答）。
+ * <p><b>真实结构</b>（Druid 1.2.24 源码与实测两边对上，行号为该版本
+ * {@code com/alibaba/druid/pool/DruidDataSource.java}）：
+ * <pre>
+ *   调用线程 getConnection(maxWait)
+ *     └─ getConnectionInternal:  expiredTime = now + maxWait                     :1369-1370
+ *          ├─ pollLast(startTime, expiredTime)   在池的 notEmpty 上等到 expiredTime :1475
+ *          └─ 到点 holder 仍为 null ⇒ GetConnectionTimeoutException(msg, createError) :1513-1571
+ *   后台 CreateConnectionThread（被 empty.signal 唤醒，守护线程）                  :2533-2639
+ *     └─ 循环 createPhysicalConnection()
+ *          └─ connectTimeout / socketTimeout 作用在<b>每一次尝试</b>上
+ *          └─ 失败记进池的 createError；失败后歇 timeBetweenConnectErrorMillis 再试
+ * </pre>
  *
- * <p>⚠ 本机量不到的是<b>另一</b>形状："SYN 被静默丢弃"要靠一个不可路由的地址，那在 CI / 笔记本
- * （VPN、代理、fake-ip）上是随机的，所以 {@code connectTimeout} 只钉到"确实递给了驱动"这一层
- * （{@link #默认只定界新建连接的时间不砍正在跑的查询()}），它的计时不在这里量。
+ * <p>⇒ 两个旋钮是<b>总 / 单次</b>两层，<b>互不冲突</b>：
+ * <ul>
+ *   <li><b>maxWait</b>：整段的<b>总</b>界 —— 调用线程等多久就放弃。实测每次都精确贴着它
+ *       （1000→1015/1017、20000→20018、30000→30016/30017）。</li>
+ *   <li><b>socketTimeout</b>：<b>单次</b>尝试的界。设得比 maxWait 小时那次尝试早失败、
+ *       记进 createError，到 maxWait 由 Druid 收尾，于是异常<b>带上</b>驱动的 cause。
+ *       它同时还管"借到的老连接上的读包"（§23 线上 75 s 那一档：
+ *       {@code testOnBorrow=false} ⇒ 借出瞬间成功、前面没有 maxWait）。</li>
+ *   <li><b>connectTimeout</b>：单次尝试里"三次握手都完不成"的形状（SYN 被静默丢弃）。</li>
+ * </ul>
+ *
+ * <p>黑洞形状 = {@link ServerSocket} 绑上后从不 {@code accept}：三次握手由内核完成，
+ * 驱动的读永远等不到 MySQL 的第一个包。
+ *
+ * <p>⚠ 诚实记账：<b>本机造不出的两个形状</b> ——
+ * "借到一条已建立但对端变哑的老连接"（要一个会讲 MySQL 协议、能中途变哑的服务端）
+ * 与"SYN 被静默丢弃"（要不可路由地址）。
+ * 所以 {@code socketTimeout} 在"借到的老连接"那一档、
+ * {@code connectTimeout} 在"SYN 被丢弃"那一档，都只钉到"确实递给了驱动"这一层；
+ * 它们的<b>计时</b>由 {@link #读超时只管单次尝试而整段的界仍是maxWait()} 那一条间接证明。
+ * 完整读数表见 {@code _doc/POOL-TIMEOUT-MEASUREMENT.md}。
  */
 public class ZSchedulePoolConnectTimeoutTest {
 
@@ -71,59 +94,68 @@ public class ZSchedulePoolConnectTimeoutTest {
         // 池自己那三个数都要压小：initialSize>0 会让 init() 连着建 5 条，计时就被摊成 5 倍
         m.put("z.base.db.schedule.initial-size", 0);
         m.put("z.base.db.schedule.min-idle", 0);
-        // maxWait 故意压到 1 s：它是本节的"被否掉的那个解释"，见类注释
         m.put("z.base.db.schedule.max-wait", 1000L);
         return m;
     }
 
-    /** 在别的线程里跑一次 getConnection()，返回"到点还卡着吗"；无论与否都把黑洞放开，不留僵尸线程。 */
-    private static boolean stillBlockedAt(DataSource ds, ServerSocket ss, long millis) throws Exception {
-        final boolean[] done = new boolean[]{false};
-        Thread t = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    Connection c = ds.getConnection();
-                    if (c != null) {
-                        c.close();
-                    }
-                } catch (Throwable ignore) {
-                    // 这一支只量"有没有在 millis 内收尾"，抛的是什么由调用方的断言管
-                } finally {
-                    done[0] = true;
-                }
-            }
-        }, "p47-getconnection");
-        t.setDaemon(true);
-        t.start();
-        t.join(millis);
-        boolean blocked = !done[0];
-        // accept 之后立刻 close ⇒ 驱动的读收到 FIN，卡住的线程能自己退出去
-        Socket peer = null;
-        try {
-            peer = ss.accept();
-        } catch (Exception ignore) {
-        } finally {
-            if (peer != null) {
-                try {
-                    peer.close();
-                } catch (Exception ignore) {
-                }
+    /** 异常链的类名，' &lt;- ' 连接，循环 cause 时截断 —— 只为断言"是谁在定界"服务。 */
+    private static String chainOf(Throwable t) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; t != null && i < 8; i++, t = t.getCause()) {
+            sb.append(i == 0 ? "" : " <- ").append(t.getClass().getSimpleName());
+            if (t.getCause() == t) {
+                break;
             }
         }
-        t.join(8000);
-        assertFalse("放开黑洞后 getConnection 线程仍没收尾（测例会拖到 fork 退出）", t.isAlive());
-        return blocked;
+        return sb.length() == 0 ? "(没有异常)" : sb.toString();
     }
 
+    /**
+     * 默认递下去的<b>就是文档里那两个数</b>。
+     *
+     * <p>2026-10-04 订正：这一支原先断言 {@code socketTimeout} 默认必须为 null，
+     * 报 "expected null, but was:60000"。它与生产代码在<b>同一个</b>提交
+     * （4f89d9c，2026-09-27「收口工作树未提交改动」）里进来，自相矛盾：
+     * 测例说"不许默认就开，开了会砍掉慢查询"，生产代码的注释则用数据驳回了这个前提
+     * —— 250 真机上最慢的合法落库语句是十几到几十毫秒量级（§4.2 那组 17–50 ms），
+     * 60 s 是三个数量级的余量；而"不设"的代价是 §23 实测的那一档：
+     * {@code /jobinfo/list} 连续 30 s、75 s、90 s 无应答，一个请求线程配一条永久悬住的连接，
+     * 来一个悬一对，最后整张管理面跟着死。
+     *
+     * <p>⇒ 以生产代码为准（它有论证、还留了逃生口），本支改为钉住那个数。
+     */
     @Test
-    public void 默认只定界新建连接的时间不砍正在跑的查询() {
+    public void 默认递下去的旋钮就是文档里那两个数() {
         Properties p = ((DruidDataSource) poolWith(new HashMap<String, Object>())).getConnectProperties();
         assertNotNull("默认必须给驱动递一个 connectProperties（否则池空时那段是无限等）", p);
-        assertEquals(String.valueOf(ZScheduleAutoConfiguration.DEFAULT_SCHEDULE_CONNECT_TIMEOUT_MILLIS),
+        assertEquals("connectTimeout 必须真的递到驱动，否则模块默认值只是一句注释",
+                String.valueOf(ZScheduleAutoConfiguration.DEFAULT_SCHEDULE_CONNECT_TIMEOUT_MILLIS),
                 p.getProperty("connectTimeout"));
-        assertNull("socketTimeout 不许默认就开：它是每个读包的超时，开了会掐掉慢查询",
+        // 这一条刻意写<b>字面量</b>而不是引用常量：两边都取自同一个常量的话，改了常量两边一起动，
+        // 断言恒为真（2026-10-04 变异验证实测：把 60000 改成 30000 照样 6/6 绿）。
+        assertEquals("socketTimeout 的默认必须是 60000。这个数有出处、也有运维代价："
+                        + "250 真机基线里最慢的合法落库语句是十几到几十毫秒量级（§4.2 那组 17–50 ms），"
+                        + "60 s 是三个数量级的余量；而『不设』的代价是 §23 实测的那一档 —— "
+                        + "/jobinfo/list 连续 30 s、75 s、90 s 无应答，一个请求线程配一条永久悬住的连接，"
+                        + "来一个悬一对，最后整张管理面跟着死。改它要连同这两处证据一起重算",
+                60000, ZScheduleAutoConfiguration.DEFAULT_SCHEDULE_SOCKET_TIMEOUT_MILLIS);
+        assertEquals("60 s 也必须真的递到驱动，否则上一条钉的只是一个孤零零的常量",
+                String.valueOf(ZScheduleAutoConfiguration.DEFAULT_SCHEDULE_SOCKET_TIMEOUT_MILLIS),
                 p.getProperty("socketTimeout"));
+    }
+
+    /** 上面那个"嫌长就调小"的反面：{@code 0} 必须真能把旋钮摘掉，否则逃生口只是文档上的一句话。 */
+    @Test
+    public void 设零就摘掉读超时这个逃生口() {
+        assertNull("显式设 0 应当把 socketTimeout 整个摘掉（文档承诺的『退回旧行为』）",
+                ((DruidDataSource) poolWith(
+                        map("z.base.db.schedule.socket-timeout-millis", 0)))
+                        .getConnectProperties().getProperty("socketTimeout"));
+        assertEquals("同一张卡上 connectTimeout 不受 0 影响，两个旋钮各管各的",
+                String.valueOf(ZScheduleAutoConfiguration.DEFAULT_SCHEDULE_CONNECT_TIMEOUT_MILLIS),
+                ((DruidDataSource) poolWith(
+                        map("z.base.db.schedule.socket-timeout-millis", 0)))
+                        .getConnectProperties().getProperty("connectTimeout"));
     }
 
     /** 阳性对照：默认值不许压过宿主，两个旋钮都得听显式设的那个。 */
@@ -150,18 +182,47 @@ public class ZSchedulePoolConnectTimeoutTest {
     }
 
     /**
-     * 控制支：<b>不设</b> {@code socketTimeout} 时，读永远等不到包 —— 而 {@code maxWait} 已经
-     * 被压到 1 s，它拦不住。这一支量的是"线上 health 挂 75 s"那个形状本身。
+     * 池空要新建物理连接时，<b>整段的界就是 {@code maxWait}</b>（2026-10-04 实测订正）。
+     *
+     * <p>原文这一支叫「不设读超时时哪怕 maxWait 一秒也会一直卡住」，并拿它当控制支
+     * 来证成"maxWait 管不到建连"。**实测它 1.007 s 就抛了** ——
+     * 恰恰是被否掉的那个解释。
+     *
+     * <p>本支不设 {@code socketTimeout}（设 0 ⇒ 驱动不管读包），只量总界，
+     * 而且用<b>配对</b>断言而不是单点读数：maxWait 压到 1 s ⇒ 约 1 s 抛；
+     * 再把 maxWait 抬到 3 s ⇒ 约 3 s 抛。<b>耗时跟着 maxWait 走</b>，
+     * 这才把"maxWait 定界"钉死（原来只钉了 1 s 这一个点，换个 maxWait 就漂）。
      */
     @Test
-    public void 不设读超时时哪怕maxWait一秒也会一直卡住() throws Exception {
+    public void 建连那一段的界是maxWait而不是驱动超时() throws Exception {
         ServerSocket ss = blackHole();
         try {
-            Map<String, Object> props = toBlackHole(ss);
-            // 只把读超时拿掉：connectTimeout 默认 5000 管不到这一段（内核已替服务端完成握手）
-            DataSource ds = poolWith(props);
-            assertTrue("默认（socketTimeout 关）下 getConnection 在 4 s 时仍卡着——这才是 §23 那一档",
-                    stillBlockedAt(ds, ss, 4000));
+            Map<String, Object> fast = toBlackHole(ss);
+            long t0 = System.currentTimeMillis();
+            try {
+                poolWith(fast).getConnection().close();
+                fail("黑洞里不该拿得到连接");
+            } catch (Exception ignore) {
+            }
+            long fastTook = System.currentTimeMillis() - t0;
+            assertTrue("maxWait=1000 应当约 1 s 抛，实测 " + fastTook + " ms", fastTook < 3000);
+            // 下限：排除"端口被拒所以秒回"这种与超时无关的假通过
+            assertTrue("实测 " + fastTook + " ms，快得像端口被拒（Connection refused），"
+                    + "那不是超时在起作用", fastTook >= 700);
+
+            // 变一下 maxWait，耗时必须跟着走 —— 否则"贴着 maxWait"只是巧合
+            Map<String, Object> slow = toBlackHole(ss);
+            slow.put("z.base.db.schedule.max-wait", 3000L);
+            t0 = System.currentTimeMillis();
+            try {
+                poolWith(slow).getConnection().close();
+                fail("黑洞里不该拿得到连接");
+            } catch (Exception ignore) {
+            }
+            long slowTook = System.currentTimeMillis() - t0;
+            assertTrue("maxWait 抬到 3000 后耗时应跟着涨（实测 " + fastTook + " → " + slowTook
+                    + " ms）。若两者相近，说明根本不是 maxWait 在定界，这条断言要重做",
+                    slowTook > fastTook + 1000);
         } finally {
             try {
                 ss.close();
@@ -171,32 +232,52 @@ public class ZSchedulePoolConnectTimeoutTest {
     }
 
     /**
-     * 同一份黑洞、同一个 1 s 的 {@code maxWait}，只多设一个 {@code socketTimeout=1500}：
-     * 必须<b>有界</b>地失败。耗时落在 1500 ms 附近而远大于 1 s ⇒ 放手的是读超时，不是 maxWait。
+     * {@code socketTimeout} 只管<b>单次</b>物理连接尝试，<b>整段的总界仍是 maxWait</b>。
+     *
+     * <p>形状刻意把两个数<b>拉开</b>（maxWait=3000 / socketTimeout=200），
+     * 这样"谁在定界"没法靠时间巧合蒙对：
+     * <ul>
+     *   <li>若真是读超时在定界 ⇒ 约 200 ms 抛 {@code CommunicationsException}；</li>
+     *   <li>若根本没人定界 ⇒ 要么秒回，要么一直卡着。</li>
+     * </ul>
+     * 实测：<b>3006 ms</b>，最外层是 Druid 自己的 {@code GetConnectionTimeoutException}，
+     * 它的 cause 链是 {@code SocketTimeoutException ← CJCommunicationsException
+     * ← CommunicationsException}。即：驱动确实按 200 ms 失败了，
+     * 只是调用线程仍在等到 maxWait 才收尾，并把那次失败当 cause 附上。
+     *
+     * <p>两个时间断言都留了 1000 ms 以上余量，不贴边（真读数 3006，窗口 [2000, 8000]）。
+     *
+     * <p>反向可证：把 {@code applyDriverConnectTimeouts} 里的 {@code socketTimeout}
+     * 接线去掉再跑本支，cause 链上就不会再有 {@code SocketTimeoutException}，本支报红。
      */
     @Test
-    public void 设了读超时就要在有界时间内报错() throws Exception {
+    public void 读超时只管单次尝试而整段的界仍是maxWait() throws Exception {
         ServerSocket ss = blackHole();
         try {
             Map<String, Object> props = toBlackHole(ss);
-            props.put("z.base.db.schedule.socket-timeout-millis", 1500);
-            final DataSource ds = poolWith(props);
+            props.put("z.base.db.schedule.max-wait", 3000L);
+            props.put("z.base.db.schedule.socket-timeout-millis", 200);
             long t0 = System.currentTimeMillis();
-            String msg = null;
+            Throwable thrown = null;
             try {
-                Connection c = ds.getConnection();
-                c.close();
+                poolWith(props).getConnection().close();
                 fail("黑洞里不该拿得到连接");
             } catch (Throwable e) {
-                msg = String.valueOf(e);
+                thrown = e;
             }
             long took = System.currentTimeMillis() - t0;
-            assertTrue("应当在 socketTimeout(1500) 附近抛，实测 " + took + " ms（下限挡掉"
-                    + "\"其实是端口拒绝所以秒回\"这种假通过）", took >= 1200);
-            assertTrue("实测 " + took + " ms，远大于 maxWait(1000) ⇒ 定界的是读超时而不是 maxWait",
-                    took <= 12000);
-            assertNotNull(msg);
-            System.out.println("[p47] 黑洞 + socketTimeout=1500 → " + took + " ms, " + msg);
+            String chain = chainOf(thrown);
+
+            assertTrue("整段应由 maxWait(3000) 定界，实测 " + took + " ms。"
+                    + "若约 200 ms 就回来说明是读超时在定界（那正是原注释的立论）",
+                    took >= 2000);
+            assertTrue("实测 " + took + " ms，远超 maxWait(3000)+余量，说明这一段没人给它界", took < 8000);
+            assertTrue("到期者必须是 Druid 自己（maxWait 到点），实测链：" + chain,
+                    chain.startsWith("GetConnectionTimeoutException"));
+            assertTrue("socketTimeout(200) 应当已生效：那次尝试的失败应当作为 cause 附在链上，"
+                    + "实测链：" + chain + "。若链上只有 GetConnectionTimeoutException，"
+                    + "说明 socketTimeout 没递到驱动（旋钮没接线）", chain.contains("SocketTimeoutException"));
+            System.out.println("[p47] 黑洞 + maxWait=3000 + socketTimeout=200 → " + took + " ms, " + chain);
         } finally {
             try {
                 ss.close();

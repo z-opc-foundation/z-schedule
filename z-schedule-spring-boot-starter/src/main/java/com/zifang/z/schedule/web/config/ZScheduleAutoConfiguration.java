@@ -169,9 +169,13 @@ public class ZScheduleAutoConfiguration extends ModuleDataSourceTemplate {
      * <p><b>两种"连不上库"的形状，界在不同的地方</b>（这一句是 2026-09-27 被自己的测例纠正过来的，
      * 原先这里写的是错的机制）：
      * <ul>
-     *   <li><b>池空、要新建物理连接</b>：Druid 的调用线程等 {@code maxWait}，到点抛错。
-     *       实测（{@code ZSchedulePoolConnectTimeoutTest#池空形状下maxWait就是那道界}）：
-     *       {@code max-wait=1000} + 黑洞端口 ⇒ 1024 ms 抛。这一形状<b>不</b>需要本节的旋钮。</li>
+     *   <li><b>池空、要新建物理连接</b>：Druid 的调用线程等 {@code maxWait}，到点抛
+     *       {@code GetConnectionTimeoutException}。实测
+     *       （{@code ZSchedulePoolConnectTimeoutTest#建连那一段的界是maxWait而不是驱动超时}）：
+     *       {@code max-wait=1000} + 黑洞端口 ⇒ 1015 ms 抛，抬到 3000 ⇒ 3006 ms 抛。
+     *       这一形状<b>不需要本节的旋钮</b>来定总界；本节的旋钮管的是
+     *       <b>每一次物理连接尝试</b>（后台创建线程上，失败后还会再试），
+     *       测它有没有接线看 {@code #读超时只管单次尝试而整段的界仍是maxWait}。</li>
      *   <li><b>借到一条对端已经不回包的老连接</b>：{@code test-on-borrow} 是关的（刻意的，
      *       见 {@code ModuleDataSourceTemplate} 那段保活注释），借出<em>瞬间成功</em>，
      *       没有任何 {@code maxWait} 在前面 —— 查询的第一个读包就是无界的。
