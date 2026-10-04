@@ -10,7 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 读取并执行随包建表脚本 {@code _doc/004_sql/z-schedule.sql} 的测试工具。
+ * 读取并执行随包建表脚本 {@code _doc/002_deploy/init/z-schedule.sql} 的测试工具。
  * <p>
  * 存在的理由只有一个：需要建表的测试必须用**同一份会被发布的脚本**，而不是各自抄一段简化 DDL。
  * 抄出来的 DDL 会跟着测试作者的记忆漂——历史上"Unknown column"之所以只在现网首次访问才炸，
@@ -20,8 +20,15 @@ import java.util.List;
  */
 public final class ShippedSqlScript {
 
+    /**
+     * 2026-09-30「散落文件收口到 _doc/ 编号桶」把脚本从 {@code _doc/004_sql/z-schedule.sql}
+     * 搬到了 {@code _doc/002_deploy/init/z-schedule.sql}，这里仍指着旧路径 ⇒
+     * {@code JobInfoServiceImplH2Test} 32 条全部以 IllegalStateException 开头。
+     * 脚本本身没动（内容与 6 个 DO 的对应关系写在文件头），只是换了位置。
+     */
     private static final String RELATIVE_PATH =
-            "_doc" + File.separator + "004_sql" + File.separator + "z-schedule.sql";
+            "_doc" + File.separator + "002_deploy" + File.separator + "init"
+                    + File.separator + "z-schedule.sql";
 
     private ShippedSqlScript() {
     }
