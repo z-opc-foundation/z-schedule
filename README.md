@@ -72,6 +72,28 @@
 （`JobTriggerServiceImplBehaviorTest` 钉着；此前 `broadcastTotal` 是默认值 0，按分片写的 handler 会一行都不做）。
 取证与三处联动改造点记在 [`_doc/005_testing/e2e/README.md`](_doc/005_testing/e2e/README.md) §7。
 
+**i18n 子系统整体未接线** —— 配 `z.schedule.i18n=en` 没有任何效果，接口文案恒为中文。四条独立实测：
+
+- `getI18n()` 在 `z-schedule-core` / `z-schedule-spring-boot-starter` / `z-schedule-admin`
+  的**生产代码里零调用**，只有 `JobInfoTest` 读它；
+- 全仓 grep `MessageSource` / `LocaleResolver` / `basename` 在 `*.java` 与 `*.yml` 里
+  **零命中** —— 没有任何 bean 去加载那两个资源包；
+- `i18n/messages_zh_CN.properties` 与 `messages_en.properties` 各 6 个 key，
+  这 6 个 key 在任何 `.java` 里**零引用**；
+- 用户实际看到的中文是**写死在代码里**的：`JobInfoServiceImpl:98/144/152/213`
+  （`"Cron表达式格式错误: "`、`"请先停止任务再修改Cron表达式"`、`"请先停止任务再删除"`）、
+  `TriggerCodeEnum:31`（`EXECUTOR_BLOCKED(503, "执行器阻塞")`）。
+
+资源包与代码里的文案并**不是 1:1**：`schedule.job.running=请先停止任务` 对应的代码文案是
+`请先停止任务再修改Cron表达式` / `请先停止任务再删除`（多了后缀）；而
+`schedule.alarm.success` / `schedule.alarm.fail` 对应的告警功能本身是桩 ——
+`DefaultAlarmService:69` 的日志就写着「配置了告警邮箱，但内置实现未接入邮件通道」，
+直接置 `alarmStatus=3`。
+
+⇒ 要真接上 i18n，需要先定：语言按配置固定还是按 `Accept-Language` 协商、回退到哪种语言、
+6 条文案以哪一份为准；且改完会动到现有断言（`JobInfoServiceImplH2Test:379`、
+`JobInfoControllerGroupAccessTest:199` 都在断言中文串）。这是产品决策，未擅自改。
+
 ---
 
 ## 🏗️ 项目结构
@@ -84,7 +106,7 @@ z-schedule/
 │                                    #   ScheduleProperties（z.schedule.* 的载体）
 ├── z-schedule-spring-boot-starter/  # 调度中枢 + HTTP 层：cluster(Leader/Ring/Engine/LogCleanup)、
 │                                    #   web/controller(7 支)、service(+impl)、domain/entity+mapper(6 张表)、
-│                                    #   auth、filter、config(ZScheduleAutoConfiguration)、i18n
+│                                    #   auth、filter、config(ZScheduleAutoConfiguration)
 ├── z-schedule-admin/                # 可启动演示应用（永不上 Maven Central）
 │                                    #   只有 3 个类：ZScheduleAdminApplication / DevDataSourceConfig / DemoJobHandler
 ├── _frontend/                       # 容器目录（自身无 package.json），两个 npm 项目经 `file:` 互相消费
@@ -148,7 +170,7 @@ mvn clean install -DskipTests
 
 | 前缀 | 载体 | 键 |
 |------|------|-----|
-| `z.schedule.*` | `@ConfigurationProperties("z.schedule")` → `ScheduleProperties` | `accessToken`（默认空）、`triggerPoolFastMax=200`、`triggerPoolSlowMax=200`、`triggerPoolSlowThreshold=5000`、`logRetentionDays=30`、`executorTimeout=0`、`i18n=zh_CN` |
+| `z.schedule.*` | `@ConfigurationProperties("z.schedule")` → `ScheduleProperties` | `accessToken`（默认空）、`triggerPoolFastMax=200`、`triggerPoolSlowMax=200`、`triggerPoolSlowThreshold=5000`、`logRetentionDays=30`、`executorTimeout=0`；`i18n=zh_CN` **配了不生效**（见下方「能力边界」） |
 | `z.base.db.schedule.*` | `ModuleDataSourceTemplate` 自建 `dataSourceSchedule` | `host`、`port`、`database`、`username`、`password`、`initial-size`、`min-idle`、`max-active`、`max-wait`、`connect-timeout-millis`、`socket-timeout-millis`、`disabled` |
 
 两个容易踩的点：
