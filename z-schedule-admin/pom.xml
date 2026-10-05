@@ -52,8 +52,13 @@
         <!-- 2026-09-29 消费者轮收尾：1.0.13 → 1.0.14。同一 reactor 里其余模块的 z-util-core 由
              继承来的 fleet 供 1.0.14（z-boot-fleet 里 z-util.version 那一格），
              这一格留 1.0.13 就是仓内一条半新半旧的线；且 z-util 1.0.14 是 2026-09-29 那批已发布的
-             新号，1.0.13 只是它的上一版 ⇒ admin 打的镜像吃的是旧字节码。键必须留（同上：不继承父链 DM）。 -->
-        <z-util.version>1.0.14</z-util.version>
+             新号，1.0.13 只是它的上一版 ⇒ admin 打的镜像吃的是旧字节码。键必须留（同上：不继承父链 DM）。
+
+             2026-10-05：1.0.14 → 1.0.18。fleet 那一格已同步抬到 1.0.18（6ef352a），
+             这一格若还钉 1.0.14 就会把 admin 单独留在旧字节码上，与 fleet 脱钩。
+             实测 -Dz-util.version=1.0.18 全量：335 测 0 失 0 错，与 1.0.14 基线逐条一致
+             （45 + 284 + 6），升版无回归。 -->
+        <z-util.version>1.0.18</z-util.version>
 
         <!--
             admin 是 standalone demo + docker 镜像源，永远不上 Maven Central。
