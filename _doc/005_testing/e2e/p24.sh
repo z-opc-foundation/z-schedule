@@ -520,7 +520,7 @@ fi
 
 # ---------- A14 / A15：根 README 的广告面，与"文档教的命令写法本身跑不跑得起来" ----------
 # A14（#40 那一格顺手撞出来的）：根 README 是别人 clone 后看到的第一屏，它当时写的是
-#   `# z-wf`（模板遗留，而这个仓的根 pom artifactId 是 z-schedule）、并且只索引了 _doc/003_script/
+#   `# z-camuda`（模板遗留，而这个仓的根 pom artifactId 是 z-schedule）、并且只索引了 _doc/003_script/
 #   一格（001_arch、004_sql 两个目录盘上就有，前页不提）。这类"抄来的数与名"没有尺就永远漂：
 #   标题、构件模块名、_doc 一级目录、每个相对链接、版本字面量、建表张数与表名，六项逐个对实物。
 #   版本那一支与 #38 同源（抄死版本号在抬版后必坏），但它量的是文档，改不动 pom 的单一来源。
@@ -707,14 +707,14 @@ mkdir -p "$WORK/prey_a14"
 python3 - "$REPO/README.md" "$WORK/prey_a14/README.md" <<'PY'
 import sys
 t = open(sys.argv[1], encoding='utf-8').read()
-t = t.replace('# z-schedule\n', '# z-wf\n', 1)                      # 标题退回模板遗留
+t = t.replace('# z-schedule\n', '# z-camuda\n', 1)                      # 标题退回模板遗留
 t = t.replace('<version>1.0.4</version>', '<version>1.0.0</version>', 1)  # 抄死一个旧版本
 t = t.replace('[`LICENSE`](LICENSE)', '[`LICENSE`](LICENSE-typo)', 1)      # 死链
 t = t.replace('- [`_doc/004_sql/`](_doc/004_sql/) — 建表:',
               '- [`_doc/00X/`](_doc/00X/) — 建表:')                 # 索引漏一个真实目录
 t = t.replace('6 张表', '7 张表', 1)                                # 抄来的数（不剥注释正好数到 7）
 t = t.replace('z-schedule-core', 'z-schedule-gone')                 # 模块名对不上 <modules>
-for k in ('z-wf', '1.0.0', 'LICENSE-typo', '00X', '7 张表', 'z-schedule-gone'):
+for k in ('z-camuda', '1.0.0', 'LICENSE-typo', '00X', '7 张表', 'z-schedule-gone'):
     assert k in t, 'A14 猎物没注入：' + k
 open(sys.argv[2], 'w', encoding='utf-8').write(t)
 PY
@@ -729,13 +729,13 @@ if printf '%s' "$A14_HEAD" | grep -qF '|ok' \
    && printf '%s' "$A14_LINK" | grep -qF '|-' \
    && printf '%s' "$A14_VER" | grep -qF '|-|cur=' \
    && printf '%s' "$A14_SQL" | grep -qF '|ok' \
-   && printf '%s' "$A14P" | grep -qF 'first-heading=[z-wf]' \
+   && printf '%s' "$A14P" | grep -qF 'first-heading=[z-camuda]' \
    && printf '%s' "$A14P" | grep -qF 'MODULE|'"$A14_MODN"'|z-schedule-core' \
    && printf '%s' "$A14P" | grep -qF 'DOCIDX|'"$A14_IDXN"'|004_sql' \
    && printf '%s' "$A14P" | grep -qF 'LICENSE-typo' \
    && printf '%s' "$A14P" | grep -qF '1.0.0' \
    && printf '%s' "$A14P" | grep -qF '张数(7)'; then
-  ok "A14 根 README 六项对实物全绿（标题含根 pom artifactId、模块 $A14_MODN 个逐个在场、_doc 一级目录 $A14_IDXN 个逐个被索引、相对链接 $A14_LINKN 个逐个存在、版本字面量只有 pom 的那一个、建表 $A14_SQLN 张与脚本一致〔不剥注释会数到 $A14_SQLRAW，那一档就是给抄来的数设的〕）；同一份尺在猎物上点名的正是这六类：first-heading=[z-wf]、缺模块 z-schedule-core、缺索引项 004_sql、死链 LICENSE-typo（连同 _doc/00X/）、旧版本字面量 1.0.0、张数 7≠6"
+  ok "A14 根 README 六项对实物全绿（标题含根 pom artifactId、模块 $A14_MODN 个逐个在场、_doc 一级目录 $A14_IDXN 个逐个被索引、相对链接 $A14_LINKN 个逐个存在、版本字面量只有 pom 的那一个、建表 $A14_SQLN 张与脚本一致〔不剥注释会数到 $A14_SQLRAW，那一档就是给抄来的数设的〕）；同一份尺在猎物上点名的正是这六类：first-heading=[z-camuda]、缺模块 z-schedule-core、缺索引项 004_sql、死链 LICENSE-typo（连同 _doc/00X/）、旧版本字面量 1.0.0、张数 7≠6"
 else
   bad "A14 形状不对：绿侧[$A14_HEAD][$A14_MOD][$A14_IDX][$A14_LINK][$A14_VER][$A14_SQL] 猎物[$A14P]"
 fi

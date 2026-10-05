@@ -246,7 +246,7 @@
                             repackage execution，不覆盖它就会出现两次 repackage——主 jar 先被就地换成 fat，
                             再由这里 attach 一个 exec。2026-09-26 在 250 真机起 exec jar 时实测到：
                             两次的输入输出串了，exec jar 的 Start-Class 变成 JarLauncher，
-                            java -jar 直接 ClassNotFoundException。z-wf-admin 早写过这条注释，本模块漏了 id。
+                            java -jar 直接 ClassNotFoundException。z-camuda-admin 早写过这条注释，本模块漏了 id。
 
                             同时刻意不写 mainClass：手写全限定类名等于第二处真源，包名一改就静默失效——
                             这里原本写着改名前的 io.github.yuku123.z.schedule.admin.ZScheduleAdminApplication，
