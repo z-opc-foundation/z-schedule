@@ -58,7 +58,7 @@
              这一格若还钉 1.0.14 就会把 admin 单独留在旧字节码上，与 fleet 脱钩。
              实测 -Dz-util.version=1.0.18 全量：335 测 0 失 0 错，与 1.0.14 基线逐条一致
              （45 + 284 + 6），升版无回归。 -->
-        <z-util.version>1.0.18</z-util.version>
+        <z-util.version>1.0.19</z-util.version>
 
         <!--
             admin 是 standalone demo + docker 镜像源，永远不上 Maven Central。
