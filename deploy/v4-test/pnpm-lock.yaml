@@ -8,9 +8,9 @@ importers:
 
   .:
     dependencies:
-      '@yuku123/z-schedule-frontend-component':
-        specifier: file:../../_frontend/z-schedule-frontend-component
-        version: file:../../_frontend/z-schedule-frontend-component(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@yuku123/z-schedule-component':
+        specifier: file:../../_frontend/z-schedule-component
+        version: file:../../_frontend/z-schedule-component(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
     devDependencies:
       esbuild:
         specifier: ^0.21.0
@@ -162,8 +162,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@yuku123/z-schedule-frontend-component@file:../../_frontend/z-schedule-frontend-component':
-    resolution: {directory: ../../_frontend/z-schedule-frontend-component, type: directory}
+  '@yuku123/z-schedule-component@file:../../_frontend/z-schedule-component':
+    resolution: {directory: ../../_frontend/z-schedule-component, type: directory}
     peerDependencies:
       react: ^18.0.0
       react-dom: ^18.0.0
@@ -263,7 +263,7 @@ snapshots:
   '@esbuild/win32-x64@0.21.5':
     optional: true
 
-  '@yuku123/z-schedule-frontend-component@file:../../_frontend/z-schedule-frontend-component(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+  '@yuku123/z-schedule-component@file:../../_frontend/z-schedule-component(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
     dependencies:
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)

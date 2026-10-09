@@ -1,5 +1,5 @@
 # Z-Schedule 前端 nginx 镜像（Mode 2 分体 / Mode 3 集群用）
-# 输入：_frontend/z-schedule-frontend/ 与 _frontend/z-schedule-frontend-component/ 的**源码**
+# 输入：_frontend/z-schedule-suit/ 与 _frontend/z-schedule-component/ 的**源码**
 #   （dist/ 在镜像里产出，不从宿主拷）
 # 输出：nginx 静态服务 + /api 反代到 backend（BACKEND_SERVICE 由 compose/清单注入）
 #
@@ -8,32 +8,32 @@
 #     照那句做完构建仍会成功，白跑一遍而已。）
 #
 # ⚠ 250 上实测出两条必红的形状（取证在 _doc/003_script/e2e/p26.sh 的 B1/B2）：
-#   1) 只 COPY _frontend/z-schedule-frontend/ ⇒ 组件层根本不在镜像里，而 app 的 `npm run build`
-#      第一步就是 `cd ../z-schedule-frontend-component`：
-#      `sh: cd: line 0: can't cd to ../z-schedule-frontend-component: No such file or directory`（rc=2）。
-#      app 的 package.json 以 `file:../z-schedule-frontend-component` 依赖它、src/App.jsx 从它
+#   1) 只 COPY _frontend/z-schedule-suit/ ⇒ 组件层根本不在镜像里，而 app 的 `npm run build`
+#      第一步就是 `cd ../z-schedule-component`：
+#      `sh: cd: line 0: can't cd to ../z-schedule-component: No such file or directory`（rc=2）。
+#      app 的 package.json 以 `file:../z-schedule-component` 依赖它、src/App.jsx 从它
 #      import JobListView，两个 `../` 都指同一个父目录 ⇒ builder 里必须摆成**兄弟目录**。
 #   2) app 的 vite base 默认 '/meta/'（Mode 1 那份 dist 由 Spring 挂在 /meta context-path 下才对），
 #      而这个镜像是 nginx 在 `/` 上服务 SPA：index.html 里的 /meta/assets/*.js 在容器里没有 ⇒ 白屏。
 #      所以 base 从 env 进来，这里钉 '/'。
 #
 # 构建命令（版本别抄死在这里，走 bin/build-images.sh 或 compose 的 build，
-#   两处都用 ${OCI_REGISTRY}/z-schedule-frontend:${IMAGE_VERSION}，与清单里的 image: 名字逐字一致）：
-#   docker build -f deploy/Dockerfile.frontend -t "$OCI_REGISTRY/z-schedule-frontend:$IMAGE_VERSION" ..
+#   两处都用 ${OCI_REGISTRY}/z-schedule-suit:${IMAGE_VERSION}，与清单里的 image: 名字逐字一致）：
+#   docker build -f deploy/Dockerfile.frontend -t "$OCI_REGISTRY/z-schedule-suit:$IMAGE_VERSION" ..
 
 # ---- 构建阶段：基于 node 跑 vite build ----
 FROM node:18-alpine AS builder
 
-# 兄弟目录布局：/src/z-schedule-frontend 与 /src/z-schedule-frontend-component
+# 兄弟目录布局：/src/z-schedule-suit 与 /src/z-schedule-component
 WORKDIR /src
 
 # 组件层先落盘：app 的 build 脚本会 cd 进这个兄弟目录跑 vite build（lib 模式出 dist/index.js）
-COPY _frontend/z-schedule-frontend-component/ ./z-schedule-frontend-component/
+COPY _frontend/z-schedule-component/ ./z-schedule-component/
 
 # 仅拷 package.json 利用 docker layer 缓存
-COPY _frontend/z-schedule-frontend/package.json ./z-schedule-frontend/
-COPY _frontend/z-schedule-frontend/package-lock.json* ./z-schedule-frontend/
-RUN cd z-schedule-frontend && npm ci --no-audit --no-fund
+COPY _frontend/z-schedule-suit/package.json ./z-schedule-suit/
+COPY _frontend/z-schedule-suit/package-lock.json* ./z-schedule-suit/
+RUN cd z-schedule-suit && npm ci --no-audit --no-fund
 
 # SPA 的挂载点。nginx 在根上服务 ⇒ 资源前缀必须是 /。
 # Mode 1 那份 dist（admin pom 复制进 jar、/meta context-path 下服务）用仓里的默认值，不受这里影响。
@@ -49,7 +49,7 @@ RUN cd z-schedule-frontend && npm ci --no-audit --no-fund
 #   B7c 之后就好了（run12 确实读到命中），那是位置运气——同顺序的 run13 又冷在 Step 6。两支探针对着看
 #   （250，`~/.cache/nocache_probe/`）：`runner.log` 05:15:49/05:16:05 —— 基线 CACHED → 一发**带**
 #   `--no-cache` 的 teeth → 同一条基线命令变冷、npm ci 重跑 20 s；`runner2.log` 05:34:49→05:35:15 ——
-#   唯一差别是去掉那个开关，teeth 仍 rc=2（`can't cd to ../z-schedule-frontend-component`），后面的基线
+#   唯一差别是去掉那个开关，teeth 仍 rc=2（`can't cd to ../z-schedule-component`），后面的基线
 #   `Step6=CACHED 耗时=1s`。⇒ 作废者是 `--no-cache` 本身，不是它在档里的位置；B1c 已删掉该开关（删 COPY
 #   那行本身就改了那条指令的缓存键，牙齿不靠 `--no-cache`）。
 #   真正兜住这条臂的是 B7c 的"先分三类（没量成 / 没复现 / 复现了）再下结论、认出网络形状就重试一次"。
@@ -58,8 +58,8 @@ ARG FRONTEND_BASE=/
 ENV VITE_BASE=${FRONTEND_BASE}
 
 # 拷源码 + build（build 脚本自己先构建组件层，再 vite build 应用层）
-COPY _frontend/z-schedule-frontend/ ./z-schedule-frontend/
-RUN cd z-schedule-frontend && npm run build
+COPY _frontend/z-schedule-suit/ ./z-schedule-suit/
+RUN cd z-schedule-suit && npm run build
 
 # ---- 运行阶段：nginx 静态服务 ----
 FROM nginx:1.25-alpine
@@ -68,7 +68,7 @@ FROM nginx:1.25-alpine
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template
 
 # 拷 build 产物
-COPY --from=builder /src/z-schedule-frontend/dist /usr/share/nginx/html
+COPY --from=builder /src/z-schedule-suit/dist /usr/share/nginx/html
 
 EXPOSE 80
 
@@ -77,7 +77,7 @@ EXPOSE 80
 # 这里我们用 envsubst 手动渲染到 /etc/nginx/conf.d/default.conf
 CMD ["/bin/sh", "-c", "envsubst '$$BACKEND_SERVICE' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
 
-LABEL org.opencontainers.image.title="z-schedule-frontend" \
+LABEL org.opencontainers.image.title="z-schedule-suit" \
       org.opencontainers.image.description="Z-Schedule admin 前端 nginx 镜像" \
       org.opencontainers.image.source="https://github.com/yuku123/z-schedule" \
       org.opencontainers.image.licenses="MIT"

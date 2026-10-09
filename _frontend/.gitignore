@@ -1,5 +1,5 @@
 # _frontend/ 容器级 .gitignore
-# 两个子 npm 项目（z-schedule-frontend/ 和 z-schedule-frontend-component/）都继承本规则。
+# 两个子 npm 项目（z-schedule-suit/ 和 z-schedule-component/）都继承本规则。
 # 子项目自己的 .gitignore 只声明特有项（如 .vite、*.tsbuildinfo）。
 
 # ===== npm 通用 =====

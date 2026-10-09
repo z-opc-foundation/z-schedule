@@ -3,12 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "V4 验证：file: 协议跨仓本地消费 z-schedule-frontend-component（独立脚手架，不参与 z-schedule/deploy 编排）",
+  "description": "V4 验证：file: 协议跨仓本地消费 z-schedule-component（独立脚手架，不参与 z-schedule/deploy 编排）",
   "scripts": {
     "test": "node test-v4.bundle.mjs"
   },
   "dependencies": {
-    "@yuku123/z-schedule-frontend-component": "file:../../_frontend/z-schedule-frontend-component"
+    "@yuku123/z-schedule-component": "file:../../_frontend/z-schedule-component"
   },
   "devDependencies": {
     "react": "^18.2.0",

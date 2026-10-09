@@ -1,17 +1,17 @@
 {
-  "name": "@yuku123/z-schedule-frontend",
+  "name": "@yuku123/z-schedule-suit",
   "version": "0.0.0",
   "private": true,
-  "description": "Z-Schedule admin UI（V2 骨架，按规范 §1.2 放于 _frontend/z-schedule-frontend/）",
+  "description": "Z-Schedule admin UI（V2 骨架，按规范 §1.2 放于 _frontend/z-schedule-suit/）",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "npm run build:component && vite build",
-    "build:component": "cd ../z-schedule-frontend-component && npm install --silent && npm run build",
+    "build:component": "cd ../z-schedule-component && npm install --silent && npm run build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@yuku123/z-schedule-frontend-component": "file:../z-schedule-frontend-component",
+    "@yuku123/z-schedule-component": "file:../z-schedule-component",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

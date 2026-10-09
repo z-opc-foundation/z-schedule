@@ -158,7 +158,7 @@
         <plugins>
             <!--
                 V2 改造：frontend-maven-plugin 在 process-resources 阶段跑 npm build
-                workingDirectory 指向 _frontend/z-schedule-frontend/（仓根下，不在 reactor 内）
+                workingDirectory 指向 _frontend/z-schedule-suit/（仓根下，不在 reactor 内）
                 产物 dist/ → 由下面 maven-resources-plugin 复制到 src/main/resources/static/
                 详见 lead/005_技术架构/005_前端工程与中间件部署架构规范.md §1.2 / §6.1 V2
             -->
@@ -167,7 +167,7 @@
                 <artifactId>frontend-maven-plugin</artifactId>
                 <version>1.15.0</version>
                 <configuration>
-                    <workingDirectory>${project.basedir}/../_frontend/z-schedule-frontend</workingDirectory>
+                    <workingDirectory>${project.basedir}/../_frontend/z-schedule-suit</workingDirectory>
                     <installDirectory>${project.build.directory}/frontend</installDirectory>
                 </configuration>
                 <executions>
@@ -206,7 +206,7 @@
             </plugin>
 
             <!--
-                V2 改造：把 _frontend/z-schedule-frontend/dist/ 复制到 target/classes/static/
+                V2 改造：把 _frontend/z-schedule-suit/dist/ 复制到 target/classes/static/
                 （不复制到 src/main/resources/static/，避免污染源码目录 + git 噪声）
                 必须在 frontend-maven-plugin 跑完之后（process-resources > generate-resources）
                 且在默认 maven-resources-plugin 之后（process-resources 阶段默认 src/main/resources -> target/classes）
@@ -226,7 +226,7 @@
                             <overwrite>true</overwrite>
                             <resources>
                                 <resource>
-                                    <directory>${project.basedir}/../_frontend/z-schedule-frontend/dist</directory>
+                                    <directory>${project.basedir}/../_frontend/z-schedule-suit/dist</directory>
                                     <filtering>false</filtering>
                                 </resource>
                             </resources>

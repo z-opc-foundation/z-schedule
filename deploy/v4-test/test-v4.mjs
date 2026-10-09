@@ -2,7 +2,7 @@
 // 用 esbuild bundle 整个依赖图（react + 组件层 + 测试代码），跑在 Node 里
 import React from 'react';
 import { renderToString } from 'react-dom/server';
-import { JobListView } from '@yuku123/z-schedule-frontend-component';
+import { JobListView } from '@yuku123/z-schedule-component';
 
 const jobs = [
     { id: 1, name: '跨仓测试 Job 1' },
@@ -29,7 +29,7 @@ for (const [name, ok] of assertions) {
 }
 console.log('');
 if (pass === assertions.length) {
-    console.log(`✓ V4 验证通过：file: 协议跨仓消费 z-schedule-frontend-component 生效（${pass}/${assertions.length}）`);
+    console.log(`✓ V4 验证通过：file: 协议跨仓消费 z-schedule-component 生效（${pass}/${assertions.length}）`);
     process.exit(0);
 } else {
     console.error(`✗ V4 验证失败（${pass}/${assertions.length}）`);

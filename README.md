@@ -110,8 +110,8 @@ z-schedule/
 ├── z-schedule-admin/                # 可启动演示应用（永不上 Maven Central）
 │                                    #   只有 3 个类：ZScheduleAdminApplication / DevDataSourceConfig / DemoJobHandler
 ├── _frontend/                       # 容器目录（自身无 package.json），两个 npm 项目经 `file:` 互相消费
-│   ├── z-schedule-frontend/                  # @yuku123/z-schedule-frontend（SPA 外壳，React 18 + Vite 5）
-│   └── z-schedule-frontend-component/        # @yuku123/z-schedule-frontend-component（library mode）
+│   ├── z-schedule-suit/                  # @yuku123/z-schedule-suit（SPA 外壳，React 18 + Vite 5）
+│   └── z-schedule-component/        # @yuku123/z-schedule-component（library mode）
 ├── deploy/                          # 三种模式 + k8s（见文末「部署」）
 └── _doc/                            # 文档，见文末「文档目录」
 ```
@@ -319,7 +319,7 @@ k8s 清单在 `k8s/`，按 `00-namespace` → `05-ingress` 顺序 apply；分模
 ⚠ 一个现在仍存在的坑：三份 compose 的镜像 tag 默认值是 `${IMAGE_VERSION:-1.0.4}`，
 即 `.env` 里不设 `IMAGE_VERSION` 就会拉到 **1.0.4** 而不是当前版本 —— 部署前显式钉住。
 
-前端外壳由 `frontend-maven-plugin` 在 `generate-resources` 跑 `_frontend/z-schedule-frontend` 的 `npm run build`，
+前端外壳由 `frontend-maven-plugin` 在 `generate-resources` 跑 `_frontend/z-schedule-suit` 的 `npm run build`，
 再由 `maven-resources-plugin` 把 `dist/` 复制到 `target/classes/static/`（不写回源码目录）。
 
 ---

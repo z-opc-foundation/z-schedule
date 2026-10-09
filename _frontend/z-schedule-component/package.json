@@ -1,5 +1,5 @@
 {
-  "name": "@yuku123/z-schedule-frontend-component",
+  "name": "@yuku123/z-schedule-component",
   "version": "0.1.0",
   "private": true,
   "description": "Z-Schedule 可复用前端组件（V2 骨架，仅本仓 admin 使用；待正式跨仓共享时改 public 并 npm publish）",

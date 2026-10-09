@@ -1,6 +1,6 @@
-# z-schedule-frontend-component
+# z-schedule-component
 
-> **组件层**：可复用 React 组件包，按规范 §1.2 放于 `_frontend/z-schedule-frontend-component/`。
+> **组件层**：可复用 React 组件包，按规范 §1.2 放于 `_frontend/z-schedule-component/`。
 > **本仓 admin** 通过 `file:` 协议本地消费；**外部项目**（如 z-opc）未来可通过 `npm publish` 后安装。
 
 ## 它是什么
@@ -17,7 +17,7 @@
 ## build
 
 ```bash
-cd _frontend/z-schedule-frontend-component
+cd _frontend/z-schedule-component
 npm install
 npm run build
 # 产物：dist/index.js（ES Module）
@@ -33,10 +33,10 @@ npm run build
 
 ```
 _frontend/
-├── z-schedule-frontend/                      ← 应用层（admin UI）
+├── z-schedule-suit/                      ← 应用层（admin UI）
 │   └── package.json 依赖：
-│       "@yuku123/z-schedule-frontend-component": "file:../z-schedule-frontend-component"
-└── z-schedule-frontend-component/            ← 当前目录（你在这里）
+│       "@yuku123/z-schedule-component": "file:../z-schedule-component"
+└── z-schedule-component/            ← 当前目录（你在这里）
     └── 产物 dist/index.js 被应用层 import
 ```
 

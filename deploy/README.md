@@ -177,7 +177,7 @@ envsubst '$NAMESPACE $INGRESS_DOMAIN $TLS_SECRET_NAME $OCI_REGISTRY $IMAGE_VERSI
 ## 构建上下文：仓库根那份 `.dockerignore`
 
 `build.context` 是**仓库根**，而两个 Dockerfile 实际只取三样东西：后端要 `${JAR_FILE}` 那一个 jar，
-前端要 `_frontend/z-schedule-frontend/` 与 `nginx.conf.template`。没有排除清单时 `make dev` 会把
+前端要 `_frontend/z-schedule-suit/` 与 `nginx.conf.template`。没有排除清单时 `make dev` 会把
 `.git`、各模块 `target/`、`_frontend/*/node_modules` 全打成 tar 送给 daemon。演练机实测（250，
 `docker build` 自己打的计数行）：
 

@@ -8,9 +8,9 @@ importers:
 
   .:
     dependencies:
-      '@yuku123/z-schedule-frontend-component':
-        specifier: file:../z-schedule-frontend-component
-        version: file:../z-schedule-frontend-component(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@yuku123/z-schedule-component':
+        specifier: file:../z-schedule-component
+        version: file:../z-schedule-component(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       react:
         specifier: ^18.2.0
         version: 18.3.1
@@ -433,8 +433,8 @@ packages:
     peerDependencies:
       vite: ^4.2.0 || ^5.0.0 || ^6.0.0 || ^7.0.0
 
-  '@yuku123/z-schedule-frontend-component@file:../z-schedule-frontend-component':
-    resolution: {directory: ../z-schedule-frontend-component, type: directory}
+  '@yuku123/z-schedule-component@file:../z-schedule-component':
+    resolution: {directory: ../z-schedule-component, type: directory}
     peerDependencies:
       react: ^18.0.0
       react-dom: ^18.0.0
@@ -910,7 +910,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@yuku123/z-schedule-frontend-component@file:../z-schedule-frontend-component(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+  '@yuku123/z-schedule-component@file:../z-schedule-component(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
     dependencies:
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)

@@ -827,19 +827,19 @@ import sys
 CTX_FILES = [
     'deploy/Dockerfile.backend',
     'deploy/nginx.conf.template',
-    '_frontend/z-schedule-frontend/vite.config.js',
+    '_frontend/z-schedule-suit/vite.config.js',
 ]
 PORT_FILES = CTX_FILES + ['deploy/README.md']
 
 # 每个收集器至少要贡献一格（判红用，见 scan 里的 contrib）
 REQ_CTX = [
-    'deploy/Dockerfile.backend:ENV', '_frontend/z-schedule-frontend/vite.config',
+    'deploy/Dockerfile.backend:ENV', '_frontend/z-schedule-suit/vite.config',
     'deploy/k8s/01-deployment-backend.yaml', 'deploy/docker-compose.yml',
     'deploy/nginx.conf.template',
 ]
 REQ_PORT = [
     'deploy/Dockerfile.backend:ENV', 'deploy/Dockerfile.backend:EXPOSE',
-    '_frontend/z-schedule-frontend/vite.config', 'k8s/01-deployment-backend.yaml:containerPort',
+    '_frontend/z-schedule-suit/vite.config', 'k8s/01-deployment-backend.yaml:containerPort',
     'k8s/01-deployment-backend.yaml:port', 'k8s/03-service-backend.yaml:port',
     'k8s/03-service-backend.yaml:targetPort', 'deploy/docker-compose.yml',
     'docker-compose.split.yml', 'docker-compose.cluster.yml', 'nginx.conf.template',
@@ -892,7 +892,7 @@ def all_files(root):
 
 def vite_cfg(root):
     """SPA 那份 vite 配置。找不到就返回 ''，由调用方判红（不能静默少一个副本）。"""
-    d = os.path.join(root, '_frontend/z-schedule-frontend')
+    d = os.path.join(root, '_frontend/z-schedule-suit')
     if not os.path.isdir(d):
         return ''
     c = sorted(f for f in os.listdir(d) if re.match(r'^vite\.config\.(js|ts|mjs|mts|cjs)$', f))
@@ -956,7 +956,7 @@ def scan(root, quiet=False):
         pom = os.path.join(root, 'z-schedule-admin/pom.xml')
         baked = 'no' if (os.path.isfile(pom) and 'VITE_BASE' in rd(pom)) else 'yes'
     else:
-        note.append('VITE-MISSING|_frontend/z-schedule-frontend 里没有 vite.config.*')
+        note.append('VITE-MISSING|_frontend/z-schedule-suit 里没有 vite.config.*')
 
     # —— 配置副本：context-path 与端口 ——
     for p in k8s_files(root) + compose_files(root):

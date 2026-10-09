@@ -10,9 +10,9 @@
 # 这一档只管 b：把 README/清单里写出去的每条 Mode 2/3 主张，在真机上按字面敲一遍。
 #
 # 首跑（09-27 04:0x，250）实测出来的两条，都不是"文档措辞"级别的问题：
-#   1) Dockerfile.frontend 只 COPY _frontend/z-schedule-frontend/，而 app 的 `npm run build`
-#      第一步是 `cd ../z-schedule-frontend-component`（package.json 也以 file:../ 依赖它）⇒
-#      `sh: cd: line 0: can't cd to ../z-schedule-frontend-component: No such file or directory`，
+#   1) Dockerfile.frontend 只 COPY _frontend/z-schedule-suit/，而 app 的 `npm run build`
+#      第一步是 `cd ../z-schedule-component`（package.json 也以 file:../ 依赖它）⇒
+#      `sh: cd: line 0: can't cd to ../z-schedule-component: No such file or directory`，
 #      rc=2，镜像建不出来。修法：builder 里摆成兄弟目录（S1/S1b 钉形状，B1 钉真构建）。
 #   2) app 的 vite base 写死 '/meta/'（Mode 1 那份 dist 由 Spring 挂在 /meta context-path 下才对），
 #      而这个镜像是 nginx 在 `/` 上服务 SPA（Mode 2/3 的 ${HTTP_PORT}:80、k8s ingress 的 path: / 都是根）
@@ -45,12 +45,12 @@ done
 E2E="${E2E:-$(pwd)}"
 FRONT="${FRONT:-$E2E/_frontend}"
 command -v python3 >/dev/null || FATAL "没有 python3"
-[ -d "$FRONT/z-schedule-frontend" ] || FATAL "前端源码不在：FRONT=$FRONT（这一档要用它现构镜像）"
-[ -d "$FRONT/z-schedule-frontend-component" ] || FATAL "组件层源码不在：$FRONT/z-schedule-frontend-component"
+[ -d "$FRONT/z-schedule-suit" ] || FATAL "前端源码不在：FRONT=$FRONT（这一档要用它现构镜像）"
+[ -d "$FRONT/z-schedule-component" ] || FATAL "组件层源码不在：$FRONT/z-schedule-component"
 
 NGX="$DEPLOY/nginx.conf.template"
 DFE="$DEPLOY/Dockerfile.frontend"
-VCFG="$FRONT/z-schedule-frontend/vite.config.js"
+VCFG="$FRONT/z-schedule-suit/vite.config.js"
 CLUSTER="$DEPLOY/docker-compose.cluster.yml"
 SPLIT="$DEPLOY/docker-compose.split.yml"
 
@@ -59,25 +59,25 @@ echo "frontend source = $FRONT"
 echo "=== 静态：前端镜像的两条构建前提 + nginx 契约 ==="
 
 # S1 builder 阶段必须把组件层摆成 app 的兄弟目录（两个 `../` 指同一个父目录 ⇒ 只能同级）。
-#    判据认三件事：组件层有 COPY、WORKDIR 是 /src、--from 取的是 /src/z-schedule-frontend/dist。
+#    判据认三件事：组件层有 COPY、WORKDIR 是 /src、--from 取的是 /src/z-schedule-suit/dist。
 #    阳性对照：同一条尺跑在"改前那份"（只 COPY app、WORKDIR /build、--from /build/dist）上必须报缺。
 s1_lines() {
   local F="$1"
   local C1 C2 C3
-  C1=$(grep -cE '^COPY[[:space:]]+_frontend/z-schedule-frontend-component/' "$F" 2>/dev/null || true)
+  C1=$(grep -cE '^COPY[[:space:]]+_frontend/z-schedule-component/' "$F" 2>/dev/null || true)
   C2=$(grep -cE '^WORKDIR[[:space:]]+/src$' "$F" 2>/dev/null || true)
-  C3=$(grep -cE '^COPY[[:space:]]+--from=builder[[:space:]]+/src/z-schedule-frontend/dist' "$F" 2>/dev/null || true)
+  C3=$(grep -cE '^COPY[[:space:]]+--from=builder[[:space:]]+/src/z-schedule-suit/dist' "$F" 2>/dev/null || true)
   [ "${C1:-0}" = "1" ] && [ "${C2:-0}" = "1" ] && [ "${C3:-0}" = "1" ]
 }
 if s1_lines "$DFE"; then
-  printf 'FROM node:18-alpine AS builder\nWORKDIR /build\nCOPY _frontend/z-schedule-frontend/package.json ./\nCOPY --from=builder /build/dist /usr/share/nginx/html\n' > "$WORK/prey_s1"
+  printf 'FROM node:18-alpine AS builder\nWORKDIR /build\nCOPY _frontend/z-schedule-suit/package.json ./\nCOPY --from=builder /build/dist /usr/share/nginx/html\n' > "$WORK/prey_s1"
   if s1_lines "$WORK/prey_s1"; then
     FATAL "S1 的尺没有牙：'改前形状'的猎物也判通过，后面这条不许信"
   else
-    ok "S1 Dockerfile.frontend 的 builder 是兄弟目录布局（组件层 COPY / WORKDIR /src / --from=/src/z-schedule-frontend/dist 各 1 处；同一把尺在改前猎物上报缺 ⇒ 有牙）"
+    ok "S1 Dockerfile.frontend 的 builder 是兄弟目录布局（组件层 COPY / WORKDIR /src / --from=/src/z-schedule-suit/dist 各 1 处；同一把尺在改前猎物上报缺 ⇒ 有牙）"
   fi
 else
-  bad "S1 builder 不是兄弟目录布局（组件层 $(grep -cE '^COPY[[:space:]]+_frontend/z-schedule-frontend-component/' "$DFE" 2>/dev/null) 处 / 真 build 死在 cd ../z-schedule-frontend-component）"
+  bad "S1 builder 不是兄弟目录布局（组件层 $(grep -cE '^COPY[[:space:]]+_frontend/z-schedule-component/' "$DFE" 2>/dev/null) 处 / 真 build 死在 cd ../z-schedule-component）"
 fi
 
 # S1b 不许留下第二个 COPY 目标的旧路径：/build 这个 WORKDIR 一旦残留，--from 与产物路径会分家
@@ -86,7 +86,7 @@ fi
 #     第一版就是这么把一条健康的 Dockerfile 判红的（数到 1 处，而那 1 处是文件名）。
 old_paths() { grep -cE '^(WORKDIR|COPY).*[[:space:]]/build' "$1" 2>/dev/null || true; }
 LEFTOLD=$(old_paths "$DFE")
-printf 'WORKDIR /build\nCOPY _frontend/z-schedule-frontend-component/ ./z-schedule-frontend-component/\nCOPY --from=builder /build/dist /usr/share/nginx/html\n' > "$WORK/prey_s1b"
+printf 'WORKDIR /build\nCOPY _frontend/z-schedule-component/ ./z-schedule-component/\nCOPY --from=builder /build/dist /usr/share/nginx/html\n' > "$WORK/prey_s1b"
 if [ "${LEFTOLD:-0}" = "0" ] && [ "$(old_paths "$WORK/prey_s1b")" = "2" ]; then
   ok "S1b Dockerfile 的指令行里 /build 零残留（同一把尺在旧路径猎物上数到 2 处：WORKDIR 与 --from 各一 ⇒ 不是恒零）"
 else
@@ -131,13 +131,13 @@ else
 fi
 
 # S4 两份清单的镜像名必须与构建产物的 tag 同源，否则清单永远拉一个没构建过的名字。
-IMGLINE='image: "${OCI_REGISTRY:-ghcr.io/yuku123}/z-schedule-frontend:${IMAGE_VERSION:-1.0.4}"'
+IMGLINE='image: "${OCI_REGISTRY:-ghcr.io/yuku123}/z-schedule-suit:${IMAGE_VERSION:-1.0.4}"'
 S4BAD=""
 for f in "$SPLIT" "$CLUSTER"; do
   grep -qF "$IMGLINE" "$f" || S4BAD="$S4BAD $(basename "$f")[前端 image: 与 build-images.sh 的 tag 不同源]"
   grep -qF '"${HTTP_PORT:-80}:80"' "$f" || S4BAD="$S4BAD $(basename "$f")[宿主端口没走 HTTP_PORT]"
 done
-grep -qF 'FRONT_TAG="$OCI_REGISTRY/z-schedule-frontend:$IMAGE_VERSION"' "$DEPLOY/bin/build-images.sh" \
+grep -qF 'FRONT_TAG="$OCI_REGISTRY/z-schedule-suit:$IMAGE_VERSION"' "$DEPLOY/bin/build-images.sh" \
   || S4BAD="$S4BAD build-images.sh[tag 形状变了，S4 的对照要跟着改]"
 # 集群那份不许钉 container_name：compose 对 --scale 的服务会直接拒（名字会撞），而 Mode 3 的
 # 卖点是副本数由命令行决定。分体那份钉了是对的（正好用它当这一臂的阳性对照——同一把尺两处读数不同）。
@@ -162,7 +162,7 @@ docker image inspect "$DBIMAGE" >/dev/null 2>&1 || FATAL "本机没有 $DBIMAGE 
 DB26=zschedule_p26
 DBC="p26db$W"; DBVOL="p26mysqldata$W"
 ADMIN_IMG="ghcr.io/yuku123/z-schedule-admin:1.0.4"
-FRONT_IMG="ghcr.io/yuku123/z-schedule-frontend:1.0.4"
+FRONT_IMG="ghcr.io/yuku123/z-schedule-suit:1.0.4"
 DBPW=$(python3 -c "import secrets,string;print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(18)))")
 MYENV="$WORK/mypwd"; printf 'MYSQL_PWD=%s\n' "$DBPW" > "$MYENV"; chmod 600 "$MYENV"
 mysql_root() { docker exec -i --env-file "$MYENV" "$DBC" mysql -uroot --skip-column-names -B "$@" 2>/dev/null; }
@@ -185,7 +185,7 @@ cleanup() {
   docker rm -f "$DBC" >/dev/null 2>&1
   docker volume rm "$DBVOL" >/dev/null 2>&1
   for n in $(docker ps -aq --filter "name=p26prey" 2>/dev/null); do docker rm -f "$n" >/dev/null 2>&1; done
-  docker rmi -f "$ADMIN_IMG" "$FRONT_IMG" local/z-schedule-frontend:p26prey >/dev/null 2>&1
+  docker rmi -f "$ADMIN_IMG" "$FRONT_IMG" local/z-schedule-suit:p26prey >/dev/null 2>&1
   if [ "${KEEP_ENV:-0}" = "1" ]; then :
   elif [ -f "$WORK/env.pbak" ]; then cp -p "$WORK/env.pbak" "$DEPLOY/env/.env"
   else rm -f "$DEPLOY/env/.env"
@@ -258,14 +258,14 @@ echo "=== B1 前端镜像：照清单的 build 真跑一次 ==="
 mkdir -p "$E2E/z-schedule-admin/target" 2>/dev/null
 cp "$RUNJAR" "$E2E/z-schedule-admin/target/p26-exec.jar" 2>/dev/null || FATAL "放不进构件"
 write_env db   # B1 只解析镜像，不连库：DB_HOST 指不存在的别名也照样 build
-( cd "$DEPLOY" && $CCLI --env-file env/.env -f docker-compose.split.yml build z-schedule-frontend \
+( cd "$DEPLOY" && $CCLI --env-file env/.env -f docker-compose.split.yml build z-schedule-suit \
     > "$WORK/build_front.log" 2>&1 )
 BRC=$?
 NBUILD=$(grep -c '^vite v' "$WORK/build_front.log" 2>/dev/null || true)
-VCNT=$(grep -c 'z-schedule-frontend-component@' "$WORK/build_front.log" 2>/dev/null || true)
+VCNT=$(grep -c 'z-schedule-component@' "$WORK/build_front.log" 2>/dev/null || true)
 CTX=$(grep -oE 'Sending build context to Docker daemon +[0-9.]+ ?(kB|MB|GB|KiB|MiB|GiB)' "$WORK/build_front.log" | tail -1)
 if [ "$BRC" = "0" ]; then
-  ok "B1 前端镜像构建 rc=0（改前这一条 rc=2 死在 cd ../z-schedule-frontend-component；构建上下文 $CTX）"
+  ok "B1 前端镜像构建 rc=0（改前这一条 rc=2 死在 cd ../z-schedule-component；构建上下文 $CTX）"
 else
   tail -14 "$WORK/build_front.log" | sed 's/^/    /'
   bad "B1 前端镜像构建 rc=$BRC ⇒ Mode 2/3 整条路对谁都没兑现过"
@@ -334,9 +334,9 @@ HCHECK() {   # $1 = 容器名，$2 = 最长等待秒
   done
   echo "${st:-读不到}"
 }
-SB=$(HCHECK z-schedule-backend 180); SF=$(HCHECK z-schedule-frontend 120)
+SB=$(HCHECK z-schedule-backend 180); SF=$(HCHECK z-schedule-suit 120)
 NB=$(docker inspect -f '{{if .State.Health}}{{len .State.Health.Log}}{{else}}0{{end}}' z-schedule-backend 2>/dev/null)
-NF=$(docker inspect -f '{{if .State.Health}}{{len .State.Health.Log}}{{else}}0{{end}}' z-schedule-frontend 2>/dev/null)
+NF=$(docker inspect -f '{{if .State.Health}}{{len .State.Health.Log}}{{else}}0{{end}}' z-schedule-suit 2>/dev/null)
 if [ "$SB" = "healthy" ] && [ "$SF" = "healthy" ]; then
   ok "B5 两个容器的 healthcheck 各自变 healthy（backend 探过 $NB 次、frontend $NF 次 ⇒ 清单那两条 wget 都在真执行，不是'端口通了'的另一种说法）"
 else
@@ -412,7 +412,7 @@ s = socket.socket(); s.bind(("0.0.0.0", 0)); print(s.getsockname()[1]); s.close(
 PY
 )
 ( cd "$DEPLOY/.." && docker build --build-arg FRONTEND_BASE=/meta/ \
-      -f deploy/Dockerfile.frontend -t local/z-schedule-frontend:p26prey . ) \
+      -f deploy/Dockerfile.frontend -t local/z-schedule-suit:p26prey . ) \
       > "$WORK/build_prey.log" 2>&1
 PREYB=$?
 PREYRETRY=0
@@ -423,7 +423,7 @@ if [ "$PREYB" != "0" ] && grep -qE 'npm error|Client\.Timeout|registry-1|ETIMEDO
      "$WORK/build_prey.log"; then
   PREYRETRY=1
   ( cd "$DEPLOY/.." && docker build --build-arg FRONTEND_BASE=/meta/ \
-        -f deploy/Dockerfile.frontend -t local/z-schedule-frontend:p26prey . ) \
+        -f deploy/Dockerfile.frontend -t local/z-schedule-suit:p26prey . ) \
         > "$WORK/build_prey_retry.log" 2>&1
   PREYB=$?
 fi
@@ -436,7 +436,7 @@ fi
 #   `--no-cache` 是作废者；run12 也读到过命中，但那是位置运气——同样顺序的 run13 又冷在 Step 6，
 #   见 B1c 那段的两支探针）。
 prey_readings() {  # $1=最后一遍构建的日志
-  PREYDEP=$(grep -A1 'RUN cd z-schedule-frontend && npm ci' "$1" | grep -c 'Using cache' || true)
+  PREYDEP=$(grep -A1 'RUN cd z-schedule-suit && npm ci' "$1" | grep -c 'Using cache' || true)
   PREYVITE=$(grep -c 'building for production' "$1" || true)
   PREYBREAK=$(awk '/^Step [0-9]+\//{s=$0} /---> Running in/{print s; exit}' "$1" | cut -c1-78)
   echo "    构建臂：最后一遍=[$(basename "$1")] retry=$PREYRETRY deps 层 Using cache=$PREYDEP vite 重跑=$PREYVITE 首个未命中=[$PREYBREAK]"
@@ -447,7 +447,7 @@ else
   prey_readings "$WORK/build_prey.log"
 fi
 docker run -d --name "p26prey$W" --network "$NET" -p "$PPORT:80" \
-       -e BACKEND_SERVICE=z-schedule-backend local/z-schedule-frontend:p26prey \
+       -e BACKEND_SERVICE=z-schedule-backend local/z-schedule-suit:p26prey \
       > "$WORK/prey_run.log" 2>&1
 PRER=$?
 PREYJS=""
@@ -460,7 +460,7 @@ PREYCODE=$(get /dev/null "http://127.0.0.1:$PPORT$PREYJS")
 PREYBODY=$(curl -s -m 15 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PPORT$PREYJS")
 PREYSTATE=$(docker inspect -f '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}nohc{{end}}' "p26prey$W" 2>/dev/null)
 docker rm -f "p26prey$W" >/dev/null 2>&1
-docker rmi -f local/z-schedule-frontend:p26prey >/dev/null 2>&1
+docker rmi -f local/z-schedule-suit:p26prey >/dev/null 2>&1
 if [ "$PREYB" != "0" ]; then
   tail -6 "$WORK/build_prey$( [ "$PREYRETRY" = "1" ] && echo _retry ).log" 2>/dev/null | sed 's/^/    构建: /'
   bad "B7c **没量成**：猎物镜像构建 rc=$PREYB（网络形状重试 $PREYRETRY 次之后仍失败）⇒ 这一格记环境的账，不能记成'形状没复现'更不能记成'尺没有牙'"
@@ -476,7 +476,7 @@ fi
 # ⚠ 这一臂**不带** `--no-cache`，这是实测出来的结论，不是省时间：
 #   · 牙齿不需要它——删掉 COPY 那一行本身就改了那条指令的缓存键，构建必然走到那一步才发现
 #     目录不在。取证（250，05:35:11，`~/.cache/nocache_probe/runner2.log` 第 ② 段）：不带
-#     `--no-cache` 建 teeth ⇒ rc=2 且报 `sh: cd: line 0: can't cd to ../z-schedule-frontend-component: No ...`。
+#     `--no-cache` 建 teeth ⇒ rc=2 且报 `sh: cd: line 0: can't cd to ../z-schedule-component: No ...`。
 #   · 加上它反而伤人——`--no-cache` 会把整条链共享的那条 `RUN npm ci` 缓存记录顶掉。同一支探针
 #     三段时间线：① 05:34:49 基线（冷，Step 6 真跑 npm ci）⇒ ② 05:35:11 不带 `--no-cache` 的 teeth
 #     ⇒ ③ 05:35:13 同一条基线命令 `rc=0 Step6=CACHED 耗时=1s`，链是热的。而上一版探针
@@ -484,16 +484,16 @@ fi
 #   ⇒ 两遍只差那一个开关，作废者就是它。原先我写的"B1c 挪到 B7c 之后就好了"是 n=1 的归纳：
 #     run13 换了顺序仍在 Step 6 读到 `deps 层 Using cache=0 vite 重跑=2`，被这一对探针否掉了。
 #     顺序保留（teeth 放在 B7c 之后），但它不是修法，删掉 `--no-cache` 才是。
-sed -E '/^COPY _frontend\/z-schedule-frontend-component\//d' "$DFE" > "$WORK/prey_dockerfile"
-( cd "$DEPLOY/.." && docker build -f "$WORK/prey_dockerfile" -t local/z-schedule-frontend:p26teeth . \
+sed -E '/^COPY _frontend\/z-schedule-component\//d' "$DFE" > "$WORK/prey_dockerfile"
+( cd "$DEPLOY/.." && docker build -f "$WORK/prey_dockerfile" -t local/z-schedule-suit:p26teeth . \
     > "$WORK/build_teeth.log" 2>&1 )
 TEETH=$?
-if [ "$TEETH" != "0" ] && grep -q "can't cd to ../z-schedule-frontend-component" "$WORK/build_teeth.log"; then
-  ok "B1c 猎物对照成立：删掉组件层那一行 COPY，构建当场退回 rc=$TEETH 并报 'can't cd to ../z-schedule-frontend-component'（这条修复是被实测钉住的，不是把错误信息抄进注释）"
+if [ "$TEETH" != "0" ] && grep -q "can't cd to ../z-schedule-component" "$WORK/build_teeth.log"; then
+  ok "B1c 猎物对照成立：删掉组件层那一行 COPY，构建当场退回 rc=$TEETH 并报 'can't cd to ../z-schedule-component'（这条修复是被实测钉住的，不是把错误信息抄进注释）"
 else
   bad "B1c 猎物没退回（rc=$TEETH）⇒ B1 的绿说明不了什么，先怀疑尺"
 fi
-docker rmi -f local/z-schedule-frontend:p26teeth >/dev/null 2>&1
+docker rmi -f local/z-schedule-suit:p26teeth >/dev/null 2>&1
 
 # B7d 这一臂是给"nginx 什么时候解析 proxy_pass 里的名字"取证：给一个当下不存在的服务名，
 #     看它是**启动即退出**还是"先起着、等请求来了再报错"。答案决定 README 里那条注意怎么写
@@ -565,7 +565,7 @@ finally:
     s.close()
 PY
 )
-INNET=$(docker exec z-schedule-frontend wget -qO- -T 10 "http://z-schedule-backend:18086/meta/actuator/health" 2>&1 | grep -c '"status":"UP"' || true)
+INNET=$(docker exec z-schedule-suit wget -qO- -T 10 "http://z-schedule-backend:18086/meta/actuator/health" 2>&1 | grep -c '"status":"UP"' || true)
 if [ "$P18086" = "closed" ] && [ "${INNET:-0}" -ge 1 ]; then
   ok "B12 宿主 18086 closed 而网内同一条 URL 返回 UP（命中 $INNET 处）⇒ '仅 internal network 访问'这句是真的，不是服务没起"
 else
@@ -578,7 +578,7 @@ echo "=== B13 Mode 2 收口 ==="
 DRC=$?
 GONE=1; PORTBACK=busy
 for i in $(seq 1 12); do
-  GONE=$(docker ps -a --format '{{.Names}}' | grep -cE '^(z-schedule-backend|z-schedule-frontend)$' || true)
+  GONE=$(docker ps -a --format '{{.Names}}' | grep -cE '^(z-schedule-backend|z-schedule-suit)$' || true)
   PORTBACK=$(python3 - <<PY
 import socket
 s = socket.socket(); s.settimeout(2)
@@ -608,7 +608,7 @@ C3=$( cd "$DEPLOY" && bash bin/start-mode3.sh "$REPLICAS" 2>&1 ); C3RC=$?
 echo "$C3" > "$WORK/up3.log"
 NAMES=$(docker ps --format '{{.Names}}' | grep -E 'z-schedule-(backend|frontend)' | sort | tr '\n' ' ')
 NBK=$(docker ps --format '{{.Names}}' | grep -c 'z-schedule-backend' || true)
-NFRT=$(docker ps --format '{{.Names}}' | grep -c 'z-schedule-frontend' || true)
+NFRT=$(docker ps --format '{{.Names}}' | grep -c 'z-schedule-suit' || true)
 if [ "$C3RC" = "0" ] && [ "${NBK:-0}" = "$REPLICAS" ] && [ "${NFRT:-0}" = "1" ]; then
   ok "C1 'bash bin/start-mode3.sh $REPLICAS'（= make cluster N=$REPLICAS 的真身）rc=0 ⇒ $NBK 个后端 + $NFRT 个前端在跑：$NAMES"
 else
@@ -667,18 +667,18 @@ docker start "$VICTIM" >/dev/null 2>&1
 # C5 副本解析：nginx 那句 proxy_pass 用的是服务名，Docker DNS 该给出 $REPLICAS 个地址。
 #    这一臂钉的是"多个后端确实共用一个名字"，不钉轮询——响应体里没有任何实例身份，
 #    拿 /api/actuator/health 数不出命中了谁（要数得先有身份，那是 #35 那一格的事）。
-#    第一版这里连错两处，都是尺的错：① 容器名抄的是 Mode 2 的 z-schedule-frontend，而 Mode 3 的
-#    前端叫 <project>-z-schedule-frontend-1（清单里没钉 container_name），探一个不存在的容器恒为 0；
+#    第一版这里连错两处，都是尺的错：① 容器名抄的是 Mode 2 的 z-schedule-suit，而 Mode 3 的
+#    前端叫 <project>-z-schedule-suit-1（清单里没钉 container_name），探一个不存在的容器恒为 0；
 #    ② 数地址用的是 `^Address: `，busybox nslookup 在这台机器上打的形状不是它。
 #    ⇒ 现在从 docker ps 现取名字，数法退到"抽所有非回环 IPv4 去重"，并拿前端自己的服务名当对照
 #    （那个必须恒为 1：一把尺若在两个名字上都数到同一个数，它数的就不是地址）。
-F3=$(docker ps --format '{{.Names}}' | grep 'z-schedule-frontend' | head -1)
-[ -n "$F3" ] || FATAL "C5 认不出 Mode 3 的前端容器（docker ps 里没有任何 z-schedule-frontend）"
+F3=$(docker ps --format '{{.Names}}' | grep 'z-schedule-suit' | head -1)
+[ -n "$F3" ] || FATAL "C5 认不出 Mode 3 的前端容器（docker ps 里没有任何 z-schedule-suit）"
 ipcount() { docker exec "$1" nslookup "$2" 2>/dev/null \
             | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -v '^127\.' | sort -u | wc -l | tr -d ' '; }
 HAVENS=$(docker exec "$F3" sh -c 'command -v nslookup >/dev/null && echo yes || echo no' 2>/dev/null)
 RFB=$(ipcount "$F3" z-schedule-backend)
-RFF=$(ipcount "$F3" z-schedule-frontend)
+RFF=$(ipcount "$F3" z-schedule-suit)
 if [ "$HAVENS" = "yes" ] && [ "${RFB:-0}" -ge 2 ] && [ "${RFF:-1}" = "1" ]; then
   ok "C5 服务名 z-schedule-backend 在前端容器里解析出 $RFB 个地址（副本声明 $REPLICAS），而同一条尺数前端自己的名字得 $RFF 个 ⇒ 数的是地址不是噪声：反代那一跳面对的是一份真列表"
 else
@@ -688,7 +688,7 @@ fi
 ( cd "$DEPLOY" && $CCLI --env-file env/.env -f docker-compose.cluster.yml down >/dev/null 2>&1 )
 # 残留只数本档起的那两个服务。第一版这里写的是 --filter 'name=z-schedule-'，它把共享机上
 # 一个跑了 15 小时的 z-schedule-e2e-mysql 也算进来了——那既不是本档的容器、更不该被本档停掉。
-LEFT=$(docker ps -aq --filter 'name=z-schedule-backend' --filter 'name=z-schedule-frontend' | wc -l | tr -d ' ')
+LEFT=$(docker ps -aq --filter 'name=z-schedule-backend' --filter 'name=z-schedule-suit' | wc -l | tr -d ' ')
 OTHERS=$(docker ps --format '{{.Names}}' | grep -c 'z-schedule' || true)
 if [ "${LEFT:-1}" = "0" ]; then
   ok "C6 Mode 3 down 之后本档的 backend/frontend 容器残留=0（盘上另有 $OTHERS 个带 z-schedule 字样的**别人的**容器，本档一条命令都没对它们下过）"

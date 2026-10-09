@@ -1109,14 +1109,14 @@ cache=0`、run12 偶然 `=1`），我在 13.3 第六条里先归因成"B1c 的�
 
 | # | 缺陷 | 原文读数 | 修法 | 判据臂 |
 |---|------|---------|------|--------|
-| 1 | `Dockerfile.frontend` 只 COPY 应用层，组件层根本不在镜像里 | `sh: cd: line 0: can't cd to ../z-schedule-frontend-component: No such file or directory` → `The command '/bin/sh -c npm run build' returned a non-zero code: 2` | builder 里摆成**兄弟目录**（`/src/z-schedule-frontend` 与 `/src/z-schedule-frontend-component`），产物路径跟着改成 `--from=builder /src/z-schedule-frontend/dist` | S1 / S1b / B1 / B1b / B1c |
+| 1 | `Dockerfile.frontend` 只 COPY 应用层，组件层根本不在镜像里 | `sh: cd: line 0: can't cd to ../z-schedule-component: No such file or directory` → `The command '/bin/sh -c npm run build' returned a non-zero code: 2` | builder 里摆成**兄弟目录**（`/src/z-schedule-suit` 与 `/src/z-schedule-component`），产物路径跟着改成 `--from=builder /src/z-schedule-suit/dist` | S1 / S1b / B1 / B1b / B1c |
 | 2 | vite 的 `base` 写死 `/meta/`，而这个镜像是 nginx 在 `/` 上服务 SPA | 只翻旋钮重造一份镜像后，页面要 `/meta/assets/index-B3o72KK5.js`，探它 **`404 text/html`** | `base` 改从 `VITE_BASE` 进来、**默认值仍 `/meta/`**（Mode 1 那份 dist 依赖它，admin pom 不设这个 env 所以行为逐字不变），镜像里用 `ARG FRONTEND_BASE=/` 拧到根 | S2 / S2b / B2 / B7 / **B7c** |
 
-为什么"兄弟目录"是硬要求而不是风格：`package.json` 的依赖写着 `"@yuku123/z-schedule-frontend-component":
-"file:../z-schedule-frontend-component"`、`build` 脚本第一步是 `cd ../z-schedule-frontend-component`、
+为什么"兄弟目录"是硬要求而不是风格：`package.json` 的依赖写着 `"@yuku123/z-schedule-component":
+"file:../z-schedule-component"`、`build` 脚本第一步是 `cd ../z-schedule-component`、
 `src/App.jsx` 从它 `import { JobListView }`——三个 `../` 都指同一个父目录。组件层那份 `dist/index.js`
 还是它自己 `vite build`（lib 模式）的产物，所以**一次构建里必须有两次 vite build**，B1b 数就是这个
-（run2：2 次，其中 1 处署名 `@yuku123/z-schedule-frontend-component@0.1.0`）。
+（run2：2 次，其中 1 处署名 `@yuku123/z-schedule-component@0.1.0`）。
 
 第 2 条值得单独说一句：它**不会**在"修好第 1 条"之后自己显形。构建会成功、两个容器会 healthy、
 `GET /` 会 200 —— 交出去是一个整页白屏的 Mode 2。所以 B7c 不做"我记得旧形状会白屏"这种回忆，
@@ -1148,7 +1148,7 @@ cache=0`、run12 偶然 `=1`），我在 13.3 第六条里先归因成"B1c 的�
   在配置解析阶段就退出（正是 B7d 量到的那条），而我读到的是"路径为空 + code=000"，被写成"猎物没复现
   ⇒ 尺没有牙"。⇒ **猎物的运行环境也要与被测物同形**；且 build rc / run rc / 容器状态三个读数必须分开记，
   混成一个就只剩猜。现在 prey 显式挂进 Mode 2 那张网，并等它真答一次才判。
-- **C5 抄了 Mode 2 的容器名**：Mode 3 的前端叫 `<project>-z-schedule-frontend-1`（那份清单**故意没钉**
+- **C5 抄了 Mode 2 的容器名**：Mode 3 的前端叫 `<project>-z-schedule-suit-1`（那份清单**故意没钉**
   `container_name`，否则 `--scale` 会被拒），探一个不存在的容器恒为 0；再叠一条 `^Address: ` 不认这台
   busybox 的输出形状。⇒ 名字从 `docker ps` 现取，数法退到"抽非回环 IPv4 去重"，并拿**前端自己的服务名**
   当 1-vs-N 对照：一把尺在两个名字上数出同一个数，它数到的就不是地址。
@@ -1163,7 +1163,7 @@ cache=0`、run12 偶然 `=1`），我在 13.3 第六条里先归因成"B1c 的�
 - **run7 那条红把账记错了对象**（第五处，也是被一条红逼出来的那处）：B7c 报
   `B7c 猎物没能复现白屏形状（路径=[] 读数='000 '）⇒ B7 的判据没有牙`，而"000 = 它根本没在服务"正是
   我给这条臂写的第一遍教训（上面第一条）。真因就躺在同一份 `build_prey.log` 里：
-  `The command '/bin/sh -c cd z-schedule-frontend && npm ci --no-audit --no-fund' returned a non-zero code: 146`
+  `The command '/bin/sh -c cd z-schedule-suit && npm ci --no-audit --no-fund' returned a non-zero code: 146`
   加下一步的 `Get "https://registry-1.docker.io/v2/": … Client.Timeout exceeded while awaiting headers`
   ⇒ **猎物镜像根本没建成**，那条"尺没有牙"是用一次没发生的测量下出来的结论。两处修法：
   ① 判据三分——`build rc≠0` 只能报"没量成"（记环境的账，且认出 `npm error`/`Client.Timeout`/`137|143|146`
@@ -1200,17 +1200,17 @@ cache=0`、run12 偶然 `=1`），我在 13.3 第六条里先归因成"B1c 的�
   **之后**"（判据一个字没改，只换顺序），并把它当成已被证实：run12 读到 `deps 层 Using cache=1
   vite 重跑=0 首个未命中=[Step 14/16 : EXPOSE 80]`。**这句今天被 run13 否了**：同一版脚本、同一顺序，
   B7c 又读到 `retry=0 deps 层 Using cache=0 vite 重跑=2 首个未命中=[Step 6/16 : RUN cd
-  z-schedule-frontend && npm ci --no-audit --no-fund]`（那一遍本身 `总判：PASS=35 FAIL=0`，含 Mode 3 全绿）
+  z-schedule-suit && npm ci --no-audit --no-fund]`（那一遍本身 `总判：PASS=35 FAIL=0`，含 Mode 3 全绿）
   ⇒ n=1 的归纳，位置只是运气好。
   真正的修法靠一支**只改一个开关**的对照探针定下来（250，`~/.cache/nocache_probe/runner2.log`，
   05:34:49→05:35:15）：① 基线冷建 → ② **不带** `--no-cache` 建 teeth，`rc=2` 且报
-  `sh: cd: line 0: can't cd to ../z-schedule-frontend-component: No` → ③ 同一条基线命令
+  `sh: cd: line 0: can't cd to ../z-schedule-component: No` → ③ 同一条基线命令
   `rc=0 Step6=CACHED 耗时=1s`。对照上一支（`runner.log`，05:15:49/05:16:05）——那里 ② **带**
   `--no-cache`，③ 就变冷、npm ci 重跑 20 s。两遍唯一差别就是那个开关 ⇒ **`--no-cache` 就是作废者，
   位置无关**（run12/run13 同顺序一读热一读冷也正是这个意思）。B1c 现已删掉 `--no-cache`；
-  牙齿不靠它：删掉 `COPY _frontend/z-schedule-frontend-component/` 那一行本身就改了那条指令的缓存键，
+  牙齿不靠它：删掉 `COPY _frontend/z-schedule-component/` 那一行本身就改了那条指令的缓存键，
   构建必然走到那一步才红，② 的 `rc=2` 就是实测。顺序保留，但注释里写明它不是修法。
-  另：`docker rmi -f local/z-schedule-frontend:p26teeth`（摘自己的叶子标签）**不**顶 deps 记录，
+  另：`docker rmi -f local/z-schedule-suit:p26teeth`（摘自己的叶子标签）**不**顶 deps 记录，
   它是被排除的嫌疑，别再当第二个作废者去改。
   对产品判据无影响（B7c 的三分类 + 重试兜得住，13.1 第 2 条的 `404 text/html` 三遍逐字复现）。
   ⇒ 教的那条：**只在失败分支里打印的诊断字段等于没有字段**——它结构上读不到"一切正常但其实我理解错了"
@@ -1221,7 +1221,7 @@ cache=0`、run12 偶然 `=1`），我在 13.3 第六条里先归因成"B1c 的�
 ### 13.4 Mode 3 的读数，和一条关于 nginx 什么时候解析名字的事实
 
 - **C1** `bash bin/start-mode3.sh 3`（= `make cluster N=3` 的真身，250 没装 make）rc=0；
-  真实容器名 `deploy-z-schedule-backend-1/-2/-3`、`deploy-z-schedule-frontend-1`（project 取 `deploy/` 的
+  真实容器名 `deploy-z-schedule-backend-1/-2/-3`、`deploy-z-schedule-suit-1`（project 取 `deploy/` 的
   目录名）。清单原文那句 `docker stop z-schedule-backend-z-schedule-backend-1` 是个**这台机器上不存在的名字**，
   已改成一条与 project 无关的命令。
 - **C2** 4/4 容器 healthy（三副本共用同一个临时库，各自的 healthcheck 都真跑过）。
@@ -1234,7 +1234,7 @@ cache=0`、run12 偶然 `=1`），我在 13.3 第六条里先归因成"B1c 的�
   20:34:44 / 20:35:13）——租约是 Java 侧写、DB 侧比的，跨了时区就会在这一行显形。
   ⇒ 副本数不放大调度（这一条只在"调度语义"层面，不等于吞吐会跟着涨，见 §性能那几档）。
 - **C4** 停掉一个后端（run2 停的正好是当时那个 Leader）之后，**第 1 次**探 `/api/actuator/health` 就 200 UP。
-- **C5** 服务名 `z-schedule-backend` 在前端容器里解析出 **3 个地址**（对照：同一条尺数 `z-schedule-frontend`
+- **C5** 服务名 `z-schedule-backend` 在前端容器里解析出 **3 个地址**（对照：同一条尺数 `z-schedule-suit`
   得 1 个）。
 - **B7d（顺手量到的一条事实，比上面几条更影响文档怎么写）**：给 nginx 一个当下不存在的服务名，它在
   **配置解析阶段**就退出——`host not found in upstream "p26-no-such-service" in /etc/nginx/conf.d/default.conf:30`。
@@ -1625,7 +1625,7 @@ A15 两支：MVNOPT 抓"把应用参数递给 Maven"那种写法（只认长选�
 
 | 环 | 实物 | 读数 |
 |---|---|---|
-| ① 源码里的默认前缀 | `_frontend/z-schedule-frontend/vite.config.js:15` | `base: process.env.VITE_BASE \|\| '/meta/'` |
+| ① 源码里的默认前缀 | `_frontend/z-schedule-suit/vite.config.js:15` | `base: process.env.VITE_BASE \|\| '/meta/'` |
 | ② 打包时有没有人覆写它 | `grep -c VITE_BASE z-schedule-admin/pom.xml` | **0** ⇒ frontend-maven-plugin 只跑 `npm run build`，不传 `VITE_BASE` ⇒ 每次打包都把 ① 那个默认前缀**烤进 jar** |
 | ③ 烤进去之后长什么样 | `unzip -p z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar BOOT-INF/classes/static/index.html` | `<script … src="/meta/assets/index-B3o72KK5.js">` + `<link … href="/meta/assets/index-CUyu9iPG.css">` —— **绝对路径，带前缀** |
 | ④ 而 m4 那条命令没设前缀 | 日志 `Tomcat started … with context path ''` | static 挂在**根**上：文件在，但没人按 `/meta/assets/…` 这个名字去取 ⇒ 页面自己声明的两条资源 **404** ⇒ `<div id="root">` 空着 ⇒ **白屏** |
@@ -1714,7 +1714,7 @@ havingValue = "false", matchIfMissing = true)`（`ZScheduleAutoConfiguration.jav
 `P24_A_ONLY=1 bash p24.sh`（bash 3.2.57）三遍逐字相同：`PASS=23 FAIL=0`，其中
 
 ```
-UIBASE|/meta|baked=yes|vite=_frontend/z-schedule-frontend/vite.config.js|dk_ctx=/meta|dk_port=18086
+UIBASE|/meta|baked=yes|vite=_frontend/z-schedule-suit/vite.config.js|dk_ctx=/meta|dk_port=18086
 CTX|7|/meta|-|-
 PORT|19|18086|-|-
 SELFTEST|N=12|WRONG=0|ok

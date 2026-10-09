@@ -1,6 +1,6 @@
-# z-schedule-frontend
+# z-schedule-suit
 
-> **应用层**：Z-Schedule admin UI，按规范 §1.2 放于 `_frontend/z-schedule-frontend/`。
+> **应用层**：Z-Schedule admin UI，按规范 §1.2 放于 `_frontend/z-schedule-suit/`。
 > 产物 `dist/` 由 `admin/pom.xml` 的 frontend-maven-plugin 在 process-resources 阶段
 > 复制到 `z-schedule-admin/src/main/resources/static/`，内嵌进 admin 的 exec jar。
 
@@ -18,7 +18,7 @@ npm run build  # 产物 dist/
 ```jsonc
 // package.json
 "dependencies": {
-    "@yuku123/z-schedule-frontend-component": "file:../z-schedule-frontend-component"
+    "@yuku123/z-schedule-component": "file:../z-schedule-component"
 }
 ```
 
@@ -31,7 +31,7 @@ npm run build  # 产物 dist/
 
 ```
 process-resources 阶段
-  → frontend-maven-plugin 在 _frontend/z-schedule-frontend/ 跑 npm install + npm run build
+  → frontend-maven-plugin 在 _frontend/z-schedule-suit/ 跑 npm install + npm run build
   → 产物 dist/
   → maven-resources-plugin 把 dist/ 复制到 ../z-schedule-admin/src/main/resources/static/
   → spring-boot-maven-plugin:repackage 把整个 jar 打成 -exec.jar

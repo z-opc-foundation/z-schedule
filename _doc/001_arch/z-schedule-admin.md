@@ -8,7 +8,7 @@
 
 一个**最小可运行单体应用**，把 `z-schedule-spring-boot-starter` 装进来，
 附上 Spring Web + Actuator + H2/Log4j2 + 内嵌前端（`src/main/resources/static/`，由
-`_frontend/z-schedule-frontend/dist` 注入），跑起来就是一个完整的「Z-Schedule 调度中心 UI」。
+`_frontend/z-schedule-suit/dist` 注入），跑起来就是一个完整的「Z-Schedule 调度中心 UI」。
 
 业务方**永远不会**在自己的项目里 `import io.github.yuku123:z-schedule-admin`。
 它存在的目的是：
@@ -229,8 +229,8 @@ deploy 脚本（`deploy_maven_center.sh`）显式 `-pl '!z-schedule-admin'` 做�
 
 ## 与前端工程的关系
 
-未来 V2 落地后，本目录的 `src/main/resources/static/` 将**由 `_frontend/z-schedule-frontend/` 的 build 产物自动注入**：
-- `_frontend/z-schedule-frontend/dist/` → `z-schedule-admin/src/main/resources/static/`
+未来 V2 落地后，本目录的 `src/main/resources/static/` 将**由 `_frontend/z-schedule-suit/` 的 build 产物自动注入**：
+- `_frontend/z-schedule-suit/dist/` → `z-schedule-admin/src/main/resources/static/`
 - 触发时机：`mvn package` 的 `process-resources` 阶段（通过 `frontend-maven-plugin`）
 - 当前 `static/` 下手动放的 dist 是临时状态，V2 会被替换
 

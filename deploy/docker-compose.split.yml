@@ -47,9 +47,9 @@ services:
       retries: 3
       start_period: 30s
 
-  z-schedule-frontend:
-    container_name: z-schedule-frontend
-    image: "${OCI_REGISTRY:-ghcr.io/yuku123}/z-schedule-frontend:${IMAGE_VERSION:-1.0.4}"
+  z-schedule-suit:
+    container_name: z-schedule-suit
+    image: "${OCI_REGISTRY:-ghcr.io/yuku123}/z-schedule-suit:${IMAGE_VERSION:-1.0.4}"
     build:
       context: ..
       dockerfile: deploy/Dockerfile.frontend

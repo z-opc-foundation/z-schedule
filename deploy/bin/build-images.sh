@@ -41,7 +41,7 @@ JAR="$(ls -1 z-schedule-admin/target/*-exec.jar 2>/dev/null | head -1)"
 echo "  jar: $JAR ($(stat -c%s "$JAR" 2>/dev/null || stat -f%z "$JAR") B)"
 
 ADMIN_TAG="$OCI_REGISTRY/z-schedule-admin:$IMAGE_VERSION"
-FRONT_TAG="$OCI_REGISTRY/z-schedule-frontend:$IMAGE_VERSION"
+FRONT_TAG="$OCI_REGISTRY/z-schedule-suit:$IMAGE_VERSION"
 
 echo ""
 echo "=== Step 2/3: 构建后端镜像（$ADMIN_TAG）==="

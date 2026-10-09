@@ -4,7 +4,7 @@ import path from 'path';
 
 // Z-Schedule 组件层 — Vite library mode 配置
 // 产物：dist/index.js（ES Module 格式，外部化 react/react-dom）
-// 引用方：同仓 _frontend/z-schedule-frontend/（file: 协议）或外部项目（npm install）
+// 引用方：同仓 _frontend/z-schedule-suit/（file: 协议）或外部项目（npm install）
 export default defineConfig({
     plugins: [react()],
     build: {

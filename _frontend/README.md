@@ -8,12 +8,12 @@
 
 ```
 _frontend/
-├── z-schedule-frontend/              ← 应用层（SPA，admin UI）
+├── z-schedule-suit/              ← 应用层（SPA，admin UI）
 │   ├── package.json
 │   ├── vite.config.js
 │   ├── index.html
 │   └── src/
-└── z-schedule-frontend-component/    ← 组件层（library mode，可复用 React 组件）
+└── z-schedule-component/    ← 组件层（library mode，可复用 React 组件）
     ├── package.json
     ├── vite.config.js
     └── src/
@@ -29,7 +29,7 @@ _frontend/
 ## 与后端集成
 
 `z-schedule-admin/pom.xml` 的 `frontend-maven-plugin` 配置指向
-`_frontend/z-schedule-frontend/`，在 process-resources 阶段：
+`_frontend/z-schedule-suit/`，在 process-resources 阶段：
 
 1. `npm install`（如 node_modules 不存在）
 2. `npm run build` → 产物 `dist/`

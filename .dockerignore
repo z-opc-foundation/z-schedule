@@ -1,7 +1,7 @@
 # 构建上下文白名单式的排除清单。
 #
 # 为什么必须有：deploy/docker-compose.yml 的 build.context 是仓库根，而两个 Dockerfile 实际只取
-# 三样东西——后端要 ${JAR_FILE} 那一个 jar，前端要 _frontend/z-schedule-frontend/ 与
+# 三样东西——后端要 ${JAR_FILE} 那一个 jar，前端要 _frontend/z-schedule-suit/ 与
 # deploy/nginx.conf.template。没有这份文件时 `make dev` 会把 .git、各模块 target/、
 # _frontend/*/node_modules 全打在 tar 里送给 daemon（本机实测上百 MiB；
 # 在 250 那种"一个目录既当仓库又放 mysql-data"的演练机上是 GiB 级）。

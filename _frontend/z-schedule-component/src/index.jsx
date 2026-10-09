@@ -22,7 +22,7 @@ export function JobListView({ jobs = [] }) {
                 </ul>
             )}
             <p style={{ fontSize: 12, color: '#999', marginTop: 16, borderTop: '1px dashed #ddd', paddingTop: 8 }}>
-                from <code>@yuku123/z-schedule-frontend-component</code> — V2 骨架验证
+                from <code>@yuku123/z-schedule-component</code> — V2 骨架验证
             </p>
         </div>
     );

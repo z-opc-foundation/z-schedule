@@ -5,7 +5,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: z-schedule-frontend
+  name: z-schedule-suit
   namespace: ${NAMESPACE}
   labels:
     app.kubernetes.io/name: z-schedule
@@ -26,7 +26,7 @@ spec:
     spec:
       containers:
         - name: nginx
-          image: ${OCI_REGISTRY}/z-schedule-frontend:${IMAGE_VERSION}
+          image: ${OCI_REGISTRY}/z-schedule-suit:${IMAGE_VERSION}
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
