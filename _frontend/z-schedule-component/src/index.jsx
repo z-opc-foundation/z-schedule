@@ -29,3 +29,5 @@ export function JobListView({ jobs = [] }) {
 }
 
 export default JobListView;
+// §8.7 域目录清退：schedule 域 App 挂载点
+export { default as ScheduleApp } from './pages/ScheduleApp.jsx'
