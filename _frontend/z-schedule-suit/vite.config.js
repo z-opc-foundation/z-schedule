@@ -15,6 +15,7 @@ export default defineConfig({
     base: process.env.VITE_BASE || '/meta/',
     plugins: [react()],
     resolve: {
+    dedupe: ['react', 'react-dom', 'react-router-dom', 'antd', '@ant-design/icons', 'axios'],
         alias: {
             '@': path.resolve(__dirname, 'src'),
         },
