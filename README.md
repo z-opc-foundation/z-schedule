@@ -373,3 +373,5 @@ MIT，见根 [`LICENSE`](LICENSE)（`Copyright (c) 2026 z-opc-foundation`）；�
 （两个 npm 项目经 `file:` 协议互相消费，见 [`_frontend/README.md`](_frontend/README.md)）。
 
 _Maintained by the z-opc-foundation organization._
+
+<!-- icon: minimax image-01 placeholder -->
