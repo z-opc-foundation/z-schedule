@@ -8,7 +8,7 @@ export const menuItems = [
     { key: '/z-schedule/jobs', label: '调度任务', icon: <ClockCircleOutlined /> },
 ]
 
-export const routeTable = [
+export const routes = [
     { path: '/z-schedule/home', Component: HomePage },
     { path: '/z-schedule/jobs', Component: JobsPage },
 ]
