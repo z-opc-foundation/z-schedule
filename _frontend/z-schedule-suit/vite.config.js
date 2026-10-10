@@ -16,9 +16,7 @@ export default defineConfig({
     plugins: [react()],
     resolve: {
     dedupe: ['react', 'react-dom', 'react-router-dom', 'antd', '@ant-design/icons', 'axios'],
-        alias: {
-            '@': path.resolve(__dirname, 'src'),
-        },
+        alias: { '@': path.resolve(__dirname, 'src'), ...(process.env.LOCAL_SIBLINGS === '1' ? { '@yuku123/z-schedule-component': '../z-schedule-component/src' } : {}) },
     },
     server: {
         port: 5173,
