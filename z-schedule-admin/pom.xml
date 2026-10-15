@@ -84,6 +84,16 @@
             <groupId>io.github.yuku123</groupId>
             <artifactId>z-boot-web-starter</artifactId>
             <version>${z-boot.version}</version>
+            <exclusions>
+                <!-- 它 DM 进来 log4j-slf4j2-impl（SLF4J 2.x Provider 绑定），与本仓解析到的
+                     slf4j-api 1.7.36 不兼容 ⇒ 启动期 NoSuchMethodError: Log4jLoggerFactory.<init>()
+                     (2.x 的 Log4jLoggerFactory 没有无参构造，1.x 的 StaticLoggerBinder 却去调它)。
+                     绑定只留 1.7 那一代 log4j-slf4j-impl，理由见下面 z-util-core 上方那段注释。 -->
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-slf4j2-impl</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <!--
             SLF4J 绑定只留一条，且必须留 **1.7 那一代**（log4j-slf4j-impl，配 slf4j-api 1.7.36）。
@@ -200,6 +210,11 @@
                         <phase>generate-resources</phase>
                         <configuration>
                             <arguments>run build</arguments>
+                            <!-- base 不用在这里钉：vite.config.js 的默认值已是 '/'，
+                                 对 Mode 1（jar，context-path 空）和 Mode 2/3（nginx/Ingress，path=/）都成立。
+                                 2026-10-15 实测：默认值原为 '/meta/' 时白屏，且 SPA 回落会把那个资源 404
+                                 伪造成 200 text/html 的 index.html，"全 200"判据照样通过。
+                                 真正非根挂载时才在这里传 VITE_BASE。 -->
                         </configuration>
                     </execution>
                 </executions>

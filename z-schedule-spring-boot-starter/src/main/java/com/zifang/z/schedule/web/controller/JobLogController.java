@@ -22,8 +22,11 @@ import java.util.Map;
 /**
  * 任务日志管理 Controller,提供调度日志的查询、清理、执行日志查看等接口.
  * <p>
- * API 基础路径: /joblog
+ * API 基础路径: /joblog 与 /api/schedule/joblog 两条等价（前端与 suit 的 dev proxy 都走后者）
  * 所属模块: z-schedule-admin
+ *
+ * <p>为什么必须是 /api/schedule 这条：SSO 登录拦截器只挡 {@code /api/**}，裸的 {@code /joblog/*} 不过拦截。
+ * 页面注释里"全部在 SSO 拦截范围内"这句话靠的就是这个别名，去掉别名等于把这组接口裸奔出去。
  *
  * <p>日志行上的 {@code job_group} 是这一层唯一的判据（{@code /jobinfo/*} 判的是任务那一行），
  * 所以四条口都按 {@link GroupAccess} 收口：出示了会话令牌且 {@code permission} 写明组的请求
@@ -38,7 +41,7 @@ import java.util.Map;
  * </ul>
  */
 @RestController
-@RequestMapping("/joblog")
+@RequestMapping({"/joblog", "/api/schedule/joblog", "/schedule/joblog"})
 public class JobLogController {
 
     /** 与 {@code JobLogServiceImpl.query} 的排序一致：最新在前，同刻按 id 倒序。 */

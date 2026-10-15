@@ -13,7 +13,7 @@ import java.util.Map;
 /**
  * 执行器分组管理 Controller,提供执行器分组的 CRUD 与注册节点查询.
  * <p>
- * API 基础路径: /jobgroup
+ * API 基础路径: /jobgroup 与 /api/schedule/jobgroup 两条等价（前端与 suit 的 dev proxy 都走后者）
  * 所属模块: z-schedule-admin
  *
  * <p>主要端点:
@@ -27,7 +27,7 @@ import java.util.Map;
  * </ul>
  */
 @RestController
-@RequestMapping("/jobgroup")
+@RequestMapping({"/jobgroup", "/api/schedule/jobgroup", "/schedule/jobgroup"})
 public class JobGroupController {
 
     @Autowired

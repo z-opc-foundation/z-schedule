@@ -5,11 +5,11 @@ import { menuItems, routes } from './pages-manifest'
 import LoginPage from './LoginPage'
 import { Result, Button } from 'antd'
 
+import { at, BASE } from './routes-base'
+
 // vite base（默认 /meta/，Spring context-path）作为 router basename；
 // Mode 2 nginx 根路径部署时 VITE_BASE='/'，basename 退化为 undefined。
-const BASE = import.meta.env.BASE_URL && import.meta.env.BASE_URL !== '/'
-    ? import.meta.env.BASE_URL.replace(/\/$/, '')
-    : undefined
+const ROUTER_BASENAME = BASE || undefined
 
 class ErrorBoundary extends Component {
     constructor(props) { super(props); this.state = { err: null } }
@@ -27,7 +27,7 @@ function NotFound() {
             status="404"
             title="页面不存在"
             subTitle="路由表里没有这条路径。"
-            extra={<Button type="primary" onClick={() => { window.location.href = '/z-schedule/home' }}>去首页</Button>}
+            extra={<Button type="primary" onClick={() => { window.location.href = at('/z-schedule/home') }}>去首页</Button>}
         />
     )
 }
@@ -42,7 +42,7 @@ function ProtectedShell() {
 
     useEffect(() => {
         if (!localStorage.getItem('token')) {
-            window.location.replace('/z-schedule/login')
+            window.location.replace(at('/z-schedule/login'))
             return
         }
         const raw = localStorage.getItem('userInfo')
@@ -67,7 +67,7 @@ function ProtectedShell() {
 export default function App() {
     return (
         <ErrorBoundary>
-            <BrowserRouter basename={BASE}>
+            <BrowserRouter basename={ROUTER_BASENAME}>
                 <Routes>
                     <Route path="/z-schedule/login" element={<LoginRoute />} />
                     <Route element={<ProtectedShell />}>

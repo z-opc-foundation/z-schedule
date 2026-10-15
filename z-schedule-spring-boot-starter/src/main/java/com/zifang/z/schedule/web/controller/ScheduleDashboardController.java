@@ -33,7 +33,7 @@ import java.util.stream.Collectors;
  * </ul>
  */
 @RestController
-@RequestMapping({"/dashboard", "/api/schedule"})
+@RequestMapping({"/dashboard", "/api/schedule", "/schedule"})
 public class ScheduleDashboardController {
 
     /** 趋势图最多回看的天数,前端只需要近两周,更大的值只会被日历循环放大. */

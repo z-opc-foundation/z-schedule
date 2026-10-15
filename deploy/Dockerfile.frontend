@@ -13,9 +13,12 @@
 #      `sh: cd: line 0: can't cd to ../z-schedule-component: No such file or directory`（rc=2）。
 #      app 的 package.json 以 `file:../z-schedule-component` 依赖它、src/App.jsx 从它
 #      import JobListView，两个 `../` 都指同一个父目录 ⇒ builder 里必须摆成**兄弟目录**。
-#   2) app 的 vite base 默认 '/meta/'（Mode 1 那份 dist 由 Spring 挂在 /meta context-path 下才对），
-#      而这个镜像是 nginx 在 `/` 上服务 SPA：index.html 里的 /meta/assets/*.js 在容器里没有 ⇒ 白屏。
-#      所以 base 从 env 进来，这里钉 '/'。
+#   2) SPA 的 base 必须是 '/'：这个镜像是 nginx 在 `/` 上服务 SPA，index.html 里的资源前缀
+#      若不是 / 就是 404 ⇒ 白屏。base 从 env 进来，这里钉 '/'（ARG 默认值）。
+#      2026-10-15 更正：旧注释写"app 的 vite base 默认 '/meta/'，Mode 1 那份 dist 由 Spring 挂在
+#      /meta context-path 下才对"——那句是错的。/meta 只来自 deploy/Dockerfile.backend 的 ENV，
+#      Mode 1 的本地 java -jar 走 application.yml、那里不设 context-path，所以 Mode 1 同样要 '/'。
+#      vite.config.js 的默认值已一并改成 '/'；这个 ARG 现在只是把意图钉显。
 #
 # 构建命令（版本别抄死在这里，走 bin/build-images.sh 或 compose 的 build，
 #   两处都用 ${OCI_REGISTRY}/z-schedule-suit:${IMAGE_VERSION}，与清单里的 image: 名字逐字一致）：
