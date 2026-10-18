@@ -3,7 +3,7 @@ import {Button, Card, Form, Input, InputNumber, message, Modal, Popconfirm, Sele
 import {ClusterOutlined, DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined} from '@ant-design/icons';
 import {jobGroupApi} from '@/schedule/services/job';
 import {AddressType} from '@/schedule/types';
-import {EmptyState, ErrorState} from '@/common/components/ui';
+import {EmptyState, ErrorState} from '@yuku123/z-frontend-common/ui';
 
 /**
  * 执行器管理 (JobGroup) — 路径: /schedule/group

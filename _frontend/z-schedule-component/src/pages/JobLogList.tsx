@@ -3,7 +3,7 @@ import {useSearchParams} from 'react-router-dom';
 import {Button, Descriptions, Drawer, Form, Popconfirm, Select, Space, Table, Tag, Tooltip} from 'antd';
 import {ClearOutlined, EyeOutlined, ReloadOutlined} from '@ant-design/icons';
 import {jobGroupApi, jobLogApi} from '@/schedule/services/job';
-import {EmptyState, ErrorState, PageHeader} from '@/common/components/ui';
+import {EmptyState, ErrorState, PageHeader} from '@yuku123/z-frontend-common/ui';
 
 /**
  * 调度日志 (JobLog) — 路径: /schedule/log
