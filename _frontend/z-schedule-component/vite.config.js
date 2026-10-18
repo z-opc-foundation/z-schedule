@@ -15,10 +15,14 @@ export default defineConfig({
     },
     build: {
         lib: {
-            entry: path.resolve(__dirname, 'src/index.jsx'),
+            // 两个 entry 对应 exports 两张脸: './dist/index.js'(.) 与 './dist/pages.js'(./pages,
+            // lead 005 §8.2/§8.6 #3)。只声明 index 时产物里没有 pages.js, 而 exports 还指着它。
+            entry: {
+                index: path.resolve(__dirname, 'src/index.jsx'),
+                pages: path.resolve(__dirname, 'src/pages.js'),
+            },
             name: 'ZScheduleFrontendComponent',
             formats: ['es'],
-            fileName: () => 'index.js',
         },
         outDir: 'dist',
         emptyOutDir: true,
