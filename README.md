@@ -20,10 +20,10 @@
 | **仓库** | `z-schedule` |
 | **Maven 坐标** | `io.github.yuku123:z-schedule:${revision}`（聚合）· `-core` · `-spring-boot-starter` |
 | **当前版本** | `1.0.6`（根 POM `<revision>`，CI-friendly versions + flatten-maven-plugin `oss` 模式） |
-| **父项目** | `io.github.yuku123:z-boot-parent:1.0.21`（`<relativePath/>` 留空，parent 在 repo1 不在磁盘） |
+| **父项目** | `io.github.yuku123:z-boot-parent:1.1.0`（`<relativePath/>` 留空，parent 在 repo1 不在磁盘） |
 | **Maven Central** | 已发布：`z-schedule` / `z-schedule-core` / `z-schedule-spring-boot-starter` 的 **1.0.4 / 1.0.5 / 1.0.6** 从 repo1 取 `.pom` 均回 200；`z-schedule-admin` 三个版本全 404（设计上不发布） |
 | **默认端口** | 本地直跑 **8080**、context-path 为空（`application.yml` 从没设过 `server.*`）；容器面才是 `18086` + `/meta` |
-| **运行口径** | Java 8（口径由父链下发，根 POM 已删 `maven.compiler.*`）· Spring Boot **2.7.18**（由地板 `z-boot-dependencies` 供，根 POM 已删 `spring-boot.version` 键） |
+| **运行口径** | Java 8（口径由父链下发，根 POM 已删 `maven.compiler.*`）· Spring Boot **2.7.18**（由 `z-boot-parent` 自带地板供，根 POM 已删 `spring-boot.version` 键） |
 | **最近更新** | 2026-09-30 |
 
 ⚠ 关于"版本单一来源"：根 `<revision>` 只管聚合/core/starter 三件。`z-schedule-admin` 有自己的
@@ -100,7 +100,7 @@
 
 ```
 z-schedule/
-├── pom.xml                          # 根聚合 POM：继承 z-boot-parent:1.0.21，<revision>=1.0.6，常开 flatten(oss)
+├── pom.xml                          # 根聚合 POM：继承 z-boot-parent:1.1.0，<revision>=1.0.6，常开 flatten(oss)
 ├── z-schedule-core/                 # 无 Spring 依赖的底层：entity/model、10 个 ExecutorRouter、
 │                                    #   枚举（阻塞/路由/过期/GLUE/状态/触发码）、IJobHandler、CronExpression、
 │                                    #   ScheduleProperties（z.schedule.* 的载体）
@@ -110,7 +110,7 @@ z-schedule/
 ├── z-schedule-admin/                # 可启动演示应用（永不上 Maven Central）
 │                                    #   只有 3 个类：ZScheduleAdminApplication / DevDataSourceConfig / DemoJobHandler
 ├── _frontend/                       # 容器目录（自身无 package.json），两个 npm 项目经 `file:` 互相消费
-│   ├── z-schedule-suit/                  # @yuku123/z-schedule-suit（SPA 外壳，React 18 + Vite 5）
+│   ├── z-schedule-suit/                  # @yuku123/z-schedule-suit（SPA 外壳，React 19 + Vite 6）
 │   └── z-schedule-component/        # @yuku123/z-schedule-component（library mode）
 ├── deploy/                          # 三种模式 + k8s（见文末「部署」）
 └── _doc/                            # 文档，见文末「文档目录」
@@ -132,14 +132,14 @@ z-schedule/
 | 层级 | 技术（全部取自 pom / 源码实测） |
 |------|------|
 | 语言 / 运行时 | Java 8（class-file major 52；口径由父链 pluginManagement 下发） |
-| 框架 | Spring Boot 2.7.18（地板 `z-boot-dependencies` 供；**仅 `z-schedule-admin` 自己的 parent 仍钉 2.7.12**） |
+| 框架 | Spring Boot 2.7.18（`z-boot-parent` 自带地板供；**仅 `z-schedule-admin` 自己的 parent 仍钉 2.7.12**） |
 | 父链 | `z-boot-parent:1.0.21` → 地板 `z-boot-dependencies:1.0.20` + 兄弟仓权威表 `z-boot-fleet:1.0.1`（三件均在 repo1，现读其 pom 得下面各格） |
 | 持久层 | MyBatis-Plus 3.5.7（`mybatis-plus-extension`）+ Druid 1.2.23（两格均由地板供） |
 | 数据库 | MySQL 8（`com.mysql:mysql-connector-j:8.0.33`，刻意留 8.0.33 不跟地板的 8.4.0；带 Boot 那条 `protobuf-java` exclusion）/ H2（dev profile 与单测） |
 | 日志 | log4j2（api/core/jul/slf4j-impl 钉 **2.17.2**，`log4j-bom` 管 slf4j2-impl=2.20.0）+ slf4j |
 | 工具库 | `z-util-core`、`z-boot-web-starter`、`z-boot-datasource-starter`（`ModuleDataSourceTemplate` 建 `dataSourceSchedule`） |
 | 接口文档 | 无（本仓没引 springdoc/Knife4j，别按 z-ctc 那套找 `/doc.html`） |
-| 前端 | React 18 + Ant Design 生态 + Vite 5（`_frontend/`，独立 npm 工程） |
+| 前端 | React 19 + Ant Design 6 + Vite 6（`_frontend/`，独立 npm 工程） |
 | 构建 | Maven（flatten-maven-plugin `oss` + surefire **本地钉 3.5.4**）· frontend-maven-plugin 1.15.0（node v18.17.0 / npm 9.6.7）· Docker / k8s |
 
 ---
@@ -152,9 +152,9 @@ z-schedule/
 mvn clean install -DskipTests
 ```
 
-第三方版本一律由 `z-boot-parent` → `z-boot-dependencies`（地板）+ `z-boot-fleet`（兄弟仓权威表）供给，
+第三方版本一律由 `z-boot-parent:1.1.0` 供给（第三方地板与兄弟仓权威表均已并入 parent 自身），
 模块 POM 里不应再出现字面版本钉；若报找不到版本，先确认本地/镜像能解析到
-`io.github.yuku123:z-boot-parent:1.0.21`。
+`io.github.yuku123:z-boot-parent:1.1.0`。
 
 ### 作为依赖接入一个 Spring Boot 应用
 
@@ -279,7 +279,7 @@ e2e README §10）：这段配置原先写作 `spring.actuator.*`（缩进在 `s
 rm -rf */target/surefire-reports && mvn test
 ```
 
-静态数 `@Test` 注解（本树实测）：`z-schedule-core` 45 + `starter` 283 + `admin` 6 = **334**。
+静态数 `@Test` 注解（本树实测）：`z-schedule-core` 45 + `starter` 284 + `admin` 6 = **335**。
 surefire 实跑数以现跑为准，计数只吃 `*/target/surefire-reports/*.xml`、不吃 stdout；目录没清干净会多算一类。
 
 已知两格必须知道的：
@@ -336,6 +336,7 @@ MIT，见根 [`LICENSE`](LICENSE)（`Copyright (c) 2026 z-opc-foundation`）；�
 本项目文档统一收口在 `_doc/` 下：
 
 - [`_doc/001_arch/`](_doc/001_arch/) — 架构与模块说明：
+  - [`00-overview.md`](_doc/001_arch/00-overview.md) — 项目总览（模块架构、核心功能、对外集成 / 上下游、技术特点、目录结构）
   - [`01-admin.md`](_doc/001_arch/01-admin.md) — 演示应用的定位、本地启动的真实前置、鉴权面、探针面
 - [`_doc/002_deploy/`](_doc/002_deploy/) — 建表 SQL：
   - [`init/z-schedule.sql`](_doc/002_deploy/init/z-schedule.sql) — 全量建表脚本（6 张表，不含 DROP）。
