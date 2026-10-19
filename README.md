@@ -265,7 +265,7 @@ Controller 上没有 `/api/xxx` 这种统一服务前缀，实际路径是 **con
 
 `accessToken` 来源优先级：请求参数 `accessToken` > 请求头 `X-Access-Token`。
 
-探针面两条真实缺陷（原文读数见 [`_doc/001_arch/z-schedule-admin.md`](_doc/001_arch/z-schedule-admin.md) 与
+探针面两条真实缺陷（原文读数见 [`_doc/001_arch/01-admin.md`](_doc/001_arch/01-admin.md) 与
 e2e README §10）：这段配置原先写作 `spring.actuator.*`（缩进在 `spring:` 之下），而 Boot 读顶层 `management.*`
 ⇒ 整块死配置，`/actuator/health/liveness`、`readiness` 天生 404，而 `deploy/k8s/01-deployment-backend.yaml` 的
 探针指的就是这两条；另外 Boot 自动建的 readiness 组**不含数据源**（库挂了仍回 200 UP），现在 yml 里显式把
@@ -332,10 +332,11 @@ MIT，见根 [`LICENSE`](LICENSE)（`Copyright (c) 2026 z-opc-foundation`）；�
 
 ## 文档目录
 
+- [`_doc/008_troubleshooting/`](_doc/008_troubleshooting/) — 踩坑与失败要点（连接池超时实测）
 本项目文档统一收口在 `_doc/` 下：
 
 - [`_doc/001_arch/`](_doc/001_arch/) — 架构与模块说明：
-  - [`z-schedule-admin.md`](_doc/001_arch/z-schedule-admin.md) — 演示应用的定位、本地启动的真实前置、鉴权面、探针面
+  - [`01-admin.md`](_doc/001_arch/01-admin.md) — 演示应用的定位、本地启动的真实前置、鉴权面、探针面
 - [`_doc/002_deploy/`](_doc/002_deploy/) — 建表 SQL：
   - [`init/z-schedule.sql`](_doc/002_deploy/init/z-schedule.sql) — 全量建表脚本（6 张表，不含 DROP）。
     部署资产（compose / k8s / `bin/*.sh` / `Makefile`）在仓根 [`deploy/`](deploy/)，不在这里

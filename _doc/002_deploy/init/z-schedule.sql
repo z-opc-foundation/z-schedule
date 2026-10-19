@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS `z_schedule_user`
 -- 与历史脚本的差异（2026-09-26 对齐）
 --
 -- z-schedule 此前**不附带任何建表脚本**，唯一在用的参照是 z-opc 仓的
--- _doc/004_sql/z-schedule.sql 与 _doc/006_troubleshooting/z-schedule-schema-migration.sql。
+-- z-opc/_doc/004_sql/z-schedule.sql 与 z-opc/_doc/006_troubleshooting/z-schedule-schema-migration.sql。
 -- 逐列比对 DO 与那份 004 脚本的结果：
 --   z_schedule_job_info 少 4 列 —— trigger_type / fix_interval / misfire_strategy / child_job_id
 --       (006 迁移脚本补了其中 3 列，仍漏 fix_interval；MySQL 也不支持 ADD COLUMN IF NOT EXISTS)

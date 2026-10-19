@@ -21,8 +21,8 @@ import java.util.List;
 public final class ShippedSqlScript {
 
     /**
-     * 2026-09-30「散落文件收口到 _doc/ 编号桶」把脚本从 {@code _doc/004_sql/z-schedule.sql}
-     * 搬到了 {@code _doc/002_deploy/init/z-schedule.sql}，这里仍指着旧路径 ⇒
+     * 2026-09-30「散落文件收口到 _doc/ 编号桶」把脚本从旧的 004 号桶搬到了
+     * {@code _doc/002_deploy/init/z-schedule.sql}，这里一度仍指着旧路径 ⇒
      * {@code JobInfoServiceImplH2Test} 32 条全部以 IllegalStateException 开头。
      * 脚本本身没动（内容与 6 个 DO 的对应关系写在文件头），只是换了位置。
      */

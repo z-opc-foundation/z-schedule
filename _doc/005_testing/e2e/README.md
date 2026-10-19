@@ -744,7 +744,7 @@ FAIL 消息把两侧原样贴出来 + 改完复跑立刻归零（下一段记的
 引擎 debug 日志哑了两周。`ManagementConfigBindingTest` 的 `everyLoggingLevelPackageIsReachable()`
 钉的就是这一族——每个 `logging.level.<pkg>` 都得能在 classpath 上解析出目录，解析不到就红。
 
-顺带纠一处**文档里的假话**：`_doc/001_arch/z-schedule-admin.md` 原先写"本应用开了 `show-details=always`，
+顺带纠一处**文档里的假话**：`_doc/001_arch/01-admin.md` 原先写"本应用开了 `show-details=always`，
 health 会把数据源信息吐给匿名访问者"。前半是错的（那段配置从未生效，实测 health 里没有 `components`）；
 后半之所以也没发生，是 `TokenAuthFilter` 把 `/actuator/*` 403 掉了——过滤器与这段 yml 无关，那条 403 一直是真的。
 **把"没发生的风险"写成"已经泄露"比漏写更糟**：它会让人以为这件事已经处置过了。现在 `show-details` 显式定为
@@ -1519,7 +1519,7 @@ README 只数围栏内：`./run.sh` 也出现在讲坑的正文里（"以前裸�
 ## 17. #40：本地启动那一屏教的两条命令，一条 Maven 直接拒、一条起来是空壳（A14 + A15）
 
 `#37 的静态半边（§16）只查了 `deploy/README.md`。这一节是同一把尺换到**另一屏**：
-根 `README.md`（别人 clone 后看到的第一屏）与 `_doc/001_arch/z-schedule-admin.md` 的「本地启动」。
+根 `README.md`（别人 clone 后看到的第一屏）与 `_doc/001_arch/01-admin.md` 的「本地启动」。
 起因很小——想在文档里挑一条"零依赖就能跑"的路径复现 §15 那条 `run.sh` 判据，结果那条路本身走不通：
 **四条命令逐条实测，三条是死路**，而文档把其中两条写成了推荐做法。
 
@@ -1608,7 +1608,7 @@ A15 两支：MVNOPT 抓"把应用参数递给 Maven"那种写法（只认长选�
 
 - 根 `README.md` 重写：标题从模板遗留的 `# z-camuda`（还写了两遍）改成真项目，补坐标/模块/`_doc/` 完整索引/
   三条"跑起来"的路各自**验到哪一步**。
-- `_doc/001_arch/z-schedule-admin.md`「本地启动」：四条命令的实测表 + dev profile 的两条前置 +
+- `_doc/001_arch/01-admin.md`「本地启动」：四条命令的实测表 + dev profile 的两条前置 +
   方式 A/B 换成能跑的形状（并写清 8080、无 `/meta`、数据接口 500）。
 - `z-schedule-admin/src/main/resources/application.yml` 与 `application-dev.yml` 的头部注释：同上改口。
 - `DevDataSourceConfig.java`：删幽灵 javadoc 条目与四个死 import，把"`disabled=true` 是前置条件"写进注释。
@@ -1749,7 +1749,7 @@ compose 后端 service 块的容器侧端口、集群版 healthcheck URL、k8s `
    并让 `prey()` 回报 `hits=N`。这条与 §17.3 第 2 条（`DOCIDX` 的"提到≠索引了"）是同一型。
 6. **MVNOPT 自己咬了改对的命令**：`arguments=` 取值段第一版只按 `\S+` 摘 ⇒ 照本节教的
    "带引号、内含空格"那串只摘掉前半截，后半截 ` --server.servlet.context-path=/meta"` 撞上"长选项名含点"
-   被判红（真树上第一遍就是 `MVNOPT|21|_doc/001_arch/z-schedule-admin.md:82`）。改成带引号优先整段摘。
+   被判红（真树上第一遍就是 `MVNOPT|21|_doc/001_arch/01-admin.md:82`）。改成带引号优先整段摘。
    连带 `ARGCOMMA` 的取值段第一版直接 `group(4)`，在 yml 头注释那种**裸写法**上 `IndexError`
    （只有带引号那两支有内层捕获组）⇒ 改成 2→3→1 依次回退。
 
@@ -1761,7 +1761,7 @@ compose 后端 service 块的容器侧端口、集群版 healthcheck URL、k8s `
 
 - **文档面**（产品字节未动）：根 `README.md`「三条跑起来的路」第三行改成**两条独立前置**
   （`disabled=true` 管起不起得来、`context-path=/meta` 管看不看得见）；
-  `_doc/001_arch/z-schedule-admin.md`「本地启动」新增「起得来 ≠ 看得见」一节，
+  `_doc/001_arch/01-admin.md`「本地启动」新增「起得来 ≠ 看得见」一节，
   方式 A 的命令改成空格分隔带引号那串并附实测行，方式 B 补 `context-path` 且纠正"jar 名跟着
   admin 模块自己的 `<version>`（当前字面 `1.0.0`，**不是**根 pom 的 `<revision>` 1.0.4）"（#38 同源）；
   `application.yml` / `application-dev.yml` 头部注释同步改口。
@@ -1869,7 +1869,7 @@ starter 就会把它扫进容器。
 
 - **产品字节**：`ZScheduleAutoConfiguration` 两支 `@Bean` 各加 `@ConditionalOnMissingBean(name = …)` 与注释（+5 行）。
 - **测试**：新增 `ZScheduleDataSourceOverrideTest`（8 例）；`ZScheduleAlarmServiceWiringTest` 换包（仍 4 例）。
-- **文档面**：根 `README.md`「三条跑起来的路」第三行、`_doc/001_arch/z-schedule-admin.md`「本地启动」
+- **文档面**：根 `README.md`「三条跑起来的路」第三行、`_doc/001_arch/01-admin.md`「本地启动」
   （含「dev profile 的两条前置」第 1 条整段重写）、`application-dev.yml` 头注释、
   `DevDataSourceConfig` 与 `ZScheduleAutoConfiguration` 的类 javadoc 里那句"必须给旗"改成**分版本口径**
   （本树不用给；用已发布 1.0.4 仍要给；只给一支 DataSource 时两版都不行）。改完的复跑见 19.6。

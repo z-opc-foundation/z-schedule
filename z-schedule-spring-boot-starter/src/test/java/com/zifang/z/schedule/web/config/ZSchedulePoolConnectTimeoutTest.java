@@ -59,7 +59,7 @@ import static org.junit.Assert.fail;
  * 所以 {@code socketTimeout} 在"借到的老连接"那一档、
  * {@code connectTimeout} 在"SYN 被丢弃"那一档，都只钉到"确实递给了驱动"这一层；
  * 它们的<b>计时</b>由 {@link #读超时只管单次尝试而整段的界仍是maxWait()} 那一条间接证明。
- * 完整读数表见 {@code _doc/POOL-TIMEOUT-MEASUREMENT.md}。
+ * 完整读数表见 {@code _doc/008_troubleshooting/01-pool-timeout-measurement.md}。
  */
 public class ZSchedulePoolConnectTimeoutTest {
 

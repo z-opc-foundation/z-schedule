@@ -664,7 +664,7 @@ for dirpath, dirnames, filenames in os.walk(root):
             # 先摘掉合法的 spring-boot.run.arguments=/jvmArguments= 取值段，剩下的才是真递给 Maven 的。
             # 取值段可以是**带引号且内含空格**（多个应用参数只能用空格分隔 ⇒ 正确写法必然长这样），
             # 所以这里必须整段摘：只按 \S+ 摘会把引号里的后半截留给下面那条规则，
-            # 于是"照 §18 改对的那条命令"反被判红（实测在 _doc/001_arch/z-schedule-admin.md:82 红过一次）。
+            # 于是"照 §18 改对的那条命令"反被判红（实测在 _doc/001_arch/01-admin.md:82 红过一次）。
             s = re.sub(r'-Dspring-boot\.run\.(arguments|jvmArguments)=("(?:[^"]*)"|\'[^\']*\'|\S+)', '', s)
             # Maven 自己的长选项名里绝不含点（--also-make / --no-transfer-progress），
             # 含点的那个形状一定是"想给应用传属性却写在 mvn 后面" ⇒ 只按这条判，不误伤
