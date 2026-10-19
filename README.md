@@ -133,7 +133,7 @@ z-schedule/
 |------|------|
 | 语言 / 运行时 | Java 8（class-file major 52；口径由父链 pluginManagement 下发） |
 | 框架 | Spring Boot 2.7.18（`z-boot-parent` 自带地板供；**仅 `z-schedule-admin` 自己的 parent 仍钉 2.7.12**） |
-| 父链 | `z-boot-parent:1.0.21` → 地板 `z-boot-dependencies:1.0.20` + 兄弟仓权威表 `z-boot-fleet:1.0.1`（三件均在 repo1，现读其 pom 得下面各格） |
+| 父链 | `z-boot-parent:1.1.0`（其父 `z-boot:1.0.19`）。第三方地板与兄弟仓权威表**都已并进 parent 自身**（`z-boot-dependencies` / `z-boot-fleet` 两个文件夹随 2026-10-08 火车制拓扑退役），现读 repo1 上那份 pom 得下面各格 |
 | 持久层 | MyBatis-Plus 3.5.7（`mybatis-plus-extension`）+ Druid 1.2.23（两格均由地板供） |
 | 数据库 | MySQL 8（`com.mysql:mysql-connector-j:8.0.33`，刻意留 8.0.33 不跟地板的 8.4.0；带 Boot 那条 `protobuf-java` exclusion）/ H2（dev profile 与单测） |
 | 日志 | log4j2（api/core/jul/slf4j-impl 钉 **2.17.2**，`log4j-bom` 管 slf4j2-impl=2.20.0）+ slf4j |
