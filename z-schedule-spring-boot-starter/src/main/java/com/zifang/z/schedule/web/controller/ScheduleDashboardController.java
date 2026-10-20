@@ -23,6 +23,14 @@ import java.util.stream.Collectors;
  * API 基础路径: /dashboard (同时保留 /api/schedule 别名以兼容老前端)
  * 所属模块: z-schedule-admin
  *
+ * <p>⚠ 这里**不能**再挂顶层 "/schedule"（2026-10-20 移除）：
+ * 主壳把 /schedule/* 当作前端路由（React Router 的 /schedule/*），而控制器的
+ * {@code @GetMapping("")} 会把**精确的 GET /schedule** 吃掉直接回 JSON ——
+ * 于是浏览器访问 /schedule 拿到的是裸 JSON（{"data":{"groupCount":1,...}}），
+ * 页面根本没有 #root，SPO 一行都渲染不出来。
+ * 子路径（/schedule/dashboard、/schedule/job 等）本来就不匹配本控制器，一直是好的，
+ * 所以只需摘掉顶层那条映射，/schedule 就会落回 SPA 的 index.html。
+ *
  * <p>主要端点:
  * <ul>
  *   <li>GET /dashboard                   — 总览统计(含 stats/recentJobs,前端主入口)</li>
@@ -33,7 +41,7 @@ import java.util.stream.Collectors;
  * </ul>
  */
 @RestController
-@RequestMapping({"/dashboard", "/api/schedule", "/schedule"})
+@RequestMapping({"/dashboard", "/api/schedule"})
 public class ScheduleDashboardController {
 
     /** 趋势图最多回看的天数,前端只需要近两周,更大的值只会被日历循环放大. */
