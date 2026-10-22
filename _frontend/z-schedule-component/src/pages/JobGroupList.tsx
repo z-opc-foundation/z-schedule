@@ -1,9 +1,9 @@
 import React, {useEffect, useState} from 'react';
-import {Button, Card, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Table, Tag} from 'antd';
+import {Button, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Tag} from 'antd';
 import {ClusterOutlined, DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined} from '@ant-design/icons';
 import {jobGroupApi} from '@/schedule/services/job';
 import {AddressType} from '@/schedule/types';
-import {EmptyState, ErrorState} from '@yuku123/z-frontend-common/ui';
+import {ErrorState, ListTable} from '@yuku123/z-frontend-common/ui';
 
 /**
  * 执行器管理 (JobGroup) — 路径: /schedule/group
@@ -91,29 +91,24 @@ const JobGroupList: React.FC = () => {
                     <ErrorState error={loadError} onRetry={load} title="加载执行器失败"/>
                 </div>
             )}
-            <Card
-                title={<Space><ClusterOutlined/> 执行器管理</Space>}
-                extra={
+            {/* 执行器全量在前端（接口一次给全量）⇒ 走基座 ListTable：
+                过滤/分页/空态三件套由基座统一承接，动作按钮放 cardExtra。 */}
+            <ListTable
+                cardTitle={<Space><ClusterOutlined/> 执行器管理</Space>}
+                rows={groups}
+                rowKey="id"
+                loading={loading}
+                searchKeys="appName,title,addressList"
+                searchPlaceholder="按 AppName / 标题 / 机器地址过滤"
+                cardExtra={
                     <Space>
                         <Button icon={<ReloadOutlined/>} onClick={load}>刷新</Button>
                         <Button type="primary" icon={<PlusOutlined/>} onClick={handleAdd}>新增执行器</Button>
                     </Space>
                 }
-            >
-                <Table
-                    rowKey="id"
-                    dataSource={groups}
-                    loading={loading}
-                    pagination={{pageSize: 20, size: 'small'}}
-                    locale={{
-                        emptyText: !loading && !loadError ? (
-                            <EmptyState
-                                title="还没有执行器"
-                                description="执行器进程起来后会调 POST /executor/beat 自动注册；也可以「新增执行器」手动录入机器地址"
-                            />
-                        ) : undefined
-                    }}
-                    columns={[
+                emptyTitle="还没有执行器"
+                emptyDescription="执行器进程起来后会调 POST /executor/beat 自动注册；也可以「新增执行器」手动录入机器地址"
+                columns={[
                         {title: 'ID', dataIndex: 'id', width: 60},
                         {
                             title: 'AppName', dataIndex: 'appName', width: 200,
@@ -151,9 +146,8 @@ const JobGroupList: React.FC = () => {
                                 </Space>
                             )
                         },
-                    ]}
-                />
-            </Card>
+                ]}
+            />
 
             <Modal
                 title={editing ? '编辑执行器' : '新增执行器'}

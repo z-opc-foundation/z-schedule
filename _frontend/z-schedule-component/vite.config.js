@@ -39,6 +39,9 @@ export default defineConfig({
                 'react', 'react-dom', 'react-dom/client', 'react/jsx-runtime',
                 'react-router-dom', 'antd', '@ant-design/icons', 'axios',
                 '@yuku123/z-frontend-common', '@yuku123/z-frontend-common/ui',
+                // 基座的 /ui/echarts 子路径也要 external：rollup 的 external 是精确字符串匹配
+                // 而不是前缀匹配，漏掉子路径就会把基座 ECharts 组件复制进本包 dist。
+                '@yuku123/z-frontend-common/ui/echarts',
             ],
         },
     },

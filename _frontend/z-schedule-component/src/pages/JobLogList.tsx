@@ -1,9 +1,9 @@
 import React, {useEffect, useState} from 'react';
 import {useSearchParams} from 'react-router-dom';
-import {Button, Descriptions, Drawer, Form, Popconfirm, Select, Space, Table, Tag, Tooltip} from 'antd';
+import {Button, Descriptions, Drawer, Form, Popconfirm, Select, Space, Tag, Tooltip} from 'antd';
 import {ClearOutlined, EyeOutlined, ReloadOutlined} from '@ant-design/icons';
 import {jobGroupApi, jobLogApi} from '@/schedule/services/job';
-import {EmptyState, ErrorState, PageHeader} from '@yuku123/z-frontend-common/ui';
+import {ErrorState, ListTable, PageHeader} from '@yuku123/z-frontend-common/ui';
 
 /**
  * 调度日志 (JobLog) — 路径: /schedule/log
@@ -123,8 +123,6 @@ const JobLogList: React.FC = () => {
         }
     };
 
-    const isEmpty = !loading && !loadError && logs.length === 0;
-
     return (
         <div>
             <PageHeader
@@ -139,14 +137,8 @@ const JobLogList: React.FC = () => {
                 </div>
             )}
 
-            <div style={{
-                background: '#ffffff',
-                borderRadius: 16,
-                padding: 20,
-                boxShadow: '0 1px 3px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.06)',
-            }}>
-                {/* 过滤器 + 操作同行 */}
-                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16}}>
+            {/* 过滤条：执行器 / 状态走后端查询（接口参数 jobGroup/status），所以不并进基座过滤框 */}
+            <div style={{marginBottom: 16}}>
                 <Form layout="inline">
                     <Form.Item label="执行器">
                         <Select value={params.jobGroup} style={{width: 160}}
@@ -170,29 +162,30 @@ const JobLogList: React.FC = () => {
                         </Form.Item>
                     )}
                 </Form>
-                <Space>
-                    <Button icon={<ReloadOutlined/>} onClick={load}>刷新</Button>
-                    <Popconfirm title="确认清空全部调度日志?"
-                                description="后端只支持整表清空 (type=0)，不可恢复"
-                                onConfirm={handleClear} okButtonProps={{danger: true}}>
-                        <Button danger icon={<ClearOutlined/>}>清空全部</Button>
-                    </Popconfirm>
-                </Space>
-                </div>
+            </div>
 
-                {isEmpty ? (
-                    <EmptyState
-                        title="暂无调度日志"
-                        description="当前过滤条件下没有任何执行记录, 执行器执行任务后会在这里出现"
-                    />
-                ) : (
-                    <Table
-                        rowKey="id"
-                        dataSource={logs}
-                        loading={loading}
-                        scroll={{x: 1200}}
-                        pagination={{pageSize: 20, showTotal: t => `本次取回 ${t} 条`}}
-                        columns={[
+            {/* 后端只有 limit（没有 offset/total）⇒ 一次取回最近 LIMIT_ROWS 条在前端切片，
+                所以这页是「整表在前端」的形态：过滤/分页/空态三件套交给基座 ListTable。 */}
+            <ListTable
+                rows={logs}
+                rowKey="id"
+                loading={loading}
+                scroll={{x: 1200}}
+                searchKeys="executorHandler,triggerMsg,executorAddress"
+                searchPlaceholder="按 Handler / 调度信息 / 执行地址过滤"
+                cardExtra={
+                    <Space>
+                        <Button icon={<ReloadOutlined/>} onClick={load}>刷新</Button>
+                        <Popconfirm title="确认清空全部调度日志?"
+                                    description="后端只支持整表清空 (type=0)，不可恢复"
+                                    onConfirm={handleClear} okButtonProps={{danger: true}}>
+                            <Button danger icon={<ClearOutlined/>}>清空全部</Button>
+                        </Popconfirm>
+                    </Space>
+                }
+                emptyTitle="暂无调度日志"
+                emptyDescription="当前过滤条件下没有任何执行记录, 执行器执行任务后会在这里出现"
+                columns={[
                             {title: 'ID', dataIndex: 'id', width: 90},
                             {title: '任务ID', dataIndex: 'jobId', width: 90},
                             {
@@ -235,16 +228,14 @@ const JobLogList: React.FC = () => {
                                     </Tooltip>
                                 ),
                             },
-                        ]}
-                    />
-                )}
-                {!isEmpty && logs.length >= LIMIT_ROWS && (
-                    <div style={{marginTop: 8, fontSize: 12, color: '#8c8c8c'}}>
-                        仅取回最近 {LIMIT_ROWS} 条（后端 /api/schedule/joblog/list 只有 limit，无 offset/total），
-                        要找更早的记录请缩小过滤条件。
-                    </div>
-                )}
-            </div>
+                ]}
+            />
+            {logs.length >= LIMIT_ROWS && (
+                <div style={{marginTop: 8, fontSize: 12, color: '#8c8c8c'}}>
+                    仅取回最近 {LIMIT_ROWS} 条（后端 /api/schedule/joblog/list 只有 limit，无 offset/total），
+                    要找更早的记录请缩小过滤条件。
+                </div>
+            )}
 
             <Drawer title={`执行记录 #${detail?.id ?? ''}`} width={720}
                     open={!!detail} onClose={() => setDetail(null)}>
