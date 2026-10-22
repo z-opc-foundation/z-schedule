@@ -4,6 +4,7 @@ import com.alibaba.druid.pool.DruidDataSource;
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import com.zifang.z.boot.datasource.starter.ModuleDataSourceTemplate;
 import com.zifang.z.schedule.core.config.ScheduleProperties;
+import com.zifang.z.schedule.core.handler.GraphMaintenanceHandler;
 import com.zifang.z.schedule.web.auth.LoginSessionStore;
 import com.zifang.z.schedule.web.filter.TokenAuthFilter;
 import com.zifang.z.schedule.web.service.AlarmService;
@@ -62,7 +63,8 @@ import java.util.Properties;
  */
 @Configuration
 @ComponentScan(basePackages = "com.zifang.z.schedule.web")
-@Import(ZScheduleAutoConfiguration.AlarmServiceConfiguration.class)
+@Import({ZScheduleAutoConfiguration.AlarmServiceConfiguration.class,
+        ZScheduleAutoConfiguration.GraphMaintenanceHandlerConfiguration.class})
 @EnableScheduling
 @MapperScan(
         basePackages = "com.zifang.z.schedule.web.domain.mapper",
@@ -98,6 +100,26 @@ public class ZScheduleAutoConfiguration extends ModuleDataSourceTemplate {
         @ConditionalOnMissingBean(AlarmService.class)
         public AlarmService alarmService() {
             return new DefaultAlarmService();
+        }
+    }
+
+    /**
+     * 图库维护任务处理器（GC + 快照 + 备份归档，TASK-20261012-027）。
+     *
+     * <p>与 {@link AlarmServiceConfiguration} 同一个理由：单独一个 {@code @Import} 出来的
+     * 嵌套配置类 + {@code @ConditionalOnMissingBean}，宿主想换成自己的实现时
+     * 只需注册同名 bean，不用改本仓源码。</p>
+     *
+     * <p><b>bean 名 = 任务表里的执行器名</b>（{@code executor_handler} 填
+     * {@code graphMaintenanceHandler}）—— 派发是按 bean 名找 handler 的。</p>
+     */
+    @Configuration(proxyBeanMethods = false)
+    public static class GraphMaintenanceHandlerConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean(GraphMaintenanceHandler.class)
+        public GraphMaintenanceHandler graphMaintenanceHandler() {
+            return new GraphMaintenanceHandler();
         }
     }
 
