@@ -170,7 +170,7 @@ mvn clean install -DskipTests
 
 | 前缀 | 载体 | 键 |
 |------|------|-----|
-| `z.schedule.*` | `@ConfigurationProperties("z.schedule")` → `ScheduleProperties` | `accessToken`（默认空）、`triggerPoolFastMax=200`、`triggerPoolSlowMax=200`、`triggerPoolSlowThreshold=5000`、`logRetentionDays=30`、`executorTimeout=0`；`i18n=zh_CN` **配了不生效**（见下方「能力边界」） |
+| `z.schedule.*` | `@ConfigurationProperties("z.schedule")` → `ScheduleProperties` | `accessToken`（默认空）、`exposeBarePaths=false`（管理面裸路径闸门，见下）、`triggerPoolFastMax=200`、`triggerPoolSlowMax=200`、`triggerPoolSlowThreshold=5000`、`logRetentionDays=30`、`executorTimeout=0`；`i18n=zh_CN` **配了不生效**（见下方「能力边界」） |
 | `z.base.db.schedule.*` | `ModuleDataSourceTemplate` 自建 `dataSourceSchedule` | `host`、`port`、`database`、`username`、`password`、`initial-size`、`min-idle`、`max-active`、`max-wait`、`connect-timeout-millis`、`socket-timeout-millis`、`disabled` |
 
 两个容易踩的点：
@@ -184,8 +184,21 @@ mvn clean install -DskipTests
    是从 xxl-job 风格样例抄来的**死配置**，本工程没有任何代码读它，不参与启动；留着只因它记着"远程派发"这个
    还没实现的意图。别照它配。
 
-`z.schedule.accessToken` 不配 ⇒ `TokenAuthFilter` 跳过校验，整个管理面（`/jobinfo`、`/joblog`、`/jobgroup`、
-`/user`…）对网络内任何人敞开，只打一条 warn。生产必须配，且**只经环境变量注入**。
+`z.schedule.accessToken` 不配 ⇒ `TokenAuthFilter` 跳过校验，`/api/schedule/**`（以及 `/dashboard`、`/actuator`）
+对网络内任何人敞开，只打一条 warn。生产必须配，且**只经环境变量注入**。
+
+**根级裸路径默认是关的**（`z.schedule.expose-bare-paths`，默认 `false`）：管理面（`/jobinfo`、`/jobgroup`、
+`/joblog`、`/glue`、`/user`）挂在根级，而**宿主的登录闸门按路径前缀匹配**（z-opc 那种聚合进程只挡 `api`
+那一段）⇒ 根级裸路径不在射程内，匿名直达业务层，含写端点。所以 starter 自带一道闸：裸路径**只认凭证**，
+匿名请求被挡在业务层之前；持有会话令牌或共享密钥的请求照常放行。
+
+| 部署形态 | 裸路径怎么算 | 配置 |
+|---|---|---|
+| 独立部署 `z-schedule-admin` | 它自带前端与登录口，裸路径就是它的正式 API 形状（实测端点在根路径，`/jobinfo/list` 200） | `z.schedule.expose-bare-paths=true`（admin 自己的 `application.yml` 已置） |
+| 嵌进聚合宿主（z-opc 单 JVM） | 裸路径不在宿主登录闸门射程内 ⇒ 默认关闭，匿名进不去 | 保持默认（`false`），改走 `/api/schedule/**` |
+
+`/executor/**`（执行器 M2M 回调，没有用户会话）与 `/dashboard*`（根级页面路径）**不受**这个开关影响 ——
+挡住它们会打断执行器注册链路。
 
 ### 库要先有
 

@@ -64,12 +64,43 @@ public class TokenAuthFilter implements Filter {
      * 容器的 error 转发（否则一次 404 会被包装成 403，排查时看不出真实失败点）。
      * 其余一律按需要 token 处理——包括 {@code /actuator/*}，它的 health 在这个应用里开了
      * show-details=always，会把数据源信息吐给匿名访问者。
+     * <p>
+     * {@code /user/login} 与 {@code /api/schedule/user/login} 都要在：{@code UserController} 挂了两条路径，
+     * 只放裸路径的话，别名那条的登录口反而要 token —— 登录前拿不到 token ⇒ 登录流程自锁。
      */
     private static final Set<String> PUBLIC_PATHS = new HashSet<String>(Arrays.asList(
-            "/", "/index.html", "/favicon.ico", "/error", "/user/login"));
+            "/", "/index.html", "/favicon.ico", "/error",
+            "/user/login", "/api/schedule/user/login"));
 
     /** 静态资源前缀（把打好的前端放进 {@code static/} 时不至于连壳都下不下来）。 */
     private static final String[] PUBLIC_PREFIXES = {"/assets/", "/static/", "/public/"};
+
+    /**
+     * 管理面<b>根级裸路径</b>的前缀（{@code /jobinfo}、{@code /jobgroup}、{@code /joblog}、
+     * {@code /glue}、{@code /user}）。
+     *
+     * <p>判定用「前缀 + {@code /}」而不是 {@code startsWith(prefix)}：{@code /jobinfos}
+     * 不是 {@code /jobinfo}，而 {@code startsWith("/jobinfo")} 会把它算进去。
+     *
+     * <p><b>为什么它们要被单独拎出来</b>：这五个前缀挂在根级，宿主（z-opc 那种聚合进程）的登录闸门
+     * 按路径前缀匹配（api 那一段的路径），根级路径一条都不落在射程内 ⇒ 匿名直达业务层。
+     * 而 controller 的类注释写着「鉴权: 由调度管理端统一拦截」——那句前提只在独立部署的
+     * z-schedule-admin 里成立，嵌进宿主就没有承接方了。所以这道闸门由 starter 自带。
+     *
+     * <p><b>为什么不在这里一并挡掉 {@code /executor/**}</b>：那是执行器进程 → 调度中心的 M2M 回调，
+     * 没有用户会话可言（执行器拿不到也不需要用户令牌），挡住它等于打断执行器注册链路。
+     * {@code /dashboard*} 同理：根级页面路径，与卡内「显式排除 /dashboard*」的口径一致。
+     */
+    private static final String[] BARE_MANAGEMENT_PREFIXES = {
+            "/jobinfo/", "/jobgroup/", "/joblog/", "/glue/", "/user/"
+    };
+
+    /**
+     * 裸路径闸门要放行的例外：{@code /user/login} 是登录口本身，登录前必须能调
+     * （与 {@link #PUBLIC_PATHS} 的理由同源）。
+     */
+    private static final Set<String> BARE_PATH_EXEMPT = new HashSet<String>(Arrays.asList(
+            "/user/login"));
 
     /**
      * 只有管理员会话能碰的路径。
@@ -81,9 +112,13 @@ public class TokenAuthFilter implements Filter {
      * "是谁"（它就是全权）；未配置 token 的演示模式下整个管理面是敞开的，这里单独拦一个口没有意义。
      * 读侧（{@code /user/list}）暂不按角色收口——它吐出的是用户名与角色，不含口令散列（见
      * {@code DoMapper.toDTO}），而"按 jobGroup 限权"是 {@code permission} 列的另一件事。
+     * <p>
+     * <b>两条路径都要列</b>：{@code UserController} 同时挂 {@code /user} 与 {@code /api/schedule/user}，
+     * 只列裸路径的话，别名那条就绕过了角色闸（普通会话就能建/改/删账号 ⇒ 给自己提权）。
      */
     private static final Set<String> ADMIN_ONLY_PATHS = new HashSet<String>(Arrays.asList(
-            "/user/add", "/user/update", "/user/remove"));
+            "/user/add", "/user/update", "/user/remove",
+            "/api/schedule/user/add", "/api/schedule/user/update", "/api/schedule/user/remove"));
 
     private final ScheduleProperties scheduleProperties;
 
@@ -124,11 +159,24 @@ public class TokenAuthFilter implements Filter {
 
     @Override
     public void init(FilterConfig filterConfig) throws ServletException {
+        boolean barePathsClosed = !scheduleProperties.isExposeBarePaths();
+        if (barePathsClosed) {
+            log.info("TokenAuthFilter 初始化, urlPattern=/*（管理面裸路径 /jobinfo /jobgroup /joblog /glue /user "
+                    + "只认凭证，匿名请求被挡在业务层之前；正式入口是 /api/schedule/**，"
+                    + "/executor/** 与 /dashboard* 不受影响）");
+        }
         String token = scheduleProperties.getAccessToken();
         if (token == null || token.trim().isEmpty()) {
-            log.warn("[z-schedule] 未配置 z.schedule.accessToken：管理面（/jobinfo、/joblog、/jobgroup、"
-                    + "/glue、/user、/dashboard、/actuator）对任何能连到本端口的人完全敞开，"
-                    + "包括改任务、删任务、伪造执行回报。生产部署必须配这个值。");
+            if (barePathsClosed) {
+                log.warn("[z-schedule] 未配置 z.schedule.accessToken：裸路径管理面已关闭（匿名进不去），"
+                        + "但 /api/schedule/** 与 /dashboard、/actuator 对任何能连到本端口的人完全敞开，"
+                        + "包括改任务、删任务、伪造执行回报。生产部署必须配这个值。");
+            } else {
+                log.warn("[z-schedule] 未配置 z.schedule.accessToken 且 z.schedule.expose-bare-paths=true："
+                        + "管理面（/jobinfo、/joblog、/jobgroup、/glue、/user、/dashboard、/actuator）"
+                        + "对任何能连到本端口的人完全敞开，包括改任务、删任务、伪造执行回报。"
+                        + "生产部署必须配这个值。");
+            }
         } else {
             log.info("TokenAuthFilter 初始化, urlPattern=/*（除 {} 外全部校验 accessToken）", PUBLIC_PATHS);
         }
@@ -169,8 +217,15 @@ public class TokenAuthFilter implements Filter {
 
         String configuredToken = scheduleProperties.getAccessToken();
 
-        // 未配置 token → 跳过验证
+        // 未配置 token → 跳过验证（演示模式）
         if (configuredToken == null || configuredToken.trim().isEmpty()) {
+            // 但裸路径仍要拦：这一支若直接放行，管理面就对匿名全开——而管理面挂在根级时，
+            // 宿主的登录闸门按路径前缀匹配根本管不到它们（z-opc 那种聚合进程只挡 api 那一段），
+            // 匿名直达业务层，含写端点。
+            if (barePathsClosed(uri)) {
+                rejectBarePath(httpRequest, httpResponse, uri);
+                return;
+            }
             chain.doFilter(request, response);
             return;
         }
@@ -185,6 +240,23 @@ public class TokenAuthFilter implements Filter {
             log.warn("accessToken 不合法, uri={}, remoteAddr={}", uri, httpRequest.getRemoteAddr());
             sendForbidden(httpResponse, " accessToken 不合法");
         }
+    }
+
+    /**
+     * 裸路径闸门是否该拦下这一次请求。
+     *
+     * <p>拦的是<b>没有出示任何有效凭证</b>的请求。会话令牌与共享密钥两条分支都在它之前就放行了，
+     * 走到这里的只剩匿名请求。
+     */
+    private boolean barePathsClosed(String uri) {
+        return !scheduleProperties.isExposeBarePaths() && isBareManagementPath(uri);
+    }
+
+    /** 裸路径闸门的拒绝响应：拦在业务层之前，不让请求进 controller。 */
+    private void rejectBarePath(HttpServletRequest request, HttpServletResponse response, String uri)
+            throws IOException {
+        log.warn("管理面裸路径未开放, uri={}, remoteAddr={}", uri, request.getRemoteAddr());
+        sendForbidden(response, "管理面裸路径未开放，请使用 /api/schedule/** 路径");
     }
 
     @Override
@@ -224,6 +296,27 @@ public class TokenAuthFilter implements Filter {
             return true;
         }
         for (String prefix : PUBLIC_PREFIXES) {
+            if (path.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 是否属于管理面的根级裸路径。
+     *
+     * <p>判定用「前缀 + {@code /}」而不是 {@code startsWith(prefix)}：{@code /jobinfos}
+     * 不是 {@code /jobinfo}，而 {@code startsWith("/jobinfo")} 会把它算进去。
+     *
+     * <p>前缀表里写的是带尾斜杠的形态（{@code "/jobinfo/"}），所以<b>目录本身</b>
+     * （{@code /jobinfo}）不算裸路径——它没有子端点，落不到任何 controller 上。
+     */
+    private static boolean isBareManagementPath(String path) {
+        if (BARE_PATH_EXEMPT.contains(path)) {
+            return false;
+        }
+        for (String prefix : BARE_MANAGEMENT_PREFIXES) {
             if (path.startsWith(prefix)) {
                 return true;
             }

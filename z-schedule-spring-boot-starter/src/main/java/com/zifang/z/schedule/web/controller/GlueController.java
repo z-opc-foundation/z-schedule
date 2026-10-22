@@ -12,10 +12,13 @@ import java.util.List;
  * <p>
  * 提供 GLUE 源码的保存、获取、历史版本查询等接口。
  * <p>
- * API 基础路径: /glue
+ * API 基础路径: /glue 与 /api/schedule/glue 两条等价。
+ * <p>
+ * {@code /api/schedule/**} 是嵌进宿主时的正式入口（宿主登录闸门按路径前缀匹配，只挡 api 那一段的路径）；
+ * 裸路径 {@code /glue} 只留给独立部署的 z-schedule-admin，且受 {@code z.schedule.expose-bare-paths} 控制（默认关闭）。
  */
 @RestController
-@RequestMapping("/glue")
+@RequestMapping({"/glue", "/api/schedule/glue"})
 public class GlueController {
 
     @Autowired

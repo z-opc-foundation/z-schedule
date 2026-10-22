@@ -97,12 +97,18 @@ z-schedule/
 
 ### 3.9 用户、登录与鉴权
 
-- `UserController`（`/user`）：用户 CRUD + `POST login` / `logout`；会话身份由 `LoginSessionStore` 管，
-  另有共享密钥双轨。
+- `UserController`（`/user` 与 `/api/schedule/user` 两条等价路径）：用户 CRUD + `POST login` / `logout`；
+  会话身份由 `LoginSessionStore` 管，另有共享密钥双轨。
 - `TokenAuthFilter` 的 `urlPattern=/*`：除 `/`、`/index.html`、`/favicon.ico`、`/error`、`/user/login`
   与静态前缀 `/assets/`、`/static/`、`/public/` 外全部校验；
   `accessToken` 来源优先级：请求参数 `accessToken` > 请求头 `X-Access-Token`。
-- **不配 `z.schedule.accessToken` ⇒ 整个管理面对网络内任何人敞开**，只打一条 warn。
+- **不配 `z.schedule.accessToken` ⇒ `/api/schedule/**` 与 `/dashboard`、`/actuator` 对网络内任何人敞开**，只打一条 warn。
+- **根级裸路径（`/jobinfo`、`/jobgroup`、`/joblog`、`/glue`、`/user`）默认关闭**
+  （`z.schedule.expose-bare-paths`，默认 `false`）：它们挂在根级，而**宿主的登录闸门按路径前缀匹配**
+  （z-opc 那种聚合进程只挡 `api` 那一段）⇒ 根级裸路径不在射程内，匿名直达业务层，含写端点。
+  闸门只拦**匿名**请求（会话令牌/共享密钥两条分支在它之前就放行了）；
+  `/executor/**`（M2M）与 `/dashboard*` 不受它影响。独立部署的 `z-schedule-admin` 显式置
+  `z.schedule.expose-bare-paths=true`（裸路径是它的正式 API 形状）。
 
 ### 3.10 路由策略库（已发布 API，但当前不参与派发）
 

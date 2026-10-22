@@ -205,6 +205,14 @@ cd z-schedule/deploy && docker compose up
 没配它则整面敞开（自带的演示 UI 才能直接用），但启动时会打一条 warn 把这件事说出来，
 不再当成静默默认。
 
+**独立部署形态（admin 自己）为什么留着裸路径**：admin 自带前端与登录口，它的端点就在根路径
+（实测 `/jobinfo/list` 200，而 `/api/schedule/*` 是 404），nginx 的反代把 `/api/` 剥掉落到
+context-path 根下。所以 admin 的 `application.yml` 显式置 `z.schedule.expose-bare-paths=true`。
+**嵌入式用法不要抄这一行**：starter 被嵌进聚合宿主时，根级裸路径不在宿主登录闸门的射程内
+（z-opc 侧只挡 `api` 那一段），开着就等于把写端点对匿名敞开；嵌入方保持默认（关闭）走 `/api/schedule/**`。
+这道闸门只拦**匿名**请求——出示了会话令牌或共享密钥的裸路径请求照常放行，
+所以它不影响「凭凭证调管理面」这种用法，只挡掉「不登录直接调」。
+
 250 真机实测（配了 token）：匿名打 `/jobinfo/list`、`/joblog/list`、`/user/list`、
 `/dashboard/stats`、`/actuator/health`、`POST /jobinfo/add`、`POST /executor/callback` 全部 403，
 且 `POST /jobinfo/add` 在库里零落地；带 token 后同一批请求回到 200、任务真的建出来。

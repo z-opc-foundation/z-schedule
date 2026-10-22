@@ -14,11 +14,16 @@ import java.util.List;
 /**
  * 调度任务管理 Controller,提供定时任务的 CRUD、启停、触发以及下次执行时间查询等接口.
  * <p>
- * API 基础路径: /jobinfo
+ * API 基础路径: /jobinfo 与 /api/schedule/jobinfo 两条等价
  * 所属模块: z-schedule-admin
  * 鉴权: 由 {@code TokenAuthFilter} 统一校验凭证；<b>在此之上</b>，出示了普通会话的请求
  * 还要按 {@code z_schedule_user.permission} 收口到具体的 jobGroup（见 {@link GroupAccess}）。
  * 管理员会话、共享密钥、演示模式匿名都不受这一层约束——前两者本来全权，后者没有身份可问。
+ *
+ * <p><b>为什么挂两条路径</b>：{@code /api/schedule/**} 是嵌进宿主时的正式入口——宿主的登录闸门
+ * 按路径前缀匹配（z-opc 那种聚合进程只挡 api 那一段的路径），根级裸路径不在射程内。
+ * 裸路径 {@code /jobinfo} 只留给独立部署的 z-schedule-admin（它的 API 形状就是根路径），
+ * 且受 {@code z.schedule.expose-bare-paths} 开关控制（默认关闭 ⇒ 嵌入式用法不再对匿名敞开）。
  *
  * <p>主要端点:
  * <ul>
@@ -34,7 +39,7 @@ import java.util.List;
  * </ul>
  */
 @RestController
-@RequestMapping("/jobinfo")
+@RequestMapping({"/jobinfo", "/api/schedule/jobinfo"})
 public class JobInfoController {
 
     @Autowired

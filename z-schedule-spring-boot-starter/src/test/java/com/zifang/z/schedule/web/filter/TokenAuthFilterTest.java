@@ -116,15 +116,82 @@ public class TokenAuthFilterTest {
 
     @Test
     public void 没配token时管理面放行但这是演示模式() throws Exception {
-        // 行为不变（否则自带的演示 UI 直接不能用），但这件事必须在启动日志里说出来，
-        // 见 TokenAuthFilter.init 里那条 warn。
+        // 显式开启裸路径后（z.schedule.expose-bare-paths=true）行为与从前一致——
+        // 否则自带的演示 UI 直接不能用，但这件事必须在启动日志里说出来，见 TokenAuthFilter.init 里那条 warn。
         RecordingChain c = new RecordingChain();
-        filter(null).doFilter(on("/jobinfo/list"), new RecordingResponse().proxy(), c);
+        filter(null, true).doFilter(on("/jobinfo/list"), new RecordingResponse().proxy(), c);
         assertTrue(c.called);
 
         RecordingChain blank = new RecordingChain();
-        filter("   ").doFilter(on("/jobinfo/list"), new RecordingResponse().proxy(), blank);
+        filter("   ", true).doFilter(on("/jobinfo/list"), new RecordingResponse().proxy(), blank);
         assertTrue(blank.called);
+    }
+
+    /**
+     * 裸路径闸门：默认关闭 ⇒ 匿名请求进不了业务层。
+     *
+     * <p>这是本仓在聚合宿主里被匿名直读写端点的那道闸：管理面挂在根级，
+     * 而宿主的登录闸门按路径前缀匹配（只挡 api 那一段），根级裸路径不在射程内。
+     */
+    @Test
+    public void 默认关闭裸路径时匿名请求进不了业务层() throws Exception {
+        for (String path : new String[]{"/jobinfo/list", "/jobinfo/remove", "/jobgroup/list",
+                "/joblog/list", "/joblog/clear", "/glue/save", "/user/list", "/user/add"}) {
+            RecordingChain c = new RecordingChain();
+            RecordingResponse r = new RecordingResponse();
+            filter(null).doFilter(on(path), r.proxy(), c);
+            assertFalse(path + " 不该让匿名请求进到业务层", c.called);
+            assertEquals(path + " 应返回 403", 403, r.status);
+        }
+    }
+
+    /**
+     * 闸门只拦匿名：出示了有效凭证的请求照常放行。
+     *
+     * <p>这条钉的是闸门的位置——它在凭证校验<b>之后</b>兜底，不是把整条裸路径封死。
+     * 否则持有共享密钥或会话令牌的人也会被拒，独立部署（admin 自己走裸路径 + 登录态）就废了。
+     */
+    @Test
+    public void 裸路径关闭时持凭证的请求仍放行() throws Exception {
+        LoginSessionStore store = new LoginSessionStore();
+        String token = store.issue(user(71, "ada", "ADMIN")).getToken();
+
+        RecordingChain bySession = new RecordingChain();
+        filter("secret", store).doFilter(bearer("/jobinfo/list", token), new RecordingResponse().proxy(), bySession);
+        assertTrue("持会话令牌的裸路径请求应当放行", bySession.called);
+
+        Map<String, String> headers = new LinkedHashMap<String, String>();
+        headers.put("X-Access-Token", "secret");
+        RecordingChain byKey = new RecordingChain();
+        filter("secret", store).doFilter(request("", "/jobinfo/list", "", "/jobinfo/list",
+                null, headers), new RecordingResponse().proxy(), byKey);
+        assertTrue("持共享密钥的裸路径请求应当放行", byKey.called);
+    }
+
+    /** 执行器 M2M 与根级页面路径不受裸路径闸门影响——挡住它们等于打断执行器注册链路。 */
+    @Test
+    public void 裸路径闸门不碰执行器与看板() throws Exception {
+        for (String path : new String[]{"/executor/beat", "/executor/callback", "/executor/run",
+                "/dashboard", "/dashboard/stats"}) {
+            RecordingChain c = new RecordingChain();
+            RecordingResponse r = new RecordingResponse();
+            filter(null).doFilter(on(path), r.proxy(), c);
+            assertTrue(path + " 不该被裸路径闸门拦下", c.called);
+            assertEquals(path + " 不该被闸门改成 403", 0, r.status);
+        }
+    }
+
+    /** 别名路径不是裸路径：它们是嵌进宿主时的正式入口（落在宿主登录闸门内）。 */
+    @Test
+    public void 别名路径不被裸路径闸门拦() throws Exception {
+        for (String path : new String[]{"/api/schedule/jobinfo/list", "/api/schedule/jobgroup/list",
+                "/api/schedule/joblog/list", "/api/schedule/user/list"}) {
+            RecordingChain c = new RecordingChain();
+            RecordingResponse r = new RecordingResponse();
+            filter(null).doFilter(on(path), r.proxy(), c);
+            assertTrue(path + " 不该被裸路径闸门拦下", c.called);
+            assertEquals(path + " 不该被闸门改成 403", 0, r.status);
+        }
     }
 
     /**
@@ -351,12 +418,14 @@ public class TokenAuthFilterTest {
         LoginSessionStore store = new LoginSessionStore();
         String normal = store.issue(user(41, "peon", "NORMAL")).getToken();
 
+        // 显式开启裸路径（独立部署 admin 的形态）时，演示模式对匿名敞开管理面
         RecordingChain anonymous = new RecordingChain();
-        filter(null, store).doFilter(on("/user/add"), new RecordingResponse().proxy(), anonymous);
-        assertTrue("未配置 token 时管理面对匿名敞开（启动日志里那条 warn 就是这件事）", anonymous.called);
+        filter(null, store, true).doFilter(on("/user/add"), new RecordingResponse().proxy(), anonymous);
+        assertTrue("未配置 token 且显式开启裸路径时管理面对匿名敞开（启动日志里那条 warn 就是这件事）",
+                anonymous.called);
 
         RecordingChain identified = new RecordingChain();
-        filter(null, store).doFilter(bearer("/user/add", normal), new RecordingResponse().proxy(), identified);
+        filter(null, store, true).doFilter(bearer("/user/add", normal), new RecordingResponse().proxy(), identified);
         assertFalse("敞开的门不该让一个自报的普通会话顺手拿到改账号的权力", identified.called);
     }
 
@@ -366,9 +435,20 @@ public class TokenAuthFilterTest {
         return filter(accessToken, null);
     }
 
+    /** 显式声明裸路径闸门的开关（默认关闭）。 */
+    private static TokenAuthFilter filter(String accessToken, boolean exposeBarePaths) {
+        return filter(accessToken, null, exposeBarePaths);
+    }
+
     private static TokenAuthFilter filter(String accessToken, LoginSessionStore store) {
+        return filter(accessToken, store, false);
+    }
+
+    private static TokenAuthFilter filter(String accessToken, LoginSessionStore store,
+                                          boolean exposeBarePaths) {
         ScheduleProperties properties = new ScheduleProperties();
         properties.setAccessToken(accessToken);
+        properties.setExposeBarePaths(exposeBarePaths);
         return new TokenAuthFilter(properties, store);
     }
 

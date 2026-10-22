@@ -109,6 +109,19 @@ z:
       schedule:
         max-active: ${Z_SCHEDULE_DB_MAX_ACTIVE:40}
 
+  # 暴露管理面裸路径（/jobinfo、/jobgroup、/joblog、/glue、/user）。
+  #
+  # **这个模块是独立部署的调度管理端，裸路径就是它的正式 API 形状**：
+  # 它自带前端与登录口，nginx 的反代把 /api/ 剥掉落到 context-path 根下
+  # （deploy/nginx.conf.template 的 proxy_pass → .../meta/），
+  # 而实测它的端点在根路径（/jobinfo/list 200），不是 /api/schedule/*。
+  # 所以这里必须显式开启，否则 starter 的裸路径闸门（默认关闭）会把本模块自己的 API 全挡掉。
+  #
+  # ⚠ 嵌入式用法**不要**抄这一行：starter 被嵌进聚合宿主时，裸路径不在宿主登录闸门的射程内
+  # （z-opc 侧只挡 api 那一段的路径），开着就等于把写端点对匿名敞开。嵌入方请保持默认关闭、走 /api/schedule/**。
+  schedule:
+    expose-bare-paths: true
+
 # Z-Schedule 配置
 # 注意：真正生效的前缀只有 `z.schedule.*`（ZScheduleAutoConfiguration 上 @ConfigurationProperties("z.schedule")）。
 # 下面这段 `zschedule.*` 是从 xxl-job 风格的样例配置抄来的，本工程没有任何代码读它——

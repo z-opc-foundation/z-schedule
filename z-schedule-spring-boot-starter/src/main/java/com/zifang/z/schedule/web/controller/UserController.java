@@ -14,11 +14,15 @@ import java.util.List;
 /**
  * 用户管理 Controller,提供用户的增删改查以及登录接口.
  * <p>
- * API 基础路径: /user
+ * API 基础路径: /user 与 /api/schedule/user 两条等价
  * 所属模块: z-schedule-admin
  * 鉴权: 由 {@code TokenAuthFilter} 统一拦；建/改/删账号只接受 ADMIN 会话（见其 ADMIN_ONLY_PATHS），
  * 而"把某个账号变成 ADMIN"这一步另有一道闸：只有 ADMIN 会话或共享 accessToken 放行的请求才做得了
  * （见 {@link #canMintAdmin}）——演示模式对匿名敞开的是管理面，不该把"铸管理员"也一起敞开。
+ * <p>
+ * <b>为什么挂两条路径</b>：{@code /api/schedule/**} 是嵌进宿主时的正式入口（宿主登录闸门按路径前缀匹配，
+ * 只挡 api 那一段的路径），裸路径 {@code /user} 只留给独立部署的 z-schedule-admin，
+ * 且受 {@code z.schedule.expose-bare-paths} 开关控制（默认关闭 ⇒ 嵌入式用法不再对匿名敞开）。
  *
  * <p>主要端点:
  * <ul>
@@ -31,7 +35,7 @@ import java.util.List;
  * </ul>
  */
 @RestController("scheduleUserController")
-@RequestMapping("/user")
+@RequestMapping({"/user", "/api/schedule/user"})
 public class UserController {
 
     @Autowired
