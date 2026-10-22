@@ -252,11 +252,18 @@ public class TokenAuthFilter implements Filter {
         return !scheduleProperties.isExposeBarePaths() && isBareManagementPath(uri);
     }
 
-    /** 裸路径闸门的拒绝响应：拦在业务层之前，不让请求进 controller。 */
+    /**
+     * 裸路径闸门的拒绝响应：拦在业务层之前，不让请求进 controller。
+     *
+     * <p>回 <b>401</b> 而不是 403：这次请求缺的是凭证，不是"凭证不够"——
+     * 匿名请求既没有会话令牌也没有共享密钥。宿主（z-opc 那种聚合进程）对没有登录态的
+     * 请求也是回 401 JSON，两边口径一致，调用方按同一个分支处理。
+     */
     private void rejectBarePath(HttpServletRequest request, HttpServletResponse response, String uri)
             throws IOException {
         log.warn("管理面裸路径未开放, uri={}, remoteAddr={}", uri, request.getRemoteAddr());
-        sendForbidden(response, "管理面裸路径未开放，请使用 /api/schedule/** 路径");
+        sendJson(response, HttpServletResponse.SC_UNAUTHORIZED,
+                "管理面裸路径未开放，请使用 /api/schedule/** 路径");
     }
 
     @Override
@@ -339,9 +346,14 @@ public class TokenAuthFilter implements Filter {
      * 区分"凭证不对"和"凭证对但角色不够"：前者让人去翻口令，后者让人去申请提权。
      */
     private void sendForbidden(HttpServletResponse response, String reason) throws IOException {
-        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        sendJson(response, HttpServletResponse.SC_FORBIDDEN, reason);
+    }
+
+    /** 返回指定状态码的 JSON 响应（401/403 共用这一支）。 */
+    private void sendJson(HttpServletResponse response, int status, String reason) throws IOException {
+        response.setStatus(status);
         response.setContentType("application/json;charset=UTF-8");
-        String body = "{\"code\":403,\"msg\":\"" + reason + "\"}";
+        String body = "{\"code\":" + status + ",\"msg\":\"" + reason + "\"}";
         PrintWriter writer = response.getWriter();
         writer.write(body);
         writer.flush();

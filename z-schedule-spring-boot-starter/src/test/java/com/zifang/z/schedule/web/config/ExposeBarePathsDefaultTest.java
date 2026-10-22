@@ -3,8 +3,10 @@ package com.zifang.z.schedule.web.config;
 import com.zifang.z.schedule.core.config.ScheduleProperties;
 import org.junit.Test;
 import org.springframework.boot.context.properties.bind.Binder;
-import org.springframework.core.env.MapPropertySource;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.env.PropertySource;
 import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.io.FileSystemResource;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -12,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertFalse;
@@ -36,8 +39,11 @@ public class ExposeBarePathsDefaultTest {
     /** 把一份属性源绑成 {@link ScheduleProperties}，走的是 starter 真正用的那个绑定器。 */
     private static ScheduleProperties bind(Map<String, Object> props) {
         StandardEnvironment env = new StandardEnvironment();
-        env.getPropertySources().addFirst(new MapPropertySource("host", props));
-        return Binder.get(env).bind("z.schedule", ScheduleProperties.class).get();
+        env.getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource("host", props));
+        // 宿主一个 z.schedule.* 都没配时绑定结果是"没有值"而不是"绑出空对象"：
+        // 这里取默认值，等价于 starter 没配任何东西时 ScheduleProperties 的字段默认值。
+        return Binder.get(env).bind("z.schedule", ScheduleProperties.class)
+                .orElseGet(ScheduleProperties::new);
     }
 
     @Test
@@ -62,8 +68,9 @@ public class ExposeBarePathsDefaultTest {
     /**
      * admin 的 yml 里必须真的开着这一项。
      *
-     * <p>不读 yml 那一行字而读不到任何东西是不够的——这里读的是文件里真实存在的那段 yaml，
-     * 并且用 Spring 自己的绑定器把它绑一遍 ⇒ admin 启动时拿到的确实是 {@code true}。
+     * <p>不读 yml 那一行字而读不到任何东西是不够的——这里用 Spring Boot <b>自己</b>的
+     * {@link YamlPropertySourceLoader} 把那份 yml 加载成属性源（和启动时走的是同一条路），
+     * 再用同一个绑定器绑一遍 ⇒ admin 启动时拿到的确实是 {@code true}。
      */
     @Test
     public void 独立部署的admin显式开启裸路径() throws IOException {
@@ -75,14 +82,22 @@ public class ExposeBarePathsDefaultTest {
                         + "（实测 /jobinfo/list 200），闸门默认关着会把它自己的 API 全挡掉",
                 text.contains("expose-bare-paths: true"));
 
-        // 用 Spring 的 yaml 解析 + 绑定器走一遍，确认这不是"看着像开了"而是真能绑上
-        Map<String, Object> parsed = parseYaml(adminYml);
-        Map<String, Object> z = asMap(parsed.get("z"));
-        assertNotNull("admin 的 application.yml 里应有 z: 段", z);
-        Map<String, Object> schedule = asMap(z.get("schedule"));
-        assertNotNull("admin 的 application.yml 里应有 z.schedule: 段", schedule);
-        assertTrue("z.schedule.expose-bare-paths 必须绑成 true",
-                Boolean.parseBoolean(String.valueOf(schedule.get("expose-bare-paths"))));
+        // 用 Spring Boot 启动时同一条加载路径读这份 yml，再用同一个绑定器绑一遍
+        List<PropertySource<?>> sources = new YamlPropertySourceLoader()
+                .load("admin-application.yml", new FileSystemResource(adminYml));
+        assertFalse("这份 yml 竟然没加载出任何属性源", sources.isEmpty());
+
+        StandardEnvironment env = new StandardEnvironment();
+        for (PropertySource<?> source : sources) {
+            env.getPropertySources().addLast(source);
+        }
+        ScheduleProperties bound = Binder.get(env).bind("z.schedule", ScheduleProperties.class)
+                .orElseGet(ScheduleProperties::new);
+        assertNotNull("绑定结果不该是 null", bound);
+        assertTrue("admin 的 application.yml 必须让 z.schedule.expose-bare-paths 绑成 true"
+                        + "（读数：z.schedule.expose-bare-paths="
+                        + env.getProperty("z.schedule.expose-bare-paths") + "）",
+                bound.isExposeBarePaths());
     }
 
     // ---- 工具 ----
@@ -96,58 +111,5 @@ public class ExposeBarePathsDefaultTest {
             }
         }
         throw new IllegalStateException("定位仓根失败：user.dir=" + System.getProperty("user.dir"));
-    }
-
-    /** 极简 yaml 解析：只认「缩进的 key: value」与顶层 key，足以读出 z.schedule.expose-bare-paths。 */
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> parseYaml(Path file) throws IOException {
-        Map<String, Object> root = new HashMap<String, Object>();
-        String[] lines = new String(Files.readAllBytes(file), StandardCharsets.UTF_8).split("\n");
-        String section = null;
-        String subsection = null;
-        for (String raw : lines) {
-            String line = raw.replace("\t", "    ");
-            if (line.trim().isEmpty() || line.trim().startsWith("#")) {
-                continue;
-            }
-            int indent = line.length() - line.trim().length();
-            String trimmed = line.trim();
-            if (indent == 0) {
-                section = trimmed.endsWith(":") ? trimmed.substring(0, trimmed.length() - 1) : null;
-                subsection = null;
-                continue;
-            }
-            if (section == null || !trimmed.contains(":")) {
-                continue;
-            }
-            String key = trimmed.substring(0, trimmed.indexOf(':')).trim();
-            String value = trimmed.substring(trimmed.indexOf(':') + 1).trim();
-            if (indent == 2) {
-                subsection = value.endsWith(":") ? key : null;
-                if (!value.endsWith(":")) {
-                    asMap(root).put(key, value);
-                }
-                continue;
-            }
-            if (indent >= 4 && subsection != null) {
-                Map<String, Object> sec = asMap(asMap(root).get(section));
-                if (sec == null) {
-                    sec = new HashMap<String, Object>();
-                    asMap(root).put(section, sec);
-                }
-                Map<String, Object> sub = asMap(sec.get(subsection));
-                if (sub == null) {
-                    sub = new HashMap<String, Object>();
-                    sec.put(subsection, sub);
-                }
-                sub.put(key, value);
-            }
-        }
-        return root;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> asMap(Object o) {
-        return o instanceof Map ? (Map<String, Object>) o : null;
     }
 }

@@ -141,7 +141,10 @@ public class TokenAuthFilterTest {
             RecordingResponse r = new RecordingResponse();
             filter(null).doFilter(on(path), r.proxy(), c);
             assertFalse(path + " 不该让匿名请求进到业务层", c.called);
-            assertEquals(path + " 应返回 403", 403, r.status);
+            // 401 而不是 403：缺的是凭证（匿名），不是"凭证不够权限"；与宿主对无登录态请求的 401 JSON 同口径
+            assertEquals(path + " 应返回 401", 401, r.status);
+            assertTrue(path + " 的响应体要说明该走哪条路: " + r.body(),
+                    r.body().contains("/api/schedule/**"));
         }
     }
 
