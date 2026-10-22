@@ -66,9 +66,30 @@ declare module '@yuku123/z-frontend-common/ui' {
     tableProps?: any
     [key: string]: any
   }): ReactElement
+
+  /**
+   * 组件文档页（lead 008 §7）：左侧 240px TOC + 右侧正文。
+   * markdown 是编译期 `?raw` 拿到的字符串，不是运行时 fetch。
+   */
+  export function ComponentDoc(props: {
+    markdown: string
+    title?: string
+    tocWidth?: number
+    tocLevels?: number[]
+    height?: string
+  }): ReactElement
 }
 
 declare module '@yuku123/z-frontend-common/ui/*' {
   const x: any
   export default x
+}
+
+/**
+ * vite `?raw` 导入声明 —— 编译期把文件内容内联成字符串，不是 fetch。
+ * DOC.md 就是这么进包的。
+ */
+declare module '*.md?raw' {
+  const content: string
+  export default content
 }
