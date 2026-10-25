@@ -28,7 +28,7 @@ z-schedule（调度中心）跨仓唯一前端面：把「执行器分组 / 调�
 
 | 页面 | 路由（相对 `/z-schedule/*`） | 源文件 | 能力 |
 |------|--------------------------|--------|------|
-| 登录 | `login` | `LoginPage.jsx` | mock 登录（admin / 123456），CTC/SSO 接入后替换 |
+| 登录 | `login` | `LoginPage.jsx` | mock 登录（账号由 VITE_MOCK_USER / VITE_MOCK_PASSWORD 注入） |
 | 首页 | `home` | `HomePage.jsx` | 欢迎语 + 按 `menuItems` 生成的快捷入口卡 |
 | 调度任务 | `jobs` | `JobsPage.jsx` | 用 `JobListView` 渲染 `SAMPLE_JOBS` 样例数据 |
 | 组件文档 | `docs` | 来自 component 包的 `ComponentDocPage` | 本文件渲染页（左侧 240px TOC + 右侧正文） |
@@ -102,7 +102,7 @@ import {jobGroupApi, jobLogApi, configureScheduleBaseURL} from '@yuku123/z-sched
 | 请求超时 | 15000ms | `makeRequest()` 里写死 |
 | vite `base` | `process.env.VITE_BASE \|\| '/'` | suit 侧；需要非根挂载时用 `VITE_BASE` 显式覆盖 |
 | router basename | `BASE \|\| undefined` | suit 侧，`BASE` 来自 `src/routes-base.js` |
-| 登录态判据 | localStorage `token` | suit 的 `ProtectedShell` 用；登录页当前是 mock（admin / 123456） |
+| 登录态判据 | localStorage `token` | suit 的 `ProtectedShell` 用；登录页当前是 mock（账号由环境变量注入） |
 
 ## 六、已知限制
 
