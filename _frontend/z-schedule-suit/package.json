@@ -11,7 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@yuku123/z-frontend-common": "^1.1.4",
+    "@yuku123/z-frontend-common": "^1.1.7",
     "@yuku123/z-schedule-component": "^0.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
