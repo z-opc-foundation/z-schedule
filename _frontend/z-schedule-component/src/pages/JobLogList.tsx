@@ -127,7 +127,6 @@ const JobLogList: React.FC = () => {
         <div>
             <PageHeader
                 title="调度日志"
-                subtitle="查看调度任务执行历史, 支持按执行器和状态过滤"
                 breadcrumb={[{label: '调度中心'}, {label: '调度日志'}]}
             />
 
