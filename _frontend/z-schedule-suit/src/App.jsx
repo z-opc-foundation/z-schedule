@@ -58,6 +58,11 @@ function ProtectedShell() {
             appTitle="Z-Schedule 调度中心"
             appShort="ZS"
             appVersion="0.1.0"
+            appIcon={{
+                icon: <img src="/icon.png" alt="Z-Schedule 调度中心" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />,
+                color: '#10b981',
+                label: 'Z-Schedule 调度中心',
+            }}
             appUser={user}
         />
     )
