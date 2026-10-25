@@ -1,6 +1,6 @@
 {
   "name": "@yuku123/z-schedule-suit",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "description": "Z-Schedule admin UI（V2 骨架，按规范 §1.2 放于 _frontend/z-schedule-suit/）",
   "type": "module",
