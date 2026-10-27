@@ -1,6 +1,6 @@
-import { Component, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
-import { AppLayout } from '@yuku123/z-frontend-common'
+import { AppLayout, ErrorBoundary } from '@yuku123/z-frontend-common'
 import { menuItems, routes } from './pages-manifest'
 import LoginPage from './LoginPage'
 import { Result, Button } from 'antd'
@@ -12,16 +12,6 @@ import { version as appVersion } from '../package.json'
 // vite base（默认 /meta/，Spring context-path）作为 router basename；
 // Mode 2 nginx 根路径部署时 VITE_BASE='/'，basename 退化为 undefined。
 const ROUTER_BASENAME = BASE || undefined
-
-class ErrorBoundary extends Component {
-    constructor(props) { super(props); this.state = { err: null } }
-    static getDerivedStateFromError(err) { return { err } }
-    componentDidCatch(err, info) { console.error('[App ErrorBoundary]', err, info) }
-    render() {
-        if (this.state.err) return <pre style={{ padding: 24, color: 'red', whiteSpace: 'pre-wrap' }}>{String(this.state.err?.stack || this.state.err)}</pre>
-        return this.props.children
-    }
-}
 
 function NotFound() {
     return (

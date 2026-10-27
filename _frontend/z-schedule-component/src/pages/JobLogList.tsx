@@ -3,7 +3,7 @@ import {useSearchParams} from 'react-router-dom';
 import {Button, Descriptions, Drawer, Form, Popconfirm, Select, Space, Tag, Tooltip} from 'antd';
 import {ClearOutlined, EyeOutlined, ReloadOutlined} from '@ant-design/icons';
 import {jobGroupApi, jobLogApi} from '@/schedule/services/job';
-import {ErrorState, ListTable, PageHeader} from '@yuku123/z-frontend-common/ui';
+import { ErrorState, ListTable } from '@yuku123/z-frontend-common/ui'
 
 /**
  * 调度日志 (JobLog) — 路径: /schedule/log
@@ -125,10 +125,6 @@ const JobLogList: React.FC = () => {
 
     return (
         <div>
-            <PageHeader
-                title="调度日志"
-                breadcrumb={[{label: '调度中心'}, {label: '调度日志'}]}
-            />
 
             {loadError && (
                 <div style={{marginBottom: 16}}>
