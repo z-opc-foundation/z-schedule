@@ -37,10 +37,11 @@
     <artifactId>z-schedule</artifactId>
     <version>${revision}</version>
     <packaging>pom</packaging>
-    <name>z-schedule (Distributed Job Scheduler Aggregator)</name>
+    <name>z-schedule :: root</name>
     <description>
         Z-Schedule: 分布式任务调度系统（对标 XXL-Job）。
         提供 Spring Boot Starter 集成 + AutoConfiguration + 集群协调（Leader / Schedule Ring / Schedule Engine）。
+        Distributed Job Scheduler Aggregator
     </description>
 
     <url>https://github.com/yuku123/z-schedule</url>

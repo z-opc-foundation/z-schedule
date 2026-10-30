@@ -22,12 +22,13 @@
     <artifactId>z-schedule-admin</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
-    <name>z-schedule :: admin (Standalone Demo App, NOT published to Central)</name>
+    <name>z-schedule :: admin</name>
     <description>
         Z-Schedule 独立可启动演示应用. 本地 spring-boot:run 启动一个完整的调度中心 UI.
         不入中央（机制有两条，都实测过：maven.deploy.skip=true；本模块的 parent 是
         spring-boot-starter-parent，不继承顶层 pom 的 central profile，故 central-publishing /
         gpg 那套插件在本模块 0 命中）。"不发"与"不在 reactor"是两件事——本模块在 reactor 内。
+        Standalone Demo App, NOT published to Central
     </description>
 
     <properties>

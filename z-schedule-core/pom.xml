@@ -11,10 +11,11 @@
 
     <artifactId>z-schedule-core</artifactId>
     <packaging>jar</packaging>
-    <name>z-schedule-core (底层 entity/router/util, 调度核心基础)</name>
+    <name>z-schedule :: core</name>
     <description>
         Z-Schedule 底层核心模块: 任务/执行器/日志的实体定义 + MyBatis-Plus mapper + 路由抽象 + 通用工具。
         上层 z-schedule-spring-boot-starter 依赖本模块, 业务方通常直接 import starter。
+        底层 entity/router/util, 调度核心基础
     </description>
     <url>https://github.com/z-opc-foundation/z-schedule/tree/main/z-schedule-core</url>
     <licenses>

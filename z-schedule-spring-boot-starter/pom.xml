@@ -13,10 +13,11 @@
 
     <artifactId>z-schedule-spring-boot-starter</artifactId>
     <packaging>jar</packaging>
-    <name>z-schedule :: spring-boot-starter (Scheduler + Cluster + REST API auto-config)</name>
+    <name>z-schedule :: spring-boot-starter</name>
     <description>
         Z-Schedule Spring Boot Starter: 调度中心 AutoConfiguration + 集群协调 (Leader / Schedule Ring / Schedule Engine) + REST API.
         业务模块只需 &lt;dependency&gt;io.github.yuku123:z-schedule-spring-boot-starter&lt;/dependency&gt; 一行集成.
+        Scheduler + Cluster + REST API auto-config
     </description>
     <url>https://github.com/z-opc-foundation/z-schedule/tree/main/z-schedule-spring-boot-starter</url>
     <licenses>
