@@ -8,7 +8,7 @@ import com.zifang.z.schedule.web.filter.TokenAuthFilter;
 import com.zifang.z.schedule.web.service.UserService;
 import org.junit.Test;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;

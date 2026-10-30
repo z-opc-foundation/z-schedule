@@ -8,9 +8,9 @@ import com.zifang.z.schedule.web.domain.entity.UserDO;
 import org.junit.Test;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 
-import javax.servlet.FilterChain;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -559,7 +559,7 @@ public class TokenAuthFilterTest {
     private static class RecordingChain implements FilterChain {
         boolean called;
 
-        public void doFilter(javax.servlet.ServletRequest request, javax.servlet.ServletResponse response) {
+        public void doFilter(jakarta.servlet.ServletRequest request, jakarta.servlet.ServletResponse response) {
             called = true;
         }
     }

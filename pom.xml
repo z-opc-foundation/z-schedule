@@ -29,7 +29,7 @@
     <parent>
         <groupId>io.github.yuku123</groupId>
         <artifactId>z-boot-parent</artifactId>
-        <version>1.1.0</version>
+        <version>1.2.0</version>
         <relativePath/>
     </parent>
 
@@ -106,8 +106,7 @@
              · druid.version=1.2.18：全仓 0 处引用（死键），而迁移前实测有效值本来就是地板的 1.2.23
                （starter 树里 com.alibaba:druid:1.2.23）⇒ 删键，tree 不动。 -->
         <mysql.version>8.0.33</mysql.version>
-        <log4j2.version>2.20.0</log4j2.version>
-        <central-publishing-maven-plugin.version>0.7.0</central-publishing-maven-plugin.version>
+                <central-publishing-maven-plugin.version>0.7.0</central-publishing-maven-plugin.version>
     </properties>
 
     <dependencyManagement>
@@ -166,38 +165,8 @@
                  这里按实测有效值钉住（2.17.2），整族抬到地板口径是另一个决定 → 待裁（同 z-kb 的 log4j2 那格）。
                  ⚠ 别照抄本仓旧的 ${log4j2.version}=2.20.0 来钉这四条：那会把 2.17.2 → 2.20.0，
                    是"顺手换实现"，不是零漂移。 -->
-            <dependency>
-                <groupId>org.apache.logging.log4j</groupId>
-                <artifactId>log4j-api</artifactId>
-                <version>2.17.2</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.logging.log4j</groupId>
-                <artifactId>log4j-core</artifactId>
-                <version>2.17.2</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.logging.log4j</groupId>
-                <artifactId>log4j-jul</artifactId>
-                <version>2.17.2</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.logging.log4j</groupId>
-                <artifactId>log4j-slf4j-impl</artifactId>
-                <version>2.17.2</version>
-            </dependency>
 
-            <!-- 第三方 BOM：log4j-bom 留着，它管的是地板不管的那几格（log4j-slf4j2-impl 实测 2.20.0）。
-                 spring-boot-dependencies 与 z-boot-dependencies 两条 import 已删：
-                 前者与地板 import 的是同一格 2.7.18（重复 import 只是 dm 打架的来源），
-                 后者本来就被 parent 链顶替（1.0.17 → 1.0.19，改由 z-boot-parent 的 <parent> 供）。 -->
-            <dependency>
-                <groupId>org.apache.logging.log4j</groupId>
-                <artifactId>log4j-bom</artifactId>
-                <version>${log4j2.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
+            <!-- log4j-bom import 已随 2026-10-30 Java17/SB3 火车摘除：parent z-boot-parent:1.2.0 DM 统一 log4j2 2.25.4 族（本仓 2.17.2 直钉一并退役） -->
         </dependencies>
     </dependencyManagement>
     <dependencies>

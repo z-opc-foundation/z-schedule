@@ -5,7 +5,7 @@ import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.web.service.JobInfoService;
 import org.junit.Test;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;

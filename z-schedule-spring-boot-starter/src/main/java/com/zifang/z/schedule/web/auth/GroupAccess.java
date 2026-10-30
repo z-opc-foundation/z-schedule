@@ -2,7 +2,7 @@ package com.zifang.z.schedule.web.auth;
 
 import com.zifang.z.schedule.web.filter.TokenAuthFilter;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;

@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import {safeEmptyOutDir} from '../../build-tools/safe-vite-plugin.mjs'
 
 // Z-Schedule 应用层 — Vite SPA 配置
 // dev 端口 5173，proxy /api → 后端 admin (18086)
@@ -18,7 +19,7 @@ import path from 'path';
 //   ⇒ 默认值取对，需要非根挂载时用 VITE_BASE 显式覆盖，别把坑种在默认值里。
 export default defineConfig({
     base: process.env.VITE_BASE || '/',
-    plugins: [react()],
+    plugins: [safeEmptyOutDir(), react()],
     resolve: {
     dedupe: ['react', 'react-dom', 'react-router-dom', 'antd', '@ant-design/icons', 'axios'],
         alias: { '@': path.resolve(__dirname, 'src'), ...(process.env.LOCAL_SIBLINGS === '1' ? { '@yuku123/z-schedule-component': '../z-schedule-component/src' } : {}) },
@@ -36,7 +37,7 @@ export default defineConfig({
     build: {
         outDir: 'dist',
         assetsDir: 'assets',
-        emptyOutDir: true,
+        emptyOutDir: false,
         sourcemap: false,
     },
 });

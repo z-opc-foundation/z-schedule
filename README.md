@@ -20,10 +20,10 @@
 | **仓库** | `z-schedule` |
 | **Maven 坐标** | `io.github.yuku123:z-schedule:${revision}`（聚合）· `-core` · `-spring-boot-starter` |
 | **当前版本** | `1.0.6`（根 POM `<revision>`，CI-friendly versions + flatten-maven-plugin `oss` 模式） |
-| **父项目** | `io.github.yuku123:z-boot-parent:1.1.0`（`<relativePath/>` 留空，parent 在 repo1 不在磁盘） |
+| **父项目** | `io.github.yuku123:z-boot-parent:1.2.0`（`<relativePath/>` 留空，parent 在 repo1 不在磁盘） |
 | **Maven Central** | 已发布：`z-schedule` / `z-schedule-core` / `z-schedule-spring-boot-starter` 的 **1.0.4 / 1.0.5 / 1.0.6** 从 repo1 取 `.pom` 均回 200；`z-schedule-admin` 三个版本全 404（设计上不发布） |
 | **默认端口** | 本地直跑 **8080**、context-path 为空（`application.yml` 从没设过 `server.*`）；容器面才是 `18086` + `/meta` |
-| **运行口径** | Java 8（口径由父链下发，根 POM 已删 `maven.compiler.*`）· Spring Boot **2.7.18**（由 `z-boot-parent` 自带地板供，根 POM 已删 `spring-boot.version` 键） |
+| **运行口径** | Java 17（口径由父链下发，根 POM 已删 `maven.compiler.*`）· Spring Boot **3.3.13**（由 `z-boot-parent` 自带地板供，根 POM 已删 `spring-boot.version` 键） |
 | **最近更新** | 2026-09-30 |
 
 ⚠ 关于"版本单一来源"：根 `<revision>` 只管聚合/core/starter 三件。`z-schedule-admin` 有自己的
@@ -100,7 +100,7 @@
 
 ```
 z-schedule/
-├── pom.xml                          # 根聚合 POM：继承 z-boot-parent:1.1.0，<revision>=1.0.6，常开 flatten(oss)
+├── pom.xml                          # 根聚合 POM：继承 z-boot-parent:1.2.0，<revision>=1.0.6，常开 flatten(oss)
 ├── z-schedule-core/                 # 无 Spring 依赖的底层：entity/model、10 个 ExecutorRouter、
 │                                    #   枚举（阻塞/路由/过期/GLUE/状态/触发码）、IJobHandler、CronExpression、
 │                                    #   ScheduleProperties（z.schedule.* 的载体）
@@ -131,9 +131,9 @@ z-schedule/
 
 | 层级 | 技术（全部取自 pom / 源码实测） |
 |------|------|
-| 语言 / 运行时 | Java 8（class-file major 52；口径由父链 pluginManagement 下发） |
+| 语言 / 运行时 | Java 17（class-file major 61；口径由父链 pluginManagement 下发） |
 | 框架 | Spring Boot 2.7.18（`z-boot-parent` 自带地板供；**仅 `z-schedule-admin` 自己的 parent 仍钉 2.7.12**） |
-| 父链 | `z-boot-parent:1.1.0`（其父 `z-boot:1.0.19`）。第三方地板与兄弟仓权威表**都已并进 parent 自身**（`z-boot-dependencies` / `z-boot-fleet` 两个文件夹随 2026-10-08 火车制拓扑退役），现读 repo1 上那份 pom 得下面各格 |
+| 父链 | `z-boot-parent:1.2.0`（其父 `z-boot:1.0.19`）。第三方地板与兄弟仓权威表**都已并进 parent 自身**（`z-boot-dependencies` / `z-boot-fleet` 两个文件夹随 2026-10-08 火车制拓扑退役），现读 repo1 上那份 pom 得下面各格 |
 | 持久层 | MyBatis-Plus 3.5.7（`mybatis-plus-extension`）+ Druid 1.2.23（两格均由地板供） |
 | 数据库 | MySQL 8（`com.mysql:mysql-connector-j:8.0.33`，刻意留 8.0.33 不跟地板的 8.4.0；带 Boot 那条 `protobuf-java` exclusion）/ H2（dev profile 与单测） |
 | 日志 | log4j2（api/core/jul/slf4j-impl 钉 **2.17.2**，`log4j-bom` 管 slf4j2-impl=2.20.0）+ slf4j |
@@ -152,9 +152,9 @@ z-schedule/
 mvn clean install -DskipTests
 ```
 
-第三方版本一律由 `z-boot-parent:1.1.0` 供给（第三方地板与兄弟仓权威表均已并入 parent 自身），
+第三方版本一律由 `z-boot-parent:1.2.0` 供给（第三方地板与兄弟仓权威表均已并入 parent 自身），
 模块 POM 里不应再出现字面版本钉；若报找不到版本，先确认本地/镜像能解析到
-`io.github.yuku123:z-boot-parent:1.1.0`。
+`io.github.yuku123:z-boot-parent:1.2.0`。
 
 ### 作为依赖接入一个 Spring Boot 应用
 

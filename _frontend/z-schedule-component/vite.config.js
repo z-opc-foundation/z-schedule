@@ -1,12 +1,13 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import {safeEmptyOutDir} from '../../build-tools/safe-vite-plugin.mjs'
 
 // Z-Schedule 组件层 — Vite library mode 配置
 // 产物：dist/index.js（ES Module 格式，外部化 react/react-dom）
 // 引用方：同仓 _frontend/z-schedule-suit/（file: 协议）或外部项目（npm install）
 export default defineConfig({
-    plugins: [react()],
+    plugins: [safeEmptyOutDir(), react()],
     resolve: {
         // src/pages/*.tsx 用 @/schedule/... 与 @/common/... 引本仓内部模块。
         // library mode 的 rollup 不读 tsconfig 的 paths，alias 必须配在这里，否则解析不了直接构建失败。
@@ -25,7 +26,7 @@ export default defineConfig({
             formats: ['es'],
         },
         outDir: 'dist',
-        emptyOutDir: true,
+        emptyOutDir: false,
         sourcemap: false,
         rollupOptions: {
             // 框架本体全部走 external（§8.4 版本线：react 19 / antd 6 / rrd 7）。

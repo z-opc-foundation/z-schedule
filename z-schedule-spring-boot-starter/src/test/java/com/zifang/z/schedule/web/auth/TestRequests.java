@@ -3,7 +3,7 @@ package com.zifang.z.schedule.web.auth;
 import com.zifang.z.schedule.web.domain.entity.UserDO;
 import com.zifang.z.schedule.web.filter.TokenAuthFilter;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
