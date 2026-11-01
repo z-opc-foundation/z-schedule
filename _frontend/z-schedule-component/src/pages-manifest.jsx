@@ -10,9 +10,14 @@ import ComponentDocPage from './pages/ComponentDoc';
 
 export const appMeta = { title: 'z-schedule 控制台', short: 'z-schedule' }
 
+// 菜单清单（按 routes 派生；页面实体仍在 suit 侧，见上方占位说明）
+export const menuItems = [
+    { key: '/z-schedule/jobs', label: 'Job List' },
+    { key: '/z-schedule/docs', label: '组件文档' },
+]
+
 export const routes = [
     { path: '/z-schedule/jobs', title: 'Job List', order: 1, Component: JobListView },
-    // 组件文档页（lead 008 §7）。本 manifest 没有 menuItems（菜单在 suit 侧），
-    // 路由在这里补一条，主壳按 /z-schedule/docs 挂载即可。
+    // 组件文档页（lead 008 §7）。路由在这里补一条，主壳按 /z-schedule/docs 挂载即可。
     { path: '/z-schedule/docs', title: '组件文档', order: 2, Component: ComponentDocPage },
 ]
