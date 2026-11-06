@@ -44,7 +44,7 @@ import java.util.Map;
  * </pre>
  * <b>凭据不进参数</b>：z-graph 的 API Token 取环境变量 {@code Z_GRAPH_API_TOKEN}，
  * z-oss 的 AK/SK 取 {@code ZOSS_ACCESS_KEY} / {@code ZOSS_SECRET_KEY}
- * （参数可以覆盖，但生产建议只用环境变量 —— 任务参数会落库）。</p>
+ * （参数可以覆盖，但生产建议只用环境变量 —— 任务参数会落库）。
  */
 public class GraphMaintenanceHandler implements IJobHandler {
 
