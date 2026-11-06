@@ -19,16 +19,16 @@
 |------|-----|
 | **仓库** | `z-schedule` |
 | **Maven 坐标** | `io.github.yuku123:z-schedule:${revision}`（聚合）· `-core` · `-spring-boot-starter` |
-| **当前版本** | `1.0.6`（根 POM `<revision>`，CI-friendly versions + flatten-maven-plugin `oss` 模式） |
+| **当前版本** | `1.0.7`（根 POM `<revision>`，CI-friendly versions + flatten-maven-plugin `oss` 模式） |
 | **父项目** | `io.github.yuku123:z-boot-parent:1.2.2`（`<relativePath/>` 留空，parent 在 repo1 不在磁盘） |
-| **Maven Central** | 已发布：`z-schedule` / `z-schedule-core` / `z-schedule-spring-boot-starter` 的 **1.0.4 / 1.0.5 / 1.0.6** 从 repo1 取 `.pom` 均回 200；`z-schedule-admin` 三个版本全 404（设计上不发布） |
+| **Maven Central** | 已发布：`z-schedule` / `z-schedule-core` / `z-schedule-spring-boot-starter` 的 **1.0.4 / 1.0.5 / 1.0.6 / 1.0.7** 从 repo1 取 `.pom` 均回 200；`z-schedule-admin` 三个版本全 404（设计上不发布） |
 | **默认端口** | 本地直跑 **8080**、context-path 为空（`application.yml` 从没设过 `server.*`）；容器面才是 `18086` + `/meta` |
 | **运行口径** | Java 17（口径由父链下发，根 POM 已删 `maven.compiler.*`）· Spring Boot **3.3.13**（由 `z-boot-parent` 自带地板供，根 POM 已删 `spring-boot.version` 键） |
 | **最近更新** | 2026-09-30 |
 
 ⚠ 关于"版本单一来源"：根 `<revision>` 只管聚合/core/starter 三件。`z-schedule-admin` 有自己的
 `<version>1.0.0</version>`（**不跟 revision 走**），产物是 `z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar`；
-它另用一条 `<z-schedule.version>` 属性（现值 `1.0.6`）来消费本仓 starter —— 抬版时这两处都得对上，
+它另用一条 `<z-schedule.version>` 属性（现值 `1.0.7`）来消费本仓 starter —— 抬版时这两处都得对上，
 抄死版本号会怎么坏，五种形状实测见 [`_doc/005_testing/e2e/README.md`](_doc/005_testing/e2e/README.md) §14。
 
 ---
@@ -100,7 +100,7 @@
 
 ```
 z-schedule/
-├── pom.xml                          # 根聚合 POM：继承 z-boot-parent:1.2.2，<revision>=1.0.6，常开 flatten(oss)
+├── pom.xml                          # 根聚合 POM：继承 z-boot-parent:1.2.2，<revision>=1.0.7，常开 flatten(oss)
 ├── z-schedule-core/                 # 无 Spring 依赖的底层：entity/model、10 个 ExecutorRouter、
 │                                    #   枚举（阻塞/路由/过期/GLUE/状态/触发码）、IJobHandler、CronExpression、
 │                                    #   ScheduleProperties（z.schedule.* 的载体）
@@ -162,7 +162,7 @@ mvn clean install -DskipTests
 <dependency>
     <groupId>io.github.yuku123</groupId>
     <artifactId>z-schedule-spring-boot-starter</artifactId>
-    <version>1.0.6</version>
+    <version>1.0.7</version>
 </dependency>
 ```
 
@@ -232,7 +232,7 @@ java -jar z-schedule-admin/target/z-schedule-admin-1.0.0-exec.jar
 `#41` 之后 starter 的 `dataSourceSchedule` / `sqlSessionFactorySchedule` 各带一支
 `@ConditionalOnMissingBean(name = …)`，改成按 **bean 名**退让，所以本树构件不给那句也起得来
 （实测 `Tomcat started on port(s): 50974 (http) with context path '/meta'`，前后读数成对记在 §19）。
-但 `~/.m2` 里那份已发布的 1.0.6 starter 与路 1 无关 —— 路 1 不带 `-am` 时依赖由 `~/.m2` 解析，
+但 `~/.m2` 里那份已发布的 1.0.7 starter 与路 1 无关 —— 路 1 不带 `-am` 时依赖由 `~/.m2` 解析，
 **仍要给**那句。
 
 ```bash
