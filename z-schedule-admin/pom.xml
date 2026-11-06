@@ -42,7 +42,7 @@
             必须与 z-schedule 顶层 pom 的 <revision> 保持一致（V1 留 reactor 后会参与 reactor 解析）。
             发版前同步更新本字段（或改用 ${revision} 显式注入，见 V1 验证记录）。
         -->
-        <z-schedule.version>1.0.6</z-schedule.version>
+        <z-schedule.version>1.0.7</z-schedule.version>
         <!-- 2026-09-29 消费者轮：1.0.17 → 1.0.21。本模块的 <parent> 是 spring-boot-starter-parent
              （建仓就有的独立应用形状，maven.deploy.skip=true、永不上 Central），**不继承**顶层
              z-boot-parent 的直接 DM ⇒ 这里的版本必须自己写，删掉就是 "dependencies.dependency.version
