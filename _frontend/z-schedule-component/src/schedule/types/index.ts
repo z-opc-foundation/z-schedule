@@ -28,6 +28,38 @@ export interface JobGroup {
 }
 
 /** /api/schedule/joblog/list 的单项。 */
+/** /api/schedule/jobinfo/list 的单项 —— DO 直出，**蛇形**键名（与 JobGroup 的驼峰不同）。 */
+export interface JobInfo {
+    id: number;
+    /** 所属执行器（jobgroup.id） */
+    job_group?: number;
+    /** cron 表达式（trigger_type=CRON 时有效） */
+    job_cron?: string;
+    job_desc?: string;
+    add_time?: string;
+    update_time?: string;
+    author?: string;
+    alarm_email?: string | null;
+    /** 路由策略：FIRST / ROUND / RANDOM / CONSISTENT_HASH / LEAST_FREQUENTLY_USED / … */
+    executor_route_strategy?: string;
+    executor_handler?: string;
+    executor_param?: string | null;
+    executor_block_strategy?: string | null;
+    executor_timeout?: number;
+    executor_fail_retry_count?: number;
+    log_id?: number;
+    /** 1=运行中 0=已停止 */
+    trigger_status?: number;
+    /** 上次/下次触发时间（毫秒时间戳） */
+    trigger_last_time?: number;
+    trigger_next_time?: number;
+    /** CRON / FIX_RATE */
+    trigger_type?: string;
+    fix_interval?: number;
+    misfire_strategy?: string;
+    child_job_id?: number | null;
+}
+
 export interface JobLog {
     id: number;
     jobGroup?: number;
