@@ -1,10 +1,6 @@
 import React, {useEffect, useState} from 'react';
 import {Button, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Tag} from 'antd';
 import {
-    DeleteOutlined,
-    EditOutlined,
-    PauseCircleOutlined,
-    PlayCircleOutlined,
     PlusOutlined,
     ReloadOutlined,
     ScheduleOutlined,
@@ -193,14 +189,13 @@ const JobList: React.FC = () => {
                         title: '操作', width: 210, fixed: 'right',
                         render: (_, j) => (
                             <Space>
-                                <Button size="small"
-                                        icon={j.trigger_status === 1 ? <PauseCircleOutlined/> : <PlayCircleOutlined/>}
+                                <Button type="link" size="small"
                                         onClick={() => toggle(j)}>
                                     {j.trigger_status === 1 ? '停止' : '启动'}
                                 </Button>
-                                <Button size="small" icon={<EditOutlined/>} onClick={() => handleEdit(j)}>编辑</Button>
+                                <Button type="link" size="small" onClick={() => handleEdit(j)}>编辑</Button>
                                 <Popconfirm title="确认删除该任务?" onConfirm={() => handleDelete(j)}>
-                                    <Button size="small" danger icon={<DeleteOutlined/>}>删除</Button>
+                                    <Button type="link" size="small" danger>删除</Button>
                                 </Popconfirm>
                             </Space>
                         ),

@@ -1,6 +1,6 @@
 import React, {useEffect, useState} from 'react';
 import {Button, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Tag} from 'antd';
-import {ClusterOutlined, DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined} from '@ant-design/icons';
+import {ClusterOutlined, PlusOutlined, ReloadOutlined} from '@ant-design/icons';
 import {jobGroupApi} from '@/schedule/services/job';
 import {AddressType} from '@/schedule/types';
 import {ErrorState, ListTable} from '@yuku123/z-frontend-common/ui';
@@ -138,10 +138,10 @@ const JobGroupList: React.FC = () => {
                             title: '操作', width: 140, fixed: 'right',
                             render: (_, g) => (
                                 <Space>
-                                    <Button size="small" icon={<EditOutlined/>}
+                                    <Button type="link" size="small"
                                             onClick={() => handleEdit(g)}>编辑</Button>
                                     <Popconfirm title="确认删除该执行器?" onConfirm={() => handleDelete(g)}>
-                                        <Button size="small" danger icon={<DeleteOutlined/>}>删除</Button>
+                                        <Button type="link" size="small" danger>删除</Button>
                                     </Popconfirm>
                                 </Space>
                             )

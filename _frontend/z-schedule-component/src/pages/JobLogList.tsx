@@ -1,7 +1,7 @@
 import React, {useEffect, useState} from 'react';
 import {useSearchParams} from 'react-router-dom';
 import {Button, Descriptions, Drawer, Form, Popconfirm, Select, Space, Tag, Tooltip} from 'antd';
-import {ClearOutlined, EyeOutlined, ReloadOutlined} from '@ant-design/icons';
+import {ClearOutlined, ReloadOutlined} from '@ant-design/icons';
 import {jobGroupApi, jobLogApi} from '@/schedule/services/job';
 import { ErrorState, ListTable } from '@yuku123/z-frontend-common/ui'
 
@@ -218,7 +218,7 @@ const JobLogList: React.FC = () => {
                                 title: '操作', width: 90, fixed: 'right' as const,
                                 render: (_: any, r: any) => (
                                     <Tooltip title="查看执行详情">
-                                        <Button type="link" size="small" icon={<EyeOutlined/>}
+                                        <Button type="link" size="small"
                                                 onClick={() => handleView(r)}>详情</Button>
                                     </Tooltip>
                                 ),
