@@ -29,7 +29,7 @@
     <parent>
         <groupId>io.github.yuku123</groupId>
         <artifactId>z-boot-parent</artifactId>
-        <version>1.2.2</version>
+        <version>1.2.3</version>
         <relativePath/>
     </parent>
 
@@ -106,7 +106,7 @@
                ⇒ 删键，下面插件声明里那条 ${flatten-maven-plugin.version} 引用留着、由父链解析。
              · druid.version=1.2.18：全仓 0 处引用（死键），而迁移前实测有效值本来就是地板的 1.2.23
                （starter 树里 com.alibaba:druid:1.2.23）⇒ 删键，tree 不动。 -->
-        <mysql.version>8.0.33</mysql.version>
+        <mysql.version>8.4.0</mysql.version>
                 <central-publishing-maven-plugin.version>0.7.0</central-publishing-maven-plugin.version>
     </properties>
 
