@@ -13,6 +13,9 @@
   "devDependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "esbuild": "^0.21.0"
+    "esbuild": "^0.25.0"
+  },
+  "overrides": {
+    "esbuild": "^0.25.0"
   }
 }
