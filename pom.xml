@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <!--
-        z-schedule 根 pom：消费入口统一走 io.github.yuku123:z-boot-parent:1.0.19（1.0.19 起全组织口径）。
+        z-schedule 根 pom：消费入口统一走 io.github.yuku123:z-boot-parent:1.2.4（1.0.19 起全组织口径）。
         一条 parent 白拿 ① 第三方地板 z-boot-dependencies:1.0.19 ② 兄弟仓权威 z-boot-fleet:1.0.0
         ③ Java 8 的 pluginManagement（compiler source/target 8、surefire/jar/resources 兜版本）。
         迁移前这里**没有** <parent>（根 pom 自包含，11 个版本键自己摊），所以"换台机器能不能构建"
@@ -29,7 +29,7 @@
     <parent>
         <groupId>io.github.yuku123</groupId>
         <artifactId>z-boot-parent</artifactId>
-        <version>1.2.3</version>
+        <version>1.2.4</version>
         <relativePath/>
     </parent>
 
@@ -167,7 +167,7 @@
                  ⚠ 别照抄本仓旧的 ${log4j2.version}=2.20.0 来钉这四条：那会把 2.17.2 → 2.20.0，
                    是"顺手换实现"，不是零漂移。 -->
 
-            <!-- log4j-bom import 已随 2026-10-30 Java17/SB3 火车摘除：parent z-boot-parent:1.2.0 DM 统一 log4j2 2.25.4 族（本仓 2.17.2 直钉一并退役） -->
+            <!-- log4j-bom import 已随 2026-10-30 Java17/SB3 火车摘除：parent z-boot-parent:1.2.4 DM 统一 log4j2 2.25.4 族（本仓 2.17.2 直钉一并退役） -->
         </dependencies>
     </dependencyManagement>
     <dependencies>

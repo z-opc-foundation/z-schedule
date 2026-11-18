@@ -23,7 +23,7 @@ React 19 + Ant Design 6 + Vite 6 前端 · Docker / docker-compose / k8s 清单�
 
 ```
 z-schedule/
-├── pom.xml                          # 根聚合 POM：parent z-boot-parent:1.1.0，<revision>=1.0.6，常开 flatten(oss)
+├── pom.xml                          # 根聚合 POM：parent z-boot-parent:1.2.4，<revision>=1.0.6，常开 flatten(oss)
 ├── z-schedule-core/                 # 无 Spring 依赖的底层：model / enums / handler / route(10 个 router) / CronExpression
 ├── z-schedule-spring-boot-starter/  # 调度中枢 + HTTP 层：cluster(4) / controller(7) / service(9) / domain(6+6) / auth / filter / config
 ├── z-schedule-admin/                # 可启动演示应用（永不上 Maven Central）
