@@ -104,6 +104,11 @@ management:
 # （这套库是被同机其他服务共用的），所以 starter/`ModuleDataSourceTemplate` 的默认值仍是 20，
 # 这里只对独立部署的 admin 显式抬高；嵌入方请按自己的库容量决定。
 z:
+  # z-ext 预置埋点自登记控制台（运行期可被控制台切换扩展点实现）
+  ext:
+    console:
+      enabled: true
+      url: ${ZEXT_CONSOLE_URL:http://192.168.31.136:8888}
   base:
     db:
       schedule:
