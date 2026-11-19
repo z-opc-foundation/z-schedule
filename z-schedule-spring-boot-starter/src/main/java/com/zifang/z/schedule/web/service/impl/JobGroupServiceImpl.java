@@ -1,6 +1,7 @@
 package com.zifang.z.schedule.web.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.zifang.z.meta.api.annotation.BizMethod;
 import com.zifang.z.schedule.core.enums.ExecutorRouteStrategyEnum;
 import com.zifang.z.schedule.core.model.JobGroup;
 import com.zifang.z.schedule.core.model.ReturnT;
@@ -10,11 +11,11 @@ import com.zifang.z.schedule.web.domain.entity.JobRegistryDO;
 import com.zifang.z.schedule.web.domain.mapper.JobGroupMapper;
 import com.zifang.z.schedule.web.domain.mapper.JobRegistryMapper;
 import com.zifang.z.schedule.web.service.JobGroupService;
+import jakarta.annotation.Resource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Service;
 
-import jakarta.annotation.Resource;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -110,6 +111,7 @@ public class JobGroupServiceImpl implements JobGroupService {
     }
 
     @Override
+    @BizMethod(name = "getAll", module = "z-schedule", description = "", operation = BizMethod.Operation.QUERY)
     public List<JobGroup> getAll() {
         List<JobGroup> list = DoMapper.toGroupDTOList(jobGroupMapper.selectList(null));
         list.sort((a, b) -> Integer.compare(a.getOrder(), b.getOrder()));
@@ -117,11 +119,13 @@ public class JobGroupServiceImpl implements JobGroupService {
     }
 
     @Override
+    @BizMethod(name = "getById", module = "z-schedule", description = "", operation = BizMethod.Operation.QUERY)
     public JobGroup getById(int id) {
         return DoMapper.toDTO(jobGroupMapper.selectById(id));
     }
 
     @Override
+    @BizMethod(name = "getByAppName", module = "z-schedule", description = "", operation = BizMethod.Operation.QUERY)
     public JobGroup getByAppName(String appName) {
         if (appName == null || appName.isEmpty()) {
             return null;
@@ -131,6 +135,7 @@ public class JobGroupServiceImpl implements JobGroupService {
     }
 
     @Override
+    @BizMethod(name = "add", module = "z-schedule", description = "", operation = BizMethod.Operation.CREATE)
     public ReturnT<String> add(JobGroup jobGroup) {
         if (jobGroup == null) return ReturnT.fail("参数不能为空");
         if (jobGroup.getAppName() == null || jobGroup.getAppName().trim().isEmpty()) {
@@ -154,6 +159,7 @@ public class JobGroupServiceImpl implements JobGroupService {
     }
 
     @Override
+    @BizMethod(name = "update", module = "z-schedule", description = "", operation = BizMethod.Operation.UPDATE)
     public ReturnT<String> update(JobGroup jobGroup) {
         if (jobGroup == null || jobGroup.getId() <= 0) {
             return ReturnT.fail("ID 不能为空");
@@ -174,6 +180,7 @@ public class JobGroupServiceImpl implements JobGroupService {
     }
 
     @Override
+    @BizMethod(name = "delete", module = "z-schedule", description = "", operation = BizMethod.Operation.DELETE)
     public ReturnT<String> delete(int id) {
         int rows = jobGroupMapper.deleteById(id);
         if (rows == 0) return ReturnT.fail("执行器分组不存在");
@@ -181,6 +188,7 @@ public class JobGroupServiceImpl implements JobGroupService {
     }
 
     @Override
+    @BizMethod(name = "register", module = "z-schedule", description = "", operation = BizMethod.Operation.CREATE)
     public synchronized ReturnT<String> register(String appName, String address) {
         if (appName == null || appName.isEmpty() || address == null || address.isEmpty()) {
             return ReturnT.fail("appName/address 不能为空");
@@ -230,6 +238,7 @@ public class JobGroupServiceImpl implements JobGroupService {
     }
 
     @Override
+    @BizMethod(name = "getRegistryNodes", module = "z-schedule", description = "", operation = BizMethod.Operation.QUERY)
     public List<String> getRegistryNodes(String appName) {
         if (appName == null || appName.isEmpty()) return new ArrayList<>();
         JobGroup group = getByAppName(appName);
@@ -244,3 +253,6 @@ public class JobGroupServiceImpl implements JobGroupService {
         return nodes;
     }
 }
+
+
+

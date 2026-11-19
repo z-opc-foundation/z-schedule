@@ -1,5 +1,8 @@
 package com.zifang.z.schedule.web.controller;
 
+import com.zifang.z.meta.api.annotation.BizApi;
+import com.zifang.z.meta.api.annotation.BizField;
+import com.zifang.z.meta.api.annotation.BizParam;
 import com.zifang.z.schedule.core.model.JobGroup;
 import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.web.service.JobGroupService;
@@ -37,6 +40,7 @@ public class JobGroupController {
      * 全量分组列表(返回前端期望结构,包含 registryList).
      */
     @GetMapping("/list")
+    @BizApi(summary = "全量分组列表(返回前端期望结构,包含 registryList)", description = "全量分组列表(返回前端期望结构,包含 registryList).", tags = { "z-schedule" })
     public ReturnT<List<Map<String, Object>>> list() {
         List<JobGroup> all = jobGroupService.getAll();
         return ReturnT.success(JobGroupServiceImpl.toFrontendList(all));
@@ -48,8 +52,10 @@ public class JobGroupController {
      * RESTful 别名: GET /jobgroup/{id}
      */
     @GetMapping({"/get", "/{id}"})
-    public ReturnT<Map<String, Object>> getById(@RequestParam(required = false) Integer id,
-                                                @PathVariable(value = "id", required = false) Integer id2) {
+    @BizApi(summary = "根据主键 ID 查询分组", description = "根据主键 ID 查询分组. RESTful 别名: GET /jobgroup/{id}", tags = { "z-schedule" })
+    public ReturnT<Map<String, Object>> getById(@RequestParam(required = false) @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.QUERY) Integer id,
+                                                @PathVariable(value = "id", required = false)
+                                                @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.PATH) Integer id2) {
         int realId = id != null ? id : (id2 != null ? id2 : 0);
         JobGroup g = jobGroupService.getById(realId);
         if (g == null) {
@@ -62,7 +68,8 @@ public class JobGroupController {
      * 新增分组.
      */
     @PostMapping("/add")
-    public ReturnT<String> add(@RequestBody JobGroup jobGroup) {
+    @BizApi(summary = "新增分组", description = "新增分组.", tags = { "z-schedule" })
+    public ReturnT<String> add(@RequestBody @BizParam(name = "jobGroup", type = BizField.FieldType.STRING, description = "", position = BizParam.Position.BODY) JobGroup jobGroup) {
         return jobGroupService.add(jobGroup);
     }
 
@@ -70,7 +77,8 @@ public class JobGroupController {
      * 更新分组.
      */
     @PostMapping("/update")
-    public ReturnT<String> update(@RequestBody JobGroup jobGroup) {
+    @BizApi(summary = "更新分组", description = "更新分组.", tags = { "z-schedule" })
+    public ReturnT<String> update(@RequestBody @BizParam(name = "jobGroup", type = BizField.FieldType.STRING, description = "", position = BizParam.Position.BODY) JobGroup jobGroup) {
         return jobGroupService.update(jobGroup);
     }
 
@@ -80,8 +88,10 @@ public class JobGroupController {
      * RESTful 别名: POST /jobgroup/remove/{id}
      */
     @PostMapping({"/remove", "/remove/{id}"})
-    public ReturnT<String> remove(@RequestParam(required = false) Integer id,
-                                  @PathVariable(value = "id", required = false) Integer id2) {
+    @BizApi(summary = "删除分组", description = "删除分组. RESTful 别名: POST /jobgroup/remove/{id}", tags = { "z-schedule" })
+    public ReturnT<String> remove(@RequestParam(required = false) @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.QUERY) Integer id,
+                                  @PathVariable(value = "id", required = false)
+                                  @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.PATH) Integer id2) {
         int realId = id != null ? id : (id2 != null ? id2 : 0);
         return jobGroupService.delete(realId);
     }
@@ -90,7 +100,9 @@ public class JobGroupController {
      * 在线注册节点列表(执行器 /beat 注册地址).
      */
     @GetMapping("/registryNodes")
-    public ReturnT<List<String>> registryNodes(@RequestParam String appName) {
+    @BizApi(summary = "在线注册节点列表(执行器 /beat 注册地址)", description = "在线注册节点列表(执行器 /beat 注册地址).", tags = { "z-schedule" })
+    public ReturnT<List<String>> registryNodes(@RequestParam @BizParam(name = "appName", type = BizField.FieldType.STRING, description = "", position = BizParam.Position.QUERY) String appName) {
         return ReturnT.success(jobGroupService.getRegistryNodes(appName));
     }
 }
+

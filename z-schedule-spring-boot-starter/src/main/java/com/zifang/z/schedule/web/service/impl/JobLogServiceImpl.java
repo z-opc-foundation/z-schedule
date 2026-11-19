@@ -1,16 +1,17 @@
 package com.zifang.z.schedule.web.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.zifang.z.meta.api.annotation.BizMethod;
 import com.zifang.z.schedule.core.model.JobLog;
 import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.web.domain.entity.JobLogDO;
 import com.zifang.z.schedule.web.domain.mapper.JobLogMapper;
 import com.zifang.z.schedule.web.service.JobLogService;
+import jakarta.annotation.Resource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Service;
 
-import jakarta.annotation.Resource;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -33,6 +34,7 @@ public class JobLogServiceImpl implements JobLogService {
     private JobLogMapper jobLogMapper;
 
     @Override
+    @BizMethod(name = "save", module = "z-schedule", description = "", operation = BizMethod.Operation.CREATE)
     public long save(JobLog jobLog) {
         JobLogDO d = DoMapper.toDO(jobLog);
         jobLogMapper.insert(d);
@@ -47,6 +49,7 @@ public class JobLogServiceImpl implements JobLogService {
     }
 
     @Override
+    @BizMethod(name = "update", module = "z-schedule", description = "", operation = BizMethod.Operation.UPDATE)
     public void update(JobLog jobLog) {
         if (jobLog == null || jobLog.getId() <= 0) {
             // 到这里就是调用方手上拿着一个没落过库的 JobLog：更新会被整条丢掉，
@@ -60,11 +63,13 @@ public class JobLogServiceImpl implements JobLogService {
     }
 
     @Override
+    @BizMethod(name = "getById", module = "z-schedule", description = "", operation = BizMethod.Operation.QUERY)
     public JobLog getById(long id) {
         return DoMapper.toDTO(jobLogMapper.selectById(id));
     }
 
     @Override
+    @BizMethod(name = "query", module = "z-schedule", description = "", operation = BizMethod.Operation.QUERY)
     public List<JobLog> query(int jobGroup, int jobId, int handleCode, int limit) {
         LambdaQueryWrapper<JobLogDO> wrapper = new LambdaQueryWrapper<>();
         if (jobGroup > 0) wrapper.eq(JobLogDO::getJobGroup, jobGroup);
@@ -81,12 +86,14 @@ public class JobLogServiceImpl implements JobLogService {
     }
 
     @Override
+    @BizMethod(name = "statsBetween", module = "z-schedule", description = "", operation = BizMethod.Operation.QUERY)
     public Stats statsBetween(Date startInclusive, Date endExclusive) {
         Map<String, Object> row = jobLogMapper.statsBetween(startInclusive, endExclusive, ReturnT.SUCCESS_CODE);
         return new Stats(number(row, "total"), number(row, "success"));
     }
 
     @Override
+    @BizMethod(name = "dailyStatsSince", module = "z-schedule", description = "", operation = BizMethod.Operation.ACTION)
     public Map<String, Stats> dailyStatsSince(Date startInclusive) {
         List<Map<String, Object>> rows = jobLogMapper.dailyStats(startInclusive, ReturnT.SUCCESS_CODE);
         Map<String, Stats> byDay = new LinkedHashMap<String, Stats>();
@@ -151,17 +158,20 @@ public class JobLogServiceImpl implements JobLogService {
     }
 
     @Override
+    @BizMethod(name = "clearByJobId", module = "z-schedule", description = "", operation = BizMethod.Operation.DELETE)
     public int clearByJobId(int jobId) {
         return jobLogMapper.delete(
                 new LambdaQueryWrapper<JobLogDO>().eq(JobLogDO::getJobId, jobId));
     }
 
     @Override
+    @BizMethod(name = "clearAll", module = "z-schedule", description = "", operation = BizMethod.Operation.DELETE)
     public int clearAll() {
         return jobLogMapper.delete(null);
     }
 
     @Override
+    @BizMethod(name = "clearLogByDays", module = "z-schedule", description = "", operation = BizMethod.Operation.DELETE)
     public int clearLogByDays(int days) {
         if (days < 7) days = 7;
         java.util.Calendar cal = java.util.Calendar.getInstance();
@@ -216,3 +226,6 @@ public class JobLogServiceImpl implements JobLogService {
         return ids;
     }
 }
+
+
+

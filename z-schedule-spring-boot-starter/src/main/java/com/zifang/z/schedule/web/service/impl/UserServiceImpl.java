@@ -1,6 +1,7 @@
 package com.zifang.z.schedule.web.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.zifang.z.meta.api.annotation.BizMethod;
 import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.core.model.User;
 import com.zifang.z.schedule.web.auth.LoginSession;
@@ -8,12 +9,12 @@ import com.zifang.z.schedule.web.auth.LoginSessionStore;
 import com.zifang.z.schedule.web.domain.entity.UserDO;
 import com.zifang.z.schedule.web.domain.mapper.UserMapper;
 import com.zifang.z.schedule.web.service.UserService;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.Resource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Service;
 
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.Resource;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -41,6 +42,7 @@ public class UserServiceImpl implements UserService {
     private LoginSessionStore sessionStore;
 
     @PostConstruct
+    @BizMethod(name = "init", module = "z-schedule", description = "", operation = BizMethod.Operation.CREATE)
     public void init() {
         try {
             logger.info("UserServiceImpl (DB-backed) initialized, total users={}", userMapper.selectCount(null));
@@ -50,16 +52,19 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @BizMethod(name = "getAll", module = "z-schedule", description = "", operation = BizMethod.Operation.QUERY)
     public List<User> getAll() {
         return DoMapper.toUserDTOList(userMapper.selectList(null));
     }
 
     @Override
+    @BizMethod(name = "getById", module = "z-schedule", description = "", operation = BizMethod.Operation.QUERY)
     public User getById(int id) {
         return DoMapper.toDTO(userMapper.selectById(id));
     }
 
     @Override
+    @BizMethod(name = "getByUsername", module = "z-schedule", description = "", operation = BizMethod.Operation.QUERY)
     public User getByUsername(String username) {
         UserDO d = userMapper.selectOne(
                 new LambdaQueryWrapper<UserDO>().eq(UserDO::getUsername, username));
@@ -67,6 +72,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @BizMethod(name = "add", module = "z-schedule", description = "", operation = BizMethod.Operation.CREATE)
     public ReturnT<String> add(User user) {
         if (user.getUsername() == null || user.getUsername().trim().isEmpty()) {
             return ReturnT.fail("用户名不能为空");
@@ -98,6 +104,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @BizMethod(name = "update", module = "z-schedule", description = "", operation = BizMethod.Operation.UPDATE)
     public ReturnT<String> update(User user) {
         if (user.getId() <= 0) {
             return ReturnT.fail("用户ID不能为空");
@@ -145,6 +152,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @BizMethod(name = "delete", module = "z-schedule", description = "", operation = BizMethod.Operation.DELETE)
     public ReturnT<String> delete(int id) {
         UserDO exist = userMapper.selectById(id);
         if (exist == null) {
@@ -158,6 +166,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @BizMethod(name = "login", module = "z-schedule", description = "", operation = BizMethod.Operation.ACTION)
     public ReturnT<String> login(String username, String password) {
         if (username == null || username.trim().isEmpty()) {
             return ReturnT.fail("用户名不能为空");
@@ -187,6 +196,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @BizMethod(name = "logout", module = "z-schedule", description = "", operation = BizMethod.Operation.ACTION)
     public ReturnT<String> logout(String token) {
         // 不回"令牌不存在"：那是一个"哪些令牌正在用"的探针。幂等成功即可。
         sessionStore.invalidate(token);
@@ -211,3 +221,6 @@ public class UserServiceImpl implements UserService {
         }
     }
 }
+
+
+

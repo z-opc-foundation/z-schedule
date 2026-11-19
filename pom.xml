@@ -84,6 +84,7 @@
     </modules>
 
     <properties>
+        <z-meta.version>1.0.2</z-meta.version>
         <!-- CI-friendly 版本根 (发版改这一处即可) -->
         <revision>1.0.7</revision>
 
@@ -168,6 +169,11 @@
                    是"顺手换实现"，不是零漂移。 -->
 
             <!-- log4j-bom import 已随 2026-10-30 Java17/SB3 火车摘除：parent z-boot-parent:1.2.4 DM 统一 log4j2 2.25.4 族（本仓 2.17.2 直钉一并退役） -->
+            <dependency>
+                <groupId>io.github.yuku123</groupId>
+                <artifactId>z-meta-api</artifactId>
+                <version>${z-meta.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
     <dependencies>

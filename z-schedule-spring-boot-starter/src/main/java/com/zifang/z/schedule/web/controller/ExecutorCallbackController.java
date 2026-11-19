@@ -1,5 +1,8 @@
 package com.zifang.z.schedule.web.controller;
 
+import com.zifang.z.meta.api.annotation.BizApi;
+import com.zifang.z.meta.api.annotation.BizField;
+import com.zifang.z.meta.api.annotation.BizParam;
 import com.zifang.z.schedule.core.model.JobInfo;
 import com.zifang.z.schedule.core.model.JobLog;
 import com.zifang.z.schedule.core.model.ReturnT;
@@ -56,9 +59,12 @@ public class ExecutorCallbackController {
      * 执行器心跳(同步 path 参数 + body 两种传参方式).
      */
     @PostMapping("/beat")
-    public ReturnT<String> beat(@RequestParam(required = false) String appName,
-                                @RequestParam(required = false) String address,
-                                @RequestBody(required = false) Map<String, Object> body) {
+    @BizApi(summary = "执行器心跳(同步 path 参数 + body 两种传参方式)", description = "执行器心跳(同步 path 参数 + body 两种传参方式).", tags = { "z-schedule" })
+    public ReturnT<String> beat(@RequestParam(required = false) @BizParam(name = "appName", type = BizField.FieldType.STRING, description = "", position = BizParam.Position.QUERY) String appName,
+                                @RequestParam(required = false)
+                                @BizParam(name = "address", type = BizField.FieldType.STRING, description = "", position = BizParam.Position.QUERY) String address,
+                                @RequestBody(required = false)
+                                @BizParam(name = "body", type = BizField.FieldType.JSON, description = "", position = BizParam.Position.BODY) Map<String, Object> body) {
         // 只对"真正取来用"的那个字段判类型：直接强转会把调用方写错的字段类型变成 HTTP 500
         if (appName == null && body != null) {
             Object appField = body.get("appName");
@@ -87,7 +93,8 @@ public class ExecutorCallbackController {
      * @return content 携带本次派发的 {@code logId}; 执行器必须以它为键回调 {@code /executor/callback}
      */
     @PostMapping("/run")
-    public ReturnT<Map<String, Object>> run(@RequestBody TriggerParam triggerParam) {
+    @BizApi(summary = "触发任务执行(由执行器侧 RPC 拉取)", description = "触发任务执行(由执行器侧 RPC 拉取).", tags = { "z-schedule" })
+    public ReturnT<Map<String, Object>> run(@RequestBody @BizParam(name = "triggerParam", type = BizField.FieldType.STRING, description = "触发参数,执行器根据 jobId/executorHandler/executorParams 执行任务", position = BizParam.Position.BODY) TriggerParam triggerParam) {
         logger.info("Executor run, param={}", triggerParam);
         if (triggerParam == null || triggerParam.getJobId() <= 0) {
             return ReturnT.fail(400, "jobId 不能为空");
@@ -126,7 +133,8 @@ public class ExecutorCallbackController {
      * 终止别的任务的日志；而 logId 定位不到日志时返回成功，等于告诉执行器"已经停了"。
      */
     @PostMapping("/kill")
-    public ReturnT<String> kill(@RequestBody KillParam killParam) {
+    @BizApi(summary = "终止任务（由执行器调用上报）", description = "终止任务（由执行器调用上报）。 jobId 与 logId 必须指向同一次执行：只认 logId 会让任何一个持 token 的执行器 终止别的任务的日志；而 logId 定位不到日志时返回成功，等于告诉执行器\"已经停了\"。", tags = { "z-schedule" })
+    public ReturnT<String> kill(@RequestBody @BizParam(name = "killParam", type = BizField.FieldType.STRING, description = "", position = BizParam.Position.BODY) KillParam killParam) {
         logger.info("Executor kill, param={}", killParam);
         if (killParam == null || killParam.getJobId() <= 0) {
             return ReturnT.fail(400, "jobId 不能为空");
@@ -149,9 +157,12 @@ public class ExecutorCallbackController {
      * 拉取指定日志的执行结果(由执行器回调).
      */
     @GetMapping("/log")
-    public ReturnT<JobLog> log(@RequestParam long logId,
-                               @RequestParam(required = false) Long logDateTim,
-                               @RequestParam(required = false, defaultValue = "0") int fromLineNum) {
+    @BizApi(summary = "拉取指定日志的执行结果(由执行器回调)", description = "拉取指定日志的执行结果(由执行器回调).", tags = { "z-schedule" })
+    public ReturnT<JobLog> log(@RequestParam @BizParam(name = "logId", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.QUERY) long logId,
+                               @RequestParam(required = false)
+                               @BizParam(name = "logDateTim", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.QUERY) Long logDateTim,
+                               @RequestParam(required = false, defaultValue = "0")
+                               @BizParam(name = "fromLineNum", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.QUERY) int fromLineNum) {
         JobLog log = jobLogService.getById(logId);
         if (log == null) {
             return ReturnT.fail("日志不存在");
@@ -173,7 +184,8 @@ public class ExecutorCallbackController {
      * 进程内执行链路，回调链路不触发 {@code AlarmService}。
      */
     @PostMapping("/callback")
-    public ReturnT<String> callback(@RequestBody JobLog log) {
+    @BizApi(summary = "简化版:接收执行器回调的执行结果(覆盖 handleCode/handleMsg)", description = "简化版:接收执行器回调的执行结果(覆盖 handleCode/handleMsg). 只认执行侧的三个字段。执行器回传的是一整个 JobLog，而它的 int 字段 (jobId/jobGroup/triggerCode/alarmStatus) 在没赋值时是 0 而不是 null—— MyBatis-Plus 的 updateById 按 null 决定是否进 SET 子句， 直接拿回调体去更新会把这条日志的归属和调度结果一并写成 0。 因此这里以库里的行为底稿，只覆盖 handle_* 三列。 已知边界（有意保持现状）：回写是 last-write-wins 的，只挡\"时间戳更早的乱序回调\"； 一条比库里更新的回调即便与终止记录冲突仍会生效。执行失败的告警目前也只覆盖 进程内执行链路，回调链路不触发 AlarmService。", tags = { "z-schedule" })
+    public ReturnT<String> callback(@RequestBody @BizParam(name = "log", type = BizField.FieldType.STRING, description = "", position = BizParam.Position.BODY) JobLog log) {
         if (log == null || log.getId() <= 0) {
             return ReturnT.fail("logId 不能为空");
         }
@@ -201,7 +213,9 @@ public class ExecutorCallbackController {
      * 简化版:在线执行器数量(轻量 health 探针).
      */
     @GetMapping("/activeCount")
+    @BizApi(summary = "简化版:在线执行器数量(轻量 health 探针)", description = "简化版:在线执行器数量(轻量 health 探针).", tags = { "z-schedule" })
     public ReturnT<Integer> activeCount() {
         return ReturnT.success(registryService.onlineGroupCount());
     }
 }
+

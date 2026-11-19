@@ -1,14 +1,17 @@
 package com.zifang.z.schedule.web.controller;
 
+import com.zifang.z.meta.api.annotation.BizApi;
+import com.zifang.z.meta.api.annotation.BizField;
+import com.zifang.z.meta.api.annotation.BizParam;
 import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.core.model.User;
 import com.zifang.z.schedule.web.auth.LoginSession;
 import com.zifang.z.schedule.web.filter.TokenAuthFilter;
 import com.zifang.z.schedule.web.service.UserService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 
 /**
@@ -70,6 +73,7 @@ public class UserController {
      * @return 用户列表的封装结果
      */
     @GetMapping("/list")
+    @BizApi(summary = "获取用户列表", description = "获取用户列表.", tags = { "z-schedule" })
     public ReturnT<List<User>> list() {
         List<User> list = userService.getAll();
         return ReturnT.success(list);
@@ -82,7 +86,8 @@ public class UserController {
      * @return 操作结果(成功/失败以及错误信息)
      */
     @PostMapping("/add")
-    public ReturnT<String> add(@RequestBody User user, HttpServletRequest request) {
+    @BizApi(summary = "新增用户", description = "新增用户.", tags = { "z-schedule" })
+    public ReturnT<String> add(@RequestBody @BizParam(name = "user", type = BizField.FieldType.STRING, description = "待新增的用户实体", position = BizParam.Position.BODY) User user, HttpServletRequest request) {
         if (wantsAdmin(user) && !canMintAdmin(request)) {
             return ReturnT.fail(NEED_ADMIN_CREDENTIAL);
         }
@@ -96,7 +101,8 @@ public class UserController {
      * @return 操作结果(成功/失败以及错误信息)
      */
     @PostMapping("/update")
-    public ReturnT<String> update(@RequestBody User user, HttpServletRequest request) {
+    @BizApi(summary = "更新用户", description = "更新用户.", tags = { "z-schedule" })
+    public ReturnT<String> update(@RequestBody @BizParam(name = "user", type = BizField.FieldType.STRING, description = "待更新的用户实体", position = BizParam.Position.BODY) User user, HttpServletRequest request) {
         if (wantsAdmin(user) && !canMintAdmin(request)) {
             return ReturnT.fail(NEED_ADMIN_CREDENTIAL);
         }
@@ -110,7 +116,8 @@ public class UserController {
      * @return 操作结果(成功/失败以及错误信息)
      */
     @PostMapping("/remove")
-    public ReturnT<String> remove(@RequestParam int id) {
+    @BizApi(summary = "根据主键 ID 删除用户", description = "根据主键 ID 删除用户.", tags = { "z-schedule" })
+    public ReturnT<String> remove(@RequestParam @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "用户主键 ID", position = BizParam.Position.QUERY) int id) {
         return userService.delete(id);
     }
 
@@ -122,7 +129,8 @@ public class UserController {
      *         {@code X-Access-Token} 头出示）
      */
     @PostMapping("/login")
-    public ReturnT<String> login(@RequestBody java.util.Map<String, String> param) {
+    @BizApi(summary = "用户登录", description = "用户登录. X-Access-Token 头出示）", tags = { "z-schedule" })
+    public ReturnT<String> login(@RequestBody @BizParam(name = "param", type = BizField.FieldType.STRING, description = "登录参数，包含 username 和 password", position = BizParam.Position.BODY) java.util.Map<String, String> param) {
         String username = param.get("username");
         String password = param.get("password");
         return userService.login(username, password);
@@ -135,6 +143,7 @@ public class UserController {
      * 能注销任意字符串的那个口，等于给持有他人令牌的人一个"帮你退出"的入口。
      */
     @PostMapping("/logout")
+    @BizApi(summary = "注销当前会话", description = "注销当前会话. 令牌从请求上下文取（TokenAuthFilter 已验过它），不从请求体取： 能注销任意字符串的那个口，等于给持有他人令牌的人一个\"帮你退出\"的入口。", tags = { "z-schedule" })
     public ReturnT<String> logout(HttpServletRequest request) {
         LoginSession identity = TokenAuthFilter.currentIdentity(request);
         if (identity == null) {
@@ -143,3 +152,6 @@ public class UserController {
         return userService.logout(identity.getToken());
     }
 }
+
+
+

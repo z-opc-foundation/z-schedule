@@ -1,5 +1,8 @@
 package com.zifang.z.schedule.web.controller;
 
+import com.zifang.z.meta.api.annotation.BizApi;
+import com.zifang.z.meta.api.annotation.BizField;
+import com.zifang.z.meta.api.annotation.BizParam;
 import com.zifang.z.schedule.core.model.JobInfo;
 import com.zifang.z.schedule.core.model.JobLog;
 import com.zifang.z.schedule.core.model.ReturnT;
@@ -7,10 +10,10 @@ import com.zifang.z.schedule.web.auth.GroupAccess;
 import com.zifang.z.schedule.web.auth.LoginSession;
 import com.zifang.z.schedule.web.service.JobInfoService;
 import com.zifang.z.schedule.web.service.JobLogService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import jakarta.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -74,10 +77,14 @@ public class JobLogController {
      * @return 日志列表(按 triggerTime 倒序)
      */
     @GetMapping("/list")
-    public ReturnT<List<JobLog>> list(@RequestParam(required = false, defaultValue = "0") int jobId,
-                                      @RequestParam(required = false, defaultValue = "0") int jobGroup,
-                                      @RequestParam(required = false, defaultValue = "0") int status,
-                                      @RequestParam(required = false, defaultValue = "100") int limit,
+    @BizApi(summary = "日志分页查询", description = "日志分页查询. 点名了组却没权限 ⇒ 明确拒绝（给空表会让人以为那组没日志）；只给了 jobId ⇒ 组要从任务那一行 解析出来才判得了，任务不存在时无从可判，也只能拒绝（\"不存在\"这件事本身由 /jobinfo 说， 这一层不替人确认 id 的存在与否）；什么都没点名 ⇒ 见 #newestAcross。", tags = { "z-schedule" })
+    public ReturnT<List<JobLog>> list(@RequestParam(required = false, defaultValue = "0") @BizParam(name = "jobId", type = BizField.FieldType.INTEGER, description = "任务 ID,默认 0 不过滤", position = BizParam.Position.QUERY) int jobId,
+                                      @RequestParam(required = false, defaultValue = "0")
+                                      @BizParam(name = "jobGroup", type = BizField.FieldType.INTEGER, description = "任务组,默认 0 不过滤", position = BizParam.Position.QUERY) int jobGroup,
+                                      @RequestParam(required = false, defaultValue = "0")
+                                      @BizParam(name = "status", type = BizField.FieldType.INTEGER, description = "状态过滤,0=全部 / 1=成功 / 2=失败(任何非成功码:500/502/404/503/400)", position = BizParam.Position.QUERY) int status,
+                                      @RequestParam(required = false, defaultValue = "100")
+                                      @BizParam(name = "limit", type = BizField.FieldType.INTEGER, description = "返回上限", position = BizParam.Position.QUERY) int limit,
                                       HttpServletRequest request) {
         int handleCode = handleCodeOf(status);
         LoginSession who = GroupAccess.restrictable(request);
@@ -111,8 +118,10 @@ public class JobLogController {
      * RESTful 别名: GET /joblog/{id}.
      */
     @GetMapping({"/get", "/{id}"})
-    public ReturnT<JobLog> getById(@RequestParam(required = false) Long id,
-                                   @PathVariable(value = "id", required = false) Long id2,
+    @BizApi(summary = "根据主键 ID 查询日志详情", description = "根据主键 ID 查询日志详情. RESTful 别名: GET /joblog/{id}.", tags = { "z-schedule" })
+    public ReturnT<JobLog> getById(@RequestParam(required = false) @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.QUERY) Long id,
+                                   @PathVariable(value = "id", required = false)
+                                   @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.PATH) Long id2,
                                    HttpServletRequest request) {
         long realId = id != null ? id : (id2 != null ? id2 : 0L);
         JobLog log = jobLogService.getById(realId);
@@ -130,8 +139,10 @@ public class JobLogController {
      * 获取执行日志(返回 handleMsg 内容及行号,模拟 xxl-job 的 executionLog).
      */
     @GetMapping("/executionLog")
-    public ReturnT<Map<String, Object>> executionLog(@RequestParam Long logId,
-                                                     @RequestParam(required = false, defaultValue = "0") int fromLineNum,
+    @BizApi(summary = "获取执行日志(返回 handleMsg 内容及行号,模拟 xxl-job 的 executionLog)", description = "获取执行日志(返回 handleMsg 内容及行号,模拟 xxl-job 的 executionLog).", tags = { "z-schedule" })
+    public ReturnT<Map<String, Object>> executionLog(@RequestParam @BizParam(name = "logId", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.QUERY) Long logId,
+                                                     @RequestParam(required = false, defaultValue = "0")
+                                                     @BizParam(name = "fromLineNum", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.QUERY) int fromLineNum,
                                                      HttpServletRequest request) {
         JobLog log = jobLogService.getById(logId);
         if (log == null) {
@@ -161,7 +172,8 @@ public class JobLogController {
      * @param body {type: 1=按 jobId,0=全部; jobId?: number}
      */
     @PostMapping("/clear")
-    public ReturnT<String> clear(@RequestBody(required = false) Map<String, Object> body,
+    @BizApi(summary = "清理日志", description = "清理日志. 分权会话只能清自己那组的任务（type=1 的 jobId 要解析出库里那一行的组来判）， 清空全部 （type=0）对分权会话直接拒绝：它删的是所有组的行，而这一层的判据 恰好只有行上的 job_group——任务已被删掉的孤儿行连组都解析不出来，放进\"按任务清理\" 里就是一条越组通道。", tags = { "z-schedule" })
+    public ReturnT<String> clear(@RequestBody(required = false) @BizParam(name = "body", type = BizField.FieldType.JSON, description = "{type: 1=按 jobId,0=全部; jobId?: number}", position = BizParam.Position.BODY) Map<String, Object> body,
                                  HttpServletRequest request) {
         int type = 0;
         int jobId = 0;
@@ -251,3 +263,6 @@ public class JobLogController {
         return right.compareTo(left);
     }
 }
+
+
+

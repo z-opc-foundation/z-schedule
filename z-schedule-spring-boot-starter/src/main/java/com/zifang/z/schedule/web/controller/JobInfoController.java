@@ -1,14 +1,17 @@
 package com.zifang.z.schedule.web.controller;
 
+import com.zifang.z.meta.api.annotation.BizApi;
+import com.zifang.z.meta.api.annotation.BizField;
+import com.zifang.z.meta.api.annotation.BizParam;
 import com.zifang.z.schedule.core.model.JobInfo;
 import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.web.auth.GroupAccess;
 import com.zifang.z.schedule.web.auth.LoginSession;
 import com.zifang.z.schedule.web.service.JobInfoService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 
 /**
@@ -55,7 +58,8 @@ public class JobInfoController {
      * @return 任务列表的封装结果
      */
     @GetMapping("/list")
-    public ReturnT<List<JobInfo>> list(@RequestParam(required = false, defaultValue = "0") int jobGroup,
+    @BizApi(summary = "获取任务列表,当 jobGroup 大于 0 时按任务组过滤,否则返回全部", description = "获取任务列表,当 jobGroup 大于 0 时按任务组过滤,否则返回全部. 指定了组却没权限 ⇒ 明确拒绝（不是\"给你一张空表\"，那会让人以为组里没任务）； 没指定组 ⇒ 把结果裁剪到这个身份碰得到的组。", tags = { "z-schedule" })
+    public ReturnT<List<JobInfo>> list(@RequestParam(required = false, defaultValue = "0") @BizParam(name = "jobGroup", type = BizField.FieldType.INTEGER, description = "任务组 ID,默认 0 表示不过滤", position = BizParam.Position.QUERY) int jobGroup,
                                        HttpServletRequest request) {
         LoginSession who = GroupAccess.restrictable(request);
         if (who != null && jobGroup > 0 && !who.permits(jobGroup)) {
@@ -79,8 +83,10 @@ public class JobInfoController {
      * @return 任务详情的封装结果
      */
     @GetMapping({"/get", "/{id}"})
-    public ReturnT<JobInfo> getById(@RequestParam(required = false) Integer id,
-                                    @PathVariable(value = "id", required = false) Integer id2,
+    @BizApi(summary = "根据主键 ID 获取单个任务详情,不存在时返回失败", description = "根据主键 ID 获取单个任务详情,不存在时返回失败. 同时作为 /jobinfo/get?id={id} 的 RESTful 别名(/jobinfo/{id}).", tags = { "z-schedule" })
+    public ReturnT<JobInfo> getById(@RequestParam(required = false) @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "任务主键 ID", position = BizParam.Position.QUERY) Integer id,
+                                    @PathVariable(value = "id", required = false)
+                                    @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.PATH) Integer id2,
                                     HttpServletRequest request) {
         int realId = id != null ? id : (id2 != null ? id2 : 0);
         JobInfo jobInfo = jobInfoService.getById(realId);
@@ -102,7 +108,8 @@ public class JobInfoController {
      * @return 操作结果(成功/失败以及错误信息)
      */
     @PostMapping("/add")
-    public ReturnT<String> add(@RequestBody JobInfo jobInfo, HttpServletRequest request) {
+    @BizApi(summary = "新增任务", description = "新增任务.", tags = { "z-schedule" })
+    public ReturnT<String> add(@RequestBody @BizParam(name = "jobInfo", type = BizField.FieldType.STRING, description = "待新增的任务实体", position = BizParam.Position.BODY) JobInfo jobInfo, HttpServletRequest request) {
         LoginSession who = GroupAccess.restrictable(request);
         if (who != null && !who.permits(jobInfo.getJobGroup())) {
             return ReturnT.fail(GroupAccess.denialReason(jobInfo.getJobGroup()));
@@ -120,7 +127,8 @@ public class JobInfoController {
      * @return 操作结果(成功/失败以及错误信息)
      */
     @PostMapping("/update")
-    public ReturnT<String> update(@RequestBody JobInfo jobInfo, HttpServletRequest request) {
+    @BizApi(summary = "更新任务", description = "更新任务. 判两个组：库里现在这个任务的组、请求体里写成的组。只判后者的话， \"把一个看得见的任务改到看不见的组里\"和\"把别人的任务改组到我这边\"都成了可走的路。", tags = { "z-schedule" })
+    public ReturnT<String> update(@RequestBody @BizParam(name = "jobInfo", type = BizField.FieldType.STRING, description = "待更新的任务实体", position = BizParam.Position.BODY) JobInfo jobInfo, HttpServletRequest request) {
         LoginSession who = GroupAccess.restrictable(request);
         if (who != null) {
             JobInfo exist = jobInfoService.getById(jobInfo.getId());
@@ -145,8 +153,10 @@ public class JobInfoController {
      * @return 操作结果(成功/失败以及错误信息)
      */
     @PostMapping({"/remove", "/remove/{id}"})
-    public ReturnT<String> remove(@RequestParam(required = false) Integer id,
-                                  @PathVariable(value = "id", required = false) Integer id2,
+    @BizApi(summary = "根据主键 ID 删除任务", description = "根据主键 ID 删除任务. RESTful 别名: POST /jobinfo/remove/{id}", tags = { "z-schedule" })
+    public ReturnT<String> remove(@RequestParam(required = false) @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "任务主键 ID", position = BizParam.Position.QUERY) Integer id,
+                                  @PathVariable(value = "id", required = false)
+                                  @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.PATH) Integer id2,
                                   HttpServletRequest request) {
         int realId = id != null ? id : (id2 != null ? id2 : 0);
         ReturnT<String> denial = denyByJobId(request, realId);
@@ -165,8 +175,10 @@ public class JobInfoController {
      * @return 操作结果(成功/失败以及错误信息)
      */
     @PostMapping({"/stop", "/stop/{id}"})
-    public ReturnT<String> stop(@RequestParam(required = false) Integer id,
-                                @PathVariable(value = "id", required = false) Integer id2,
+    @BizApi(summary = "停止指定任务", description = "停止指定任务. RESTful 别名: POST /jobinfo/stop/{id}", tags = { "z-schedule" })
+    public ReturnT<String> stop(@RequestParam(required = false) @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "任务主键 ID", position = BizParam.Position.QUERY) Integer id,
+                                @PathVariable(value = "id", required = false)
+                                @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.PATH) Integer id2,
                                 HttpServletRequest request) {
         int realId = id != null ? id : (id2 != null ? id2 : 0);
         ReturnT<String> denial = denyByJobId(request, realId);
@@ -185,8 +197,10 @@ public class JobInfoController {
      * @return 操作结果(成功/失败以及错误信息)
      */
     @PostMapping({"/start", "/start/{id}"})
-    public ReturnT<String> start(@RequestParam(required = false) Integer id,
-                                 @PathVariable(value = "id", required = false) Integer id2,
+    @BizApi(summary = "启动指定任务", description = "启动指定任务. RESTful 别名: POST /jobinfo/start/{id}", tags = { "z-schedule" })
+    public ReturnT<String> start(@RequestParam(required = false) @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "任务主键 ID", position = BizParam.Position.QUERY) Integer id,
+                                 @PathVariable(value = "id", required = false)
+                                 @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.PATH) Integer id2,
                                  HttpServletRequest request) {
         int realId = id != null ? id : (id2 != null ? id2 : 0);
         ReturnT<String> denial = denyByJobId(request, realId);
@@ -205,8 +219,10 @@ public class JobInfoController {
      * @return 操作结果(成功/失败以及错误信息)
      */
     @PostMapping({"/trigger", "/trigger/{id}"})
-    public ReturnT<String> trigger(@RequestParam(required = false) Integer id,
-                                   @PathVariable(value = "id", required = false) Integer id2,
+    @BizApi(summary = "手动触发任务执行一次", description = "手动触发任务执行一次. RESTful 别名: POST /jobinfo/trigger/{id}", tags = { "z-schedule" })
+    public ReturnT<String> trigger(@RequestParam(required = false) @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "任务主键 ID", position = BizParam.Position.QUERY) Integer id,
+                                   @PathVariable(value = "id", required = false)
+                                   @BizParam(name = "id", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.PATH) Integer id2,
                                    HttpServletRequest request) {
         int realId = id != null ? id : (id2 != null ? id2 : 0);
         ReturnT<String> denial = denyByJobId(request, realId);
@@ -244,7 +260,11 @@ public class JobInfoController {
      * @return 后续触发时间字符串列表的封装结果
      */
     @GetMapping("/nextTriggerTime")
-    public ReturnT<List<String>> nextTriggerTime(@RequestParam String cron) {
+    @BizApi(summary = "根据 Cron 表达式计算未来的若干次触发时间", description = "根据 Cron 表达式计算未来的若干次触发时间.", tags = { "z-schedule" })
+    public ReturnT<List<String>> nextTriggerTime(@RequestParam @BizParam(name = "cron", type = BizField.FieldType.STRING, description = "Cron 表达式", position = BizParam.Position.QUERY) String cron) {
         return jobInfoService.nextTriggerTime(cron);
     }
 }
+
+
+

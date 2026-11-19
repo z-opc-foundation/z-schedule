@@ -1,5 +1,8 @@
 package com.zifang.z.schedule.web.controller;
 
+import com.zifang.z.meta.api.annotation.BizApi;
+import com.zifang.z.meta.api.annotation.BizField;
+import com.zifang.z.meta.api.annotation.BizParam;
 import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.web.service.GlueService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,9 +36,10 @@ public class GlueController {
      * @return 操作结果
      */
     @PostMapping("/save")
-    public ReturnT<String> save(@RequestParam int jobId,
-                                @RequestParam String glueSource,
-                                @RequestParam String glueType) {
+    @BizApi(summary = "保存 GLUE 源码", tags = { "z-schedule" })
+    public ReturnT<String> save(@RequestParam @BizParam(name = "jobId", type = BizField.FieldType.INTEGER, description = "任务ID", position = BizParam.Position.QUERY) int jobId,
+                                @RequestParam @BizParam(name = "glueSource", type = BizField.FieldType.STRING, description = "GLUE 源码", position = BizParam.Position.QUERY) String glueSource,
+                                @RequestParam @BizParam(name = "glueType", type = BizField.FieldType.STRING, description = "GLUE 类型", position = BizParam.Position.QUERY) String glueType) {
         return glueService.save(jobId, glueSource, glueType);
     }
 
@@ -46,7 +50,8 @@ public class GlueController {
      * @return GLUE 源码
      */
     @GetMapping("/get")
-    public ReturnT<String> get(@RequestParam int jobId) {
+    @BizApi(summary = "获取最新 GLUE 源码", tags = { "z-schedule" })
+    public ReturnT<String> get(@RequestParam @BizParam(name = "jobId", type = BizField.FieldType.INTEGER, description = "任务ID", position = BizParam.Position.QUERY) int jobId) {
         return glueService.get(jobId);
     }
 
@@ -57,7 +62,11 @@ public class GlueController {
      * @return 版本列表
      */
     @GetMapping("/versions")
-    public ReturnT<List<String>> getVersions(@RequestParam int jobId) {
+    @BizApi(summary = "获取 GLUE 源码历史版本列表", tags = { "z-schedule" })
+    public ReturnT<List<String>> getVersions(@RequestParam @BizParam(name = "jobId", type = BizField.FieldType.INTEGER, description = "任务ID", position = BizParam.Position.QUERY) int jobId) {
         return glueService.getVersions(jobId);
     }
 }
+
+
+

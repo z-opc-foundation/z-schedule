@@ -1,5 +1,6 @@
 package com.zifang.z.schedule.web.service.impl;
 
+import com.zifang.z.meta.api.annotation.BizMethod;
 import com.zifang.z.schedule.core.config.ScheduleProperties;
 import com.zifang.z.schedule.core.enums.TriggerCodeEnum;
 import com.zifang.z.schedule.core.enums.TriggerTypeEnum;
@@ -13,6 +14,9 @@ import com.zifang.z.schedule.web.service.AlarmService;
 import com.zifang.z.schedule.web.service.JobInfoService;
 import com.zifang.z.schedule.web.service.JobLogService;
 import com.zifang.z.schedule.web.service.JobTriggerService;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import jakarta.annotation.Resource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
@@ -20,9 +24,6 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
-import jakarta.annotation.Resource;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Date;
@@ -72,6 +73,7 @@ public class JobTriggerServiceImpl implements JobTriggerService {
     private final Map<Long, Thread> runningExecutions = new ConcurrentHashMap<Long, Thread>();
 
     @PostConstruct
+    @BizMethod(name = "init", module = "z-schedule", description = "", operation = BizMethod.Operation.CREATE)
     public void init() {
         engine = new JobScheduleEngine();
         engine.setJobInfoService(jobInfoService);
@@ -85,11 +87,13 @@ public class JobTriggerServiceImpl implements JobTriggerService {
     /**
      * 引擎仅在测试/嵌入式场景下外部提供。
      */
+    @BizMethod(name = "引擎仅在测试/嵌入式场景下外部提供", module = "z-schedule", description = "引擎仅在测试/嵌入式场景下外部提供。", operation = BizMethod.Operation.UPDATE)
     public void setEngine(JobScheduleEngine engine) {
         this.engine = engine;
     }
 
     @PreDestroy
+    @BizMethod(name = "destroy", module = "z-schedule", description = "", operation = BizMethod.Operation.ACTION)
     public void destroy() {
         if (engine != null) {
             engine.stop();
@@ -101,6 +105,7 @@ public class JobTriggerServiceImpl implements JobTriggerService {
      * 周期性 reconcile：兜住绕过本节点直接改 DB 的变更（其它节点 start/stop、SQL 手工改）。
      */
     @Scheduled(fixedDelay = 15_000L)
+    @BizMethod(name = "周期性 reconcile：兜住绕过本节点直接改 DB 的变更（其它节点 start/stop、SQL 手工改）", module = "z-schedule", description = "周期性 reconcile：兜住绕过本节点直接改 DB 的变更（其它节点 start/stop、SQL 手工改）。", operation = BizMethod.Operation.ACTION)
     public void reloadRunningJobs() {
         if (!leaderElector.isLeader()) {
             return; // 非 Leader 不排期
@@ -109,6 +114,7 @@ public class JobTriggerServiceImpl implements JobTriggerService {
     }
 
     @Override
+    @BizMethod(name = "registerJob", module = "z-schedule", description = "", operation = BizMethod.Operation.CREATE)
     public void registerJob(JobInfo jobInfo) {
         if (jobInfo == null) {
             logger.warn("Invalid job info, skip registration");
@@ -127,6 +133,7 @@ public class JobTriggerServiceImpl implements JobTriggerService {
     }
 
     @Override
+    @BizMethod(name = "cancelJob", module = "z-schedule", description = "", operation = BizMethod.Operation.ACTION)
     public void cancelJob(int jobId) {
         if (leaderElector.isLeader() && engine.isRunning()) {
             engine.unscheduleJob(jobId);
@@ -135,6 +142,7 @@ public class JobTriggerServiceImpl implements JobTriggerService {
     }
 
     @Override
+    @BizMethod(name = "completeJob", module = "z-schedule", description = "", operation = BizMethod.Operation.ACTION)
     public void completeJob(int jobId) {
         if (engine != null && engine.isRunning()) {
             engine.completeJob(jobId);
@@ -143,6 +151,7 @@ public class JobTriggerServiceImpl implements JobTriggerService {
     }
 
     @Override
+    @BizMethod(name = "killJob", module = "z-schedule", description = "", operation = BizMethod.Operation.ACTION)
     public void killJob(long logId) {
         Thread worker = runningExecutions.remove(logId);
         if (worker == null) {
@@ -161,11 +170,13 @@ public class JobTriggerServiceImpl implements JobTriggerService {
     }
 
     /** 正在执行中的日志数（监控用）。 */
+    @BizMethod(name = "正在执行中的日志数（监控用）", module = "z-schedule", description = "正在执行中的日志数（监控用）。", operation = BizMethod.Operation.ACTION)
     public int runningExecutionCount() {
         return runningExecutions.size();
     }
 
     @Override
+    @BizMethod(name = "triggerJob", module = "z-schedule", description = "", operation = BizMethod.Operation.ACTION)
     public void triggerJob(JobInfo jobInfo) {
         executeJob(jobInfo);
     }
@@ -389,3 +400,6 @@ public class JobTriggerServiceImpl implements JobTriggerService {
         }
     }
 }
+
+
+

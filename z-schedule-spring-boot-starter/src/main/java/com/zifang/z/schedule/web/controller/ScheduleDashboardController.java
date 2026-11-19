@@ -1,5 +1,8 @@
 package com.zifang.z.schedule.web.controller;
 
+import com.zifang.z.meta.api.annotation.BizApi;
+import com.zifang.z.meta.api.annotation.BizField;
+import com.zifang.z.meta.api.annotation.BizParam;
 import com.zifang.z.schedule.core.model.JobInfo;
 import com.zifang.z.schedule.core.model.JobLog;
 import com.zifang.z.schedule.core.model.ReturnT;
@@ -63,6 +66,7 @@ public class ScheduleDashboardController {
      * 总览统计(向后兼容,返回 data+recentJobs 结构).
      */
     @GetMapping("")
+    @BizApi(summary = "总览统计(向后兼容,返回 data+recentJobs 结构)", description = "总览统计(向后兼容,返回 data+recentJobs 结构).", tags = { "z-schedule" })
     public Map<String, Object> dashboard() {
         Map<String, Object> result = new HashMap<>();
         try {
@@ -103,6 +107,7 @@ public class ScheduleDashboardController {
      * 任务/执行器统计(直接返回 stats 字段,前端 dashboardApi.getStats 直接消费).
      */
     @GetMapping("/stats")
+    @BizApi(summary = "任务/执行器统计(直接返回 stats 字段,前端 dashboardApi.getStats 直接消费)", description = "任务/执行器统计(直接返回 stats 字段,前端 dashboardApi.getStats 直接消费).", tags = { "z-schedule" })
     public ReturnT<Map<String, Object>> stats() {
         List<JobInfo> all = jobInfoService.getAll();
         int total = all == null ? 0 : all.size();
@@ -133,7 +138,8 @@ public class ScheduleDashboardController {
      * 最近调度记录(前端期望 ScheduleRecord[]).
      */
     @GetMapping("/scheduleRecords")
-    public ReturnT<List<Map<String, Object>>> scheduleRecords(@RequestParam(required = false, defaultValue = "20") int limit) {
+    @BizApi(summary = "最近调度记录(前端期望 ScheduleRecord[])", description = "最近调度记录(前端期望 ScheduleRecord[]).", tags = { "z-schedule" })
+    public ReturnT<List<Map<String, Object>>> scheduleRecords(@RequestParam(required = false, defaultValue = "20") @BizParam(name = "limit", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.QUERY) int limit) {
         List<JobLog> logs = jobLogService.query(0, 0, -1, limit);
         Map<Integer, JobInfo> infoMap = new HashMap<>();
         for (JobInfo info : jobInfoService.getAll()) infoMap.put(info.getId(), info);
@@ -165,6 +171,7 @@ public class ScheduleDashboardController {
      * 执行器负载列表(前端期望 {appName, instanceCount, runningTasks}[]).
      */
     @GetMapping("/executorLoad")
+    @BizApi(summary = "执行器负载列表(前端期望 {appName, instanceCount, runningTasks}[])", description = "执行器负载列表(前端期望 {appName, instanceCount, runningTasks}[]).", tags = { "z-schedule" })
     public ReturnT<List<Map<String, Object>>> executorLoad() {
         List<Map<String, Object>> list = registryService.loadAll();
         for (Map<String, Object> m : list) {
@@ -184,7 +191,8 @@ public class ScheduleDashboardController {
      * 早期实现把整张 job_log 拉进 JVM 再按天扫,趋势页会随日志量线性变慢。
      */
     @GetMapping("/successRateTrend")
-    public ReturnT<List<Map<String, Object>>> successRateTrend(@RequestParam(required = false, defaultValue = "7") int days) {
+    @BizApi(summary = "成功率趋势(近 N 天)", description = "成功率趋势(近 N 天). 日期按数据库/服务的自然日聚合,一次查询拿到 N 天的计数; 早期实现把整张 job_log 拉进 JVM 再按天扫,趋势页会随日志量线性变慢。", tags = { "z-schedule" })
+    public ReturnT<List<Map<String, Object>>> successRateTrend(@RequestParam(required = false, defaultValue = "7") @BizParam(name = "days", type = BizField.FieldType.INTEGER, description = "", position = BizParam.Position.QUERY) int days) {
         int span = Math.max(1, Math.min(days, MAX_TREND_DAYS));
         Calendar cursor = Calendar.getInstance();
         cursor.set(Calendar.HOUR_OF_DAY, 0);
@@ -214,3 +222,4 @@ public class ScheduleDashboardController {
         return ReturnT.success(result);
     }
 }
+

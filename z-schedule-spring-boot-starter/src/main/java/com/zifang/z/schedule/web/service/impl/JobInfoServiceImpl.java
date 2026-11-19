@@ -2,6 +2,7 @@ package com.zifang.z.schedule.web.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.zifang.z.meta.api.annotation.BizMethod;
 import com.zifang.z.schedule.core.enums.MisfireStrategyEnum;
 import com.zifang.z.schedule.core.enums.TriggerTypeEnum;
 import com.zifang.z.schedule.core.model.JobInfo;
@@ -11,13 +12,13 @@ import com.zifang.z.schedule.web.domain.entity.JobInfoDO;
 import com.zifang.z.schedule.web.domain.mapper.JobInfoMapper;
 import com.zifang.z.schedule.web.service.JobInfoService;
 import com.zifang.z.schedule.web.service.JobTriggerService;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.Resource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
-import jakarta.annotation.PostConstruct;
-import org.springframework.context.annotation.Lazy;
-import jakarta.annotation.Resource;
 import java.text.ParseException;
 import java.util.Date;
 import java.util.List;
@@ -41,6 +42,7 @@ public class JobInfoServiceImpl implements JobInfoService {
     private JobTriggerService jobTriggerService;
 
     @PostConstruct
+    @BizMethod(name = "init", module = "z-schedule", description = "", operation = BizMethod.Operation.CREATE)
     public void init() {
         // H2/demo 模式下 z_schedule_job_info 表可能不存在, 包装 try-catch 不阻塞启动
         try {
@@ -51,22 +53,26 @@ public class JobInfoServiceImpl implements JobInfoService {
     }
 
     @Override
+    @BizMethod(name = "getById", module = "z-schedule", description = "", operation = BizMethod.Operation.QUERY)
     public JobInfo getById(int id) {
         return DoMapper.toDTO(jobInfoMapper.selectById(id));
     }
 
     @Override
+    @BizMethod(name = "getAll", module = "z-schedule", description = "", operation = BizMethod.Operation.QUERY)
     public List<JobInfo> getAll() {
         return DoMapper.toDTOList(jobInfoMapper.selectList(null));
     }
 
     @Override
+    @BizMethod(name = "getByJobGroup", module = "z-schedule", description = "", operation = BizMethod.Operation.QUERY)
     public List<JobInfo> getByJobGroup(int jobGroup) {
         return DoMapper.toDTOList(jobInfoMapper.selectList(
                 new LambdaQueryWrapper<JobInfoDO>().eq(JobInfoDO::getJobGroup, jobGroup)));
     }
 
     @Override
+    @BizMethod(name = "add", module = "z-schedule", description = "", operation = BizMethod.Operation.CREATE)
     public ReturnT<String> add(JobInfo jobInfo) {
         if (jobInfo.getJobDesc() == null || jobInfo.getJobDesc().trim().isEmpty()) {
             return ReturnT.fail("任务描述不能为空");
@@ -122,6 +128,7 @@ public class JobInfoServiceImpl implements JobInfoService {
     }
 
     @Override
+    @BizMethod(name = "update", module = "z-schedule", description = "", operation = BizMethod.Operation.UPDATE)
     public ReturnT<String> update(JobInfo jobInfo) {
         if (jobInfo.getId() <= 0) {
             return ReturnT.fail("任务ID不能为空");
@@ -204,6 +211,7 @@ public class JobInfoServiceImpl implements JobInfoService {
     }
 
     @Override
+    @BizMethod(name = "delete", module = "z-schedule", description = "", operation = BizMethod.Operation.DELETE)
     public ReturnT<String> delete(int id) {
         JobInfoDO exist = jobInfoMapper.selectById(id);
         if (exist == null) {
@@ -218,6 +226,7 @@ public class JobInfoServiceImpl implements JobInfoService {
     }
 
     @Override
+    @BizMethod(name = "start", module = "z-schedule", description = "", operation = BizMethod.Operation.ACTION)
     public ReturnT<String> start(int id) {
         JobInfoDO exist = jobInfoMapper.selectById(id);
         if (exist == null) {
@@ -253,6 +262,7 @@ public class JobInfoServiceImpl implements JobInfoService {
     }
 
     @Override
+    @BizMethod(name = "stop", module = "z-schedule", description = "", operation = BizMethod.Operation.ACTION)
     public ReturnT<String> stop(int id) {
         JobInfoDO exist = jobInfoMapper.selectById(id);
         if (exist == null) {
@@ -272,6 +282,7 @@ public class JobInfoServiceImpl implements JobInfoService {
     }
 
     @Override
+    @BizMethod(name = "trigger", module = "z-schedule", description = "", operation = BizMethod.Operation.ACTION)
     public ReturnT<String> trigger(int id) {
         JobInfoDO exist = jobInfoMapper.selectById(id);
         if (exist == null) {
@@ -287,6 +298,7 @@ public class JobInfoServiceImpl implements JobInfoService {
     }
 
     @Override
+    @BizMethod(name = "nextTriggerTime", module = "z-schedule", description = "", operation = BizMethod.Operation.ACTION)
     public ReturnT<List<String>> nextTriggerTime(String cron) {
         List<String> result = new java.util.ArrayList<>();
         try {
@@ -309,6 +321,7 @@ public class JobInfoServiceImpl implements JobInfoService {
     /**
      * 列出所有 trigger_status=1（运行中）的任务（供调度线程启动时全量恢复）
      */
+    @BizMethod(name = "列出所有 trigger_status=1（运行中）的任务（供调度线程启动时全量恢复）", module = "z-schedule", description = "列出所有 trigger_status=1（运行中）的任务（供调度线程启动时全量恢复）", operation = BizMethod.Operation.QUERY)
     public List<JobInfo> listRunning() {
         return DoMapper.toDTOList(jobInfoMapper.selectList(
                 new LambdaQueryWrapper<JobInfoDO>().eq(JobInfoDO::getTriggerStatus, 1)));
@@ -352,6 +365,7 @@ public class JobInfoServiceImpl implements JobInfoService {
     /**
      * 原子更新 trigger_last_time / trigger_next_time（Leader 调度线程调用）
      */
+    @BizMethod(name = "原子更新 trigger_last_time / trigger_next_time（Leader 调度线程调用）", module = "z-schedule", description = "原子更新 trigger_last_time / trigger_next_time（Leader 调度线程调用）", operation = BizMethod.Operation.UPDATE)
     public void updateTriggerTimes(int jobId, long lastTime, long nextTime) {
         jobInfoMapper.update(null,
                 new LambdaUpdateWrapper<JobInfoDO>()
@@ -360,3 +374,6 @@ public class JobInfoServiceImpl implements JobInfoService {
                         .set(JobInfoDO::getTriggerNextTime, nextTime));
     }
 }
+
+
+

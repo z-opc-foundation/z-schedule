@@ -1,5 +1,6 @@
 package com.zifang.z.schedule.web.service.impl;
 
+import com.zifang.z.meta.api.annotation.BizMethod;
 import com.zifang.z.schedule.core.enums.GlueTypeEnum;
 import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.web.service.GlueService;
@@ -30,6 +31,7 @@ public class GlueServiceImpl implements GlueService {
     private final ConcurrentHashMap<Integer, List<String>> glueVersionMap = new ConcurrentHashMap<>();
 
     @Override
+    @BizMethod(name = "save", module = "z-schedule", description = "", operation = BizMethod.Operation.CREATE)
     public ReturnT<String> save(int jobId, String glueSource, String glueType) {
         if (jobId <= 0) {
             return ReturnT.fail("任务ID无效");
@@ -63,6 +65,7 @@ public class GlueServiceImpl implements GlueService {
     }
 
     @Override
+    @BizMethod(name = "get", module = "z-schedule", description = "", operation = BizMethod.Operation.QUERY)
     public ReturnT<String> get(int jobId) {
         if (jobId <= 0) {
             return ReturnT.fail("任务ID无效");
@@ -78,6 +81,7 @@ public class GlueServiceImpl implements GlueService {
     }
 
     @Override
+    @BizMethod(name = "getVersions", module = "z-schedule", description = "", operation = BizMethod.Operation.QUERY)
     public ReturnT<List<String>> getVersions(int jobId) {
         if (jobId <= 0) {
             return ReturnT.fail("任务ID无效");
@@ -91,3 +95,6 @@ public class GlueServiceImpl implements GlueService {
         return ReturnT.success(new ArrayList<>(versions));
     }
 }
+
+
+

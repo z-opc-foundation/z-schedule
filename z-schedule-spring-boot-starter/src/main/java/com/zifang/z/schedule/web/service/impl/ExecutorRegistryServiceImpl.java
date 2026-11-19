@@ -1,17 +1,18 @@
 package com.zifang.z.schedule.web.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.zifang.z.meta.api.annotation.BizMethod;
 import com.zifang.z.schedule.core.model.ReturnT;
 import com.zifang.z.schedule.web.domain.entity.JobRegistryDO;
 import com.zifang.z.schedule.web.domain.mapper.JobRegistryMapper;
 import com.zifang.z.schedule.web.service.ExecutorRegistryService;
+import jakarta.annotation.Resource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import org.springframework.context.annotation.Lazy;
-import jakarta.annotation.Resource;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -40,6 +41,7 @@ public class ExecutorRegistryServiceImpl implements ExecutorRegistryService {
     private com.zifang.z.schedule.web.service.JobGroupService jobGroupService;
 
     @Override
+    @BizMethod(name = "beat", module = "z-schedule", description = "", operation = BizMethod.Operation.ACTION)
     public ReturnT<String> beat(String appName, String address) {
         if (appName == null || appName.isEmpty() || address == null || address.isEmpty()) {
             return ReturnT.fail("appName/address 不能为空");
@@ -69,6 +71,7 @@ public class ExecutorRegistryServiceImpl implements ExecutorRegistryService {
     }
 
     @Override
+    @BizMethod(name = "remove", module = "z-schedule", description = "", operation = BizMethod.Operation.DELETE)
     public ReturnT<String> remove(String appName, String address) {
         if (appName == null || address == null) {
             return ReturnT.fail("appName/address 不能为空");
@@ -85,6 +88,7 @@ public class ExecutorRegistryServiceImpl implements ExecutorRegistryService {
     }
 
     @Override
+    @BizMethod(name = "onlineGroupCount", module = "z-schedule", description = "", operation = BizMethod.Operation.ACTION)
     public int onlineGroupCount() {
         cleanupExpired();
         return jobRegistryMapper.selectCount(null) > 0
@@ -98,6 +102,7 @@ public class ExecutorRegistryServiceImpl implements ExecutorRegistryService {
     /**
      * 当前 appName 下的活跃实例数（心跳未过期）
      */
+    @BizMethod(name = "当前 appName 下的活跃实例数（心跳未过期）", module = "z-schedule", description = "当前 appName 下的活跃实例数（心跳未过期）", operation = BizMethod.Operation.QUERY)
     public int countActive(String appName) {
         Date threshold = new Date(System.currentTimeMillis() - REGISTRY_EXPIRE_SECONDS * 1000L);
         return Math.toIntExact(jobRegistryMapper.selectCount(
@@ -109,6 +114,7 @@ public class ExecutorRegistryServiceImpl implements ExecutorRegistryService {
     /**
      * 加载所有分组 + 实时心跳，用于 Dashboard。
      */
+    @BizMethod(name = "加载所有分组 + 实时心跳，用于 Dashboard", module = "z-schedule", description = "加载所有分组 + 实时心跳，用于 Dashboard。", operation = BizMethod.Operation.QUERY)
     public List<Map<String, Object>> loadAll() {
         cleanupExpired();
         List<Map<String, Object>> result = new java.util.ArrayList<>();
@@ -129,6 +135,7 @@ public class ExecutorRegistryServiceImpl implements ExecutorRegistryService {
     }
 
     @Scheduled(fixedDelay = 30_000L)
+    @BizMethod(name = "cleanupExpired", module = "z-schedule", description = "", operation = BizMethod.Operation.ACTION)
     public void cleanupExpired() {
         Date threshold = new Date(System.currentTimeMillis() - REGISTRY_EXPIRE_SECONDS * 1000L);
         int rows = jobRegistryMapper.delete(
@@ -138,3 +145,6 @@ public class ExecutorRegistryServiceImpl implements ExecutorRegistryService {
         }
     }
 }
+
+
+
