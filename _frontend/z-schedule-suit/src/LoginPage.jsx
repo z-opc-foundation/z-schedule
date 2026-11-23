@@ -40,10 +40,10 @@ export default function LoginPage() {
 
     return (
         <div style={{
-            height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center',
+            minHeight: '100dvh', padding: 16, boxSizing: 'border-box', display: 'flex', justifyContent: 'center', alignItems: 'center',
             background: 'linear-gradient(135deg, #eef2ff 0%, #f5f3ff 50%, #eff6ff 100%)',
         }}>
-            <Card style={{ width: 400, boxShadow: '0 10px 40px rgba(124,58,237,0.12)' }}>
+            <Card style={{ width: '100%', maxWidth: 400, boxShadow: '0 10px 40px rgba(124,58,237,0.12)' }}>
                 <div style={{ textAlign: 'center', marginBottom: 20 }}>
                     <div style={{
                         width: 48, height: 48, borderRadius: 12, margin: '0 auto 12px',

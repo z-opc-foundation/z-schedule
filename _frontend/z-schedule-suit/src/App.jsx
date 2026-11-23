@@ -9,8 +9,6 @@ import { at, BASE } from './routes-base'
 // 版本号只认 package.json，避免顶栏版本与发版号两处各写一遍慢慢漂移。
 import { version as appVersion } from '../package.json'
 
-// vite base（默认 /meta/，Spring context-path）作为 router basename；
-// Mode 2 nginx 根路径部署时 VITE_BASE='/'，basename 退化为 undefined。
 const ROUTER_BASENAME = BASE || undefined
 
 function NotFound() {
@@ -51,11 +49,12 @@ function ProtectedShell() {
             appShort="ZS"
             appVersion={appVersion}
             appIcon={{
-                icon: <img src="/icon.png" alt="Z-Schedule 调度中心" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />,
+                icon: <img src={at('/icon.png')} alt="Z-Schedule 调度中心" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />,
                 color: '#10b981',
                 label: 'Z-Schedule 调度中心',
             }}
             appUser={user}
+            loginPath={at('/z-schedule/login')}
         />
     )
 }
